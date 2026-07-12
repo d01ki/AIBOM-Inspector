@@ -31,19 +31,9 @@ from aibom.models.entities import (
     Service,
 )
 from aibom.models.evidence import Evidence
+from aibom.spdx import canonical_spdx, is_spdx
 
 _SPEC_VERSION = "1.6"
-
-# A pragmatic subset of SPDX ids we may see on model/dataset licenses. If a
-# license string matches (case-insensitively) it is emitted as an SPDX `id`;
-# otherwise it degrades to a free-text `name` so the BOM stays valid either way.
-_SPDX_IDS = {
-    "apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause", "gpl-2.0", "gpl-3.0",
-    "gpl-3.0-only", "gpl-3.0-or-later", "lgpl-2.1", "lgpl-3.0", "agpl-3.0",
-    "mpl-2.0", "cc-by-4.0", "cc-by-sa-4.0", "cc-by-nc-4.0", "cc-by-nc-sa-4.0",
-    "cc0-1.0", "cc-by-nc-nd-4.0", "openrail", "bigscience-openrail-m",
-    "creativeml-openrail-m", "llama2", "llama3", "gemma", "unlicense", "isc",
-}
 
 
 def to_cyclonedx(inventory: Inventory) -> dict[str, Any]:
@@ -250,22 +240,9 @@ def _licenses(license_str: str | None) -> list[dict[str, Any]] | None:
     if not license_str:
         return None
     normalized = license_str.strip()
-    if normalized.lower() in _SPDX_IDS:
-        return [{"license": {"id": _canonical_spdx(normalized)}}]
+    if is_spdx(normalized):
+        return [{"license": {"id": canonical_spdx(normalized)}}]
     return [{"license": {"name": normalized}}]
-
-
-def _canonical_spdx(value: str) -> str:
-    # Preserve conventional SPDX casing for the ids we emit.
-    lower = value.lower()
-    special = {
-        "apache-2.0": "Apache-2.0", "mit": "MIT", "bsd-2-clause": "BSD-2-Clause",
-        "bsd-3-clause": "BSD-3-Clause", "mpl-2.0": "MPL-2.0", "isc": "ISC",
-        "cc0-1.0": "CC0-1.0", "unlicense": "Unlicense",
-    }
-    if lower in special:
-        return special[lower]
-    return lower
 
 
 # ── property / evidence helpers ──────────────────────────────────────────────

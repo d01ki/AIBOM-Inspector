@@ -25,6 +25,7 @@ from aibom.models.entities import (
     Service,
 )
 from aibom.models.evidence import Evidence
+from aibom.models.signals import RiskSignal
 
 # Directories that never contain first-party AI supply-chain signal worth scanning.
 _IGNORE_DIRS = {
@@ -71,6 +72,18 @@ _RE_AGENT_CTOR = re.compile(
     r"""|create_openai_functions_agent|create_openai_tools_agent|AgentExecutor)\b"""
 )
 _RE_TRUST_REMOTE = re.compile(r"""trust_remote_code\s*=\s*True""")
+
+# Hardcoded-secret heuristics. A provider key with a recognizable prefix, or an
+# assignment of a secret-ish name to a literal string that is *not* an env
+# lookup / obvious placeholder.
+_RE_PROVIDER_KEY = re.compile(r"""\b(sk-ant-[A-Za-z0-9\-_]{16,}|sk-[A-Za-z0-9]{20,})\b""")
+_RE_SECRET_ASSIGN = re.compile(
+    r"""(?i)\b(?:api[_-]?key|secret|token|password|access[_-]?key)\s*[:=]\s*"""
+    r"""['"]([^'"]{8,})['"]"""
+)
+_RE_ENV_OR_PLACEHOLDER = re.compile(
+    r"""(?i)(os\.environ|getenv|your[_-]|<[^>]+>|\{\{|\$\{|xxx+|changeme|example|placeholder|\.\.\.)"""
+)
 
 # import <-> provider service mapping
 _PROVIDER_IMPORTS = {
@@ -218,8 +231,36 @@ class RepoCollector(Collector):
             for entity in self._scan_line(line, lineno, rel):
                 canonical = inventory.add_entity(entity)
                 buckets[type(canonical)].append(canonical.id)
+            self._scan_signals(inventory, line, lineno, rel)
 
         self._link_intra_file(inventory, buckets)
+
+    def _scan_signals(self, inventory: Inventory, line: str, lineno: int, rel: str) -> None:
+        """Detect non-entity risk signals (trust_remote_code, hardcoded secrets)."""
+
+        def signal(kind: str, pattern: str, conf: float, detail: str | None = None) -> None:
+            inventory.add_signal(
+                RiskSignal(
+                    kind=kind,
+                    detail=detail,
+                    source_evidence=[
+                        Evidence(
+                            file=rel, line_start=lineno, line_end=lineno,
+                            snippet=line.strip()[:200], matched_pattern=pattern, confidence=conf,
+                        )
+                    ],
+                )
+            )
+
+        if _RE_TRUST_REMOTE.search(line):
+            signal("trust_remote_code", "trust_remote_code=True", 0.95)
+
+        if _RE_ENV_OR_PLACEHOLDER.search(line):
+            return  # env lookup / placeholder — not a hardcoded secret
+        if _RE_PROVIDER_KEY.search(line):
+            signal("hardcoded_secret", "provider-key-literal", 0.9, "provider API key literal")
+        elif _RE_SECRET_ASSIGN.search(line):
+            signal("hardcoded_secret", "secret-assignment", 0.6, "secret assigned a string literal")
 
     def _scan_line(self, line: str, lineno: int, rel: str) -> list[Entity]:
         found: list[Entity] = []

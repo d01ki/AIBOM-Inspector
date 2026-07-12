@@ -33,7 +33,7 @@ resolves it, and adds graph + risk analysis on top.
 
 ## Status
 
-**Early alpha (v0.1, M1–M2).** Implemented today:
+**Early alpha (v0.1, M1–M3).** Implemented today:
 
 - ✅ Unified Pydantic schema with mandatory evidence
 - ✅ Static repository collector (models, datasets, prompts, agents, services)
@@ -43,11 +43,13 @@ resolves it, and adds graph + risk analysis on top.
   cache-backed, offline-friendly; **never downloads or loads weights**)
 - ✅ **CycloneDX 1.6 (ML-BOM) export** — `machine-learning-model` / `data` components,
   services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace
-- ✅ CLI (`aibom scan`) with JSON inventory + CycloneDX export
+- ✅ **Deterministic risk rules (TDR-001…010)** + a reproducible 0–100 security score
+  over integrity / provenance / licensing / configuration
+- ✅ **Self-contained HTML report** (score, evidence-backed findings, inventory)
+- ✅ CLI (`aibom scan`) with JSON inventory, CycloneDX, HTML report, and severity exit codes
 - ✅ Golden-fixture test suite
 
-Roadmap → [SPEC.md](SPEC.md): deterministic risk rules (TDR-001…010) + scoring,
-HTML report, FastAPI + React dashboard.
+Roadmap → [SPEC.md](SPEC.md): FastAPI + React dashboard, plugin collectors.
 
 ## Install
 
@@ -76,9 +78,38 @@ aibom scan ./path/to/repo --resolve --cyclonedx aibom.cdx.json
 # cache HF metadata for offline / air-gapped re-scans
 aibom scan ./path/to/repo --resolve --hf-cache ~/.cache/aibom
 
+# risk analysis: write a self-contained HTML report (score + findings + inventory)
+aibom scan ./path/to/repo --report report.html
+
+# CI gate: exit non-zero if any finding is at/above a severity
+aibom scan ./path/to/repo --fail-on high
+
 # drop low-confidence detections
 aibom scan ./path/to/repo --min-confidence 0.8
 ```
+
+## Risk rules & scoring
+
+Findings are **deterministic and rule-based** (no LLM in the loop). Each carries a
+severity, a `file:line` evidence trail, and a remediation.
+
+| ID | Check | Default severity | Needs `--resolve` |
+|---|---|---|---|
+| TDR-001 | Pickle-based weight format (arbitrary code exec on load) | High | — |
+| TDR-002 | Model reference without a pinned revision | Medium | — |
+| TDR-003 | Name impersonates a popular model family (typosquat) | High | — |
+| TDR-004 | Missing model card | Low | ✔ |
+| TDR-005 | License missing / non-SPDX / unrecognized | Medium–Low | ✔ |
+| TDR-006 | Very low adoption (verify author) | Medium | ✔ |
+| TDR-007 | Hardcoded secret near an AI call | Critical | — |
+| TDR-008 | Dataset with no provenance metadata | Low | — |
+| TDR-009 | `trust_remote_code=True` | High | — |
+| TDR-010 | Deprecated / superseded model referenced | Medium | — |
+
+**Security score (0–100):** each of the four categories {integrity, provenance,
+licensing, configuration} starts at 100 and loses points per finding
+(critical 40 / high 20 / medium 10 / low 3, floored at 0); the overall score is
+their mean. The formula is printed in the report itself for reproducibility.
 
 Try it against the bundled deliberately-vulnerable demo app:
 

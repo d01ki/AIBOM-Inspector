@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from aibom.models.entities import Entity, EntityType, Relationship
+from aibom.models.signals import RiskSignal
 
 
 class ScanMetadata(BaseModel):
@@ -29,6 +30,7 @@ class Inventory(BaseModel):
     metadata: ScanMetadata
     entities: list[Entity] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
+    signals: list[RiskSignal] = Field(default_factory=list)
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.
@@ -54,6 +56,17 @@ class Inventory(BaseModel):
                 existing.source_evidence.extend(relationship.source_evidence)
                 return
         self.relationships.append(relationship)
+
+    def add_signal(self, signal: RiskSignal) -> None:
+        """Add a risk signal, deduplicating on (kind, file, line)."""
+        key = signal.location_key()
+        if any(s.location_key() == key for s in self.signals):
+            return
+        self.signals.append(signal)
+
+    def signals_of(self, kind: str) -> list[RiskSignal]:
+        """Return all risk signals of a given kind."""
+        return [s for s in self.signals if s.kind == kind]
 
     def by_type(self, entity_type: EntityType) -> list[Entity]:
         """Return all entities of a given type."""

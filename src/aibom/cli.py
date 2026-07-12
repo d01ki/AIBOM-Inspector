@@ -19,7 +19,11 @@ from aibom.collectors.repo import RepoCollector
 from aibom.export.cyclonedx import to_cyclonedx_json
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.entities import EntityType
+from aibom.models.findings import Finding, SecurityScore, Severity
+from aibom.report.html import render_html
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
+from aibom.risk.engine import evaluate as evaluate_risk
+from aibom.risk.scoring import score_findings
 
 
 def _make_output_encode_safe() -> None:
@@ -52,6 +56,14 @@ _TYPE_STYLE = {
     EntityType.AGENT: "bold green",
     EntityType.SERVICE: "bold blue",
     EntityType.LICENSE: "white",
+}
+
+_SEVERITY_STYLE = {
+    Severity.CRITICAL: "bold white on red",
+    Severity.HIGH: "bold red",
+    Severity.MEDIUM: "bold yellow",
+    Severity.LOW: "green",
+    Severity.INFO: "dim",
 }
 
 
@@ -98,6 +110,18 @@ def scan(
         Path | None,
         typer.Option("--hf-cache", help="Directory for cached HF metadata (offline snapshots)."),
     ] = None,
+    report: Annotated[
+        Path | None,
+        typer.Option("--report", "-r", help="Write a self-contained HTML report to this path."),
+    ] = None,
+    fail_on: Annotated[
+        str | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit non-zero if any finding is at/above this severity "
+            "(info|low|medium|high|critical).",
+        ),
+    ] = None,
     min_confidence: Annotated[
         float,
         typer.Option("--min-confidence", help="Drop entities whose best evidence is below this."),
@@ -111,6 +135,8 @@ def scan(
         console.print(f"[red]error:[/red] target does not exist: {target}")
         raise typer.Exit(code=2)
 
+    fail_threshold = _parse_severity(fail_on)
+
     inventory = Inventory(
         metadata=ScanMetadata(tool_version=__version__, target=str(target.resolve()))
     )
@@ -122,8 +148,12 @@ def scan(
 
     _apply_confidence_filter(inventory, min_confidence)
 
+    findings = evaluate_risk(inventory)
+    score = score_findings(findings)
+
     if not quiet:
         _render(inventory)
+        _render_risk(findings, score)
 
     if output is not None:
         output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")
@@ -132,6 +162,26 @@ def scan(
     if cyclonedx is not None:
         cyclonedx.write_text(to_cyclonedx_json(inventory), encoding="utf-8")
         console.print(f"[green]written[/green] CycloneDX AIBOM to [bold]{cyclonedx}[/bold]")
+
+    if report is not None:
+        report.write_text(render_html(inventory, findings, score), encoding="utf-8")
+        console.print(f"[green]written[/green] HTML report to [bold]{report}[/bold]")
+
+    if fail_threshold is not None and any(
+        f.severity.rank >= fail_threshold.rank for f in findings
+    ):
+        raise typer.Exit(code=1)
+
+
+def _parse_severity(value: str | None) -> Severity | None:
+    if value is None:
+        return None
+    try:
+        return Severity(value.lower())
+    except ValueError:
+        valid = ", ".join(s.value for s in Severity)
+        console.print(f"[red]error:[/red] invalid --fail-on '{value}'. Choose one of: {valid}")
+        raise typer.Exit(code=2) from None
 
 
 def _apply_confidence_filter(inventory: Inventory, threshold: float) -> None:
@@ -178,6 +228,36 @@ def _render(inventory: Inventory) -> None:
             f"[{_TYPE_STYLE[entity.type]}]{entity.type.value}[/]", entity.name, provider, ev
         )
     console.print(detail)
+
+
+def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
+    cats = "  ".join(f"{c.category.value} {c.score}" for c in score.categories)
+    grade_style = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "bold red"}
+    console.print(
+        f"\n[bold]Security score:[/bold] "
+        f"[{grade_style.get(score.grade, 'white')}]{score.overall}/100 "
+        f"(grade {score.grade})[/]   [dim]{cats}[/dim]"
+    )
+
+    if not findings:
+        console.print("[green]No risk findings.[/green]")
+        return
+
+    table = Table(title="Risk findings", show_lines=False)
+    table.add_column("Sev", style="bold")
+    table.add_column("Rule")
+    table.add_column("Finding")
+    table.add_column("Where", style="dim")
+    for f in findings:
+        loc = f.source_evidence[0].location() if f.source_evidence else ""
+        where = f"{f.entity_name} @ {loc}" if f.entity_name else loc
+        table.add_row(
+            f"[{_SEVERITY_STYLE[f.severity]}] {f.severity.value} [/]",
+            f.rule_id,
+            f.title,
+            where,
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":
