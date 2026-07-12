@@ -5,6 +5,8 @@ Static analysis only — running ``aibom scan`` never executes the target code.
 
 from __future__ import annotations
 
+import contextlib
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -17,10 +19,27 @@ from aibom.collectors.repo import RepoCollector
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.entities import EntityType
 
+
+def _make_output_encode_safe() -> None:
+    """Never crash on a legacy console codepage (e.g. Windows cp932).
+
+    Keeps the console's native encoding but swaps the error handler to
+    ``replace`` so characters it cannot encode degrade gracefully instead of
+    raising ``UnicodeEncodeError``.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):  # stream-dependent
+                reconfigure(errors="replace")
+
+
+_make_output_encode_safe()
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="AIBOM Inspector — discover & inventory AI supply chains (static, evidence-backed).",
+    help="AIBOM Inspector - discover & inventory AI supply chains (static, evidence-backed).",
 )
 console = Console()
 
