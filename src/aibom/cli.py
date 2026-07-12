@@ -20,7 +20,7 @@ from aibom.models.entities import EntityType
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="AIBOManagement — discover & inventory AI supply chains (static, evidence-backed).",
+    help="AIBOM Inspector — discover & inventory AI supply chains (static, evidence-backed).",
 )
 console = Console()
 
@@ -50,7 +50,7 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """AIBOManagement CLI."""
+    """AIBOM Inspector CLI."""
 
 
 @app.command()

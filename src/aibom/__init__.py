@@ -1,4 +1,4 @@
-"""AIBOManagement — AI supply chain discovery & risk platform.
+"""AIBOM Inspector — AI supply chain discovery & risk platform.
 
 `aibom` discovers AI usage across a codebase (models, datasets, prompts, agents),
 resolves it, and builds an evidence-backed inventory that can be exported as an

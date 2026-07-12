@@ -1,4 +1,4 @@
-"""Unified data model (Pydantic v2) for the AIBOManagement inventory."""
+"""Unified data model (Pydantic v2) for the AIBOM Inspector inventory."""
 
 from aibom.models.entities import (
     Agent,

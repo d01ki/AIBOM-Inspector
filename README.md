@@ -1,9 +1,9 @@
-# AIBOManagement
+# AIBOM Inspector
 
 > **Discover, inventory, and analyze AI supply chains — the "Dependency-Track for AI."**
 > Static, evidence-backed, local-first. **Never executes scanned code or loads scanned models.**
 
-[![CI](https://github.com/d01ki/AIBOManagement/actions/workflows/ci.yml/badge.svg)](https://github.com/d01ki/AIBOManagement/actions/workflows/ci.yml)
+[![CI](https://github.com/d01ki/AIBOM-Inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/d01ki/AIBOM-Inspector/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
@@ -21,15 +21,15 @@ matched. **No evidence, no claim** — that is the trust contract of the tool.
 
 Existing SBOM tooling (Trivy, Syft) is package-level and blind to models,
 datasets, prompts, and agents. AIBOM generators produce a bill of materials for a
-*single* known model. **AIBOManagement discovers AI usage across a whole codebase**,
+*single* known model. **AIBOM Inspector discovers AI usage across a whole codebase**,
 resolves it, and adds graph + risk analysis on top.
 
-| Tool | Gap AIBOManagement fills |
+| Tool | Gap AIBOM Inspector fills |
 |---|---|
-| OWASP AIBOM Generator | Generates an AIBOM for a single HF model. AIBOManagement *discovers* AI usage across a codebase and adds graph + risk analysis. |
+| OWASP AIBOM Generator | Generates an AIBOM for a single HF model. AIBOM Inspector *discovers* AI usage across a codebase and adds graph + risk analysis. |
 | Trivy / Syft (SBOM) | Package-level only; blind to models, datasets, prompts, agents. |
 | Dependency-Track | Consumes SBOMs; no AI-specific discovery or risk rules. |
-| `modelscan` / `picklescan` | Scan a *given* model file for unsafe pickles. AIBOManagement *finds which models a repo uses in the first place*, then flags the pickle risk in context. |
+| `modelscan` / `picklescan` | Scan a *given* model file for unsafe pickles. AIBOM Inspector *finds which models a repo uses in the first place*, then flags the pickle risk in context. |
 
 ## Status
 
@@ -48,8 +48,8 @@ deterministic risk rules (TDR-001…010) + scoring, HTML report, graph dashboard
 
 ```bash
 # from source (uv recommended)
-git clone https://github.com/d01ki/AIBOManagement
-cd AIBOManagement
+git clone https://github.com/d01ki/AIBOM-Inspector
+cd AIBOM-Inspector
 uv venv && uv pip install -e ".[dev]"
 ```
 

@@ -1,4 +1,4 @@
-"""Core entities of the unified AIBOManagement schema.
+"""Core entities of the unified AIBOM Inspector schema.
 
 Every entity carries ``source_evidence`` — see :mod:`aibom.models.evidence`.
 Entity identities are deterministic (derived from type + natural key) so that

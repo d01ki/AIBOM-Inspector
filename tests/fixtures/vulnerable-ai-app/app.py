@@ -1,4 +1,4 @@
-"""Deliberately vulnerable demo app for AIBOManagement.
+"""Deliberately vulnerable demo app for AIBOM Inspector.
 
 This file exists only as a scan target. It is never executed by the scanner.
 It intentionally exhibits AI supply-chain smells (unpinned models, pickle

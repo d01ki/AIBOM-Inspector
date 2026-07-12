@@ -1,7 +1,7 @@
 [project]
 name = "aibom"
 version = "0.1.0"
-description = "AIBOManagement — discover, inventory, and analyze AI supply chains (the 'Dependency-Track for AI')."
+description = "AIBOM Inspector — discover, inventory, and analyze AI supply chains (the 'Dependency-Track for AI')."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -32,8 +32,8 @@ dev = [
 aibom = "aibom.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/d01ki/AIBOManagement"
-Repository = "https://github.com/d01ki/AIBOManagement"
+Homepage = "https://github.com/d01ki/AIBOM-Inspector"
+Repository = "https://github.com/d01ki/AIBOM-Inspector"
 
 [build-system]
 requires = ["hatchling"]
