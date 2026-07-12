@@ -1,0 +1,2 @@
+PLACEHOLDER — not a real pickle. This file exists so the scanner detects a
+pickle-serialized weight file by extension. AIBOManagement never unpickles it.
