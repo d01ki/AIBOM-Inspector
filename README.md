@@ -100,8 +100,3 @@ uv run mypy              # types
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
-
-## Prior art & credits
-
-Builds on ideas from OWASP CycloneDX ML-BOM, Dependency-Track, and the pickle-safety
-work in `protectai/modelscan` and `mmaitre314/picklescan`.
