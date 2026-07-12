@@ -33,16 +33,21 @@ resolves it, and adds graph + risk analysis on top.
 
 ## Status
 
-**Early alpha (v0.1, M1).** Implemented today:
+**Early alpha (v0.1, M1–M2).** Implemented today:
 
 - ✅ Unified Pydantic schema with mandatory evidence
 - ✅ Static repository collector (models, datasets, prompts, agents, services)
 - ✅ Deduplicating inventory + typed relationship graph
-- ✅ CLI (`aibom scan`) with JSON inventory export
+- ✅ **Hugging Face resolver** — enriches HF models/datasets with license, model-card
+  presence, serialization formats, author, downloads, gated status (network-optional,
+  cache-backed, offline-friendly; **never downloads or loads weights**)
+- ✅ **CycloneDX 1.6 (ML-BOM) export** — `machine-learning-model` / `data` components,
+  services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace
+- ✅ CLI (`aibom scan`) with JSON inventory + CycloneDX export
 - ✅ Golden-fixture test suite
 
-Roadmap → [SPEC.md](SPEC.md): Hugging Face resolution, CycloneDX 1.6 export,
-deterministic risk rules (TDR-001…010) + scoring, HTML report, graph dashboard.
+Roadmap → [SPEC.md](SPEC.md): deterministic risk rules (TDR-001…010) + scoring,
+HTML report, FastAPI + React dashboard.
 
 ## Install
 
@@ -61,6 +66,15 @@ aibom scan ./path/to/repo
 
 # write the full inventory (entities + relationships + evidence) as JSON
 aibom scan ./path/to/repo --output inventory.json
+
+# generate a CycloneDX 1.6 (ML-BOM) AIBOM — import it into Dependency-Track
+aibom scan ./path/to/repo --cyclonedx aibom.cdx.json
+
+# enrich Hugging Face models/datasets with hub metadata (license, formats, …)
+aibom scan ./path/to/repo --resolve --cyclonedx aibom.cdx.json
+
+# cache HF metadata for offline / air-gapped re-scans
+aibom scan ./path/to/repo --resolve --hf-cache ~/.cache/aibom
 
 # drop low-confidence detections
 aibom scan ./path/to/repo --min-confidence 0.8

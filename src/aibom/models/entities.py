@@ -79,6 +79,13 @@ class Model(Entity):
     license: str | None = None
     author: str | None = None
     has_model_card: bool | None = None
+    # -- resolution (populated by a resolver, e.g. Hugging Face) ---------------
+    downloads: int | None = Field(default=None, description="Downloads reported by the hub.")
+    gated: bool | None = Field(default=None, description="Whether the hub gates access.")
+    last_modified: str | None = Field(default=None, description="ISO timestamp of last change.")
+    resolved: bool = Field(
+        default=False, description="True once a resolver has enriched this entity."
+    )
 
 
 class Dataset(Entity):
@@ -88,6 +95,13 @@ class Dataset(Entity):
     source: str | None = Field(default=None, description="e.g. 'huggingface', local path, URL.")
     license: str | None = None
     provenance: str | None = None
+    author: str | None = None
+    downloads: int | None = Field(default=None, description="Downloads reported by the hub.")
+    gated: bool | None = Field(default=None, description="Whether the hub gates access.")
+    last_modified: str | None = Field(default=None, description="ISO timestamp of last change.")
+    resolved: bool = Field(
+        default=False, description="True once a resolver has enriched this entity."
+    )
 
 
 class Prompt(Entity):

@@ -16,8 +16,10 @@ from rich.table import Table
 
 from aibom import __version__
 from aibom.collectors.repo import RepoCollector
+from aibom.export.cyclonedx import to_cyclonedx_json
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.entities import EntityType
+from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
 
 
 def _make_output_encode_safe() -> None:
@@ -79,6 +81,23 @@ def scan(
         Path | None,
         typer.Option("--output", "-o", help="Write the full inventory as JSON to this path."),
     ] = None,
+    cyclonedx: Annotated[
+        Path | None,
+        typer.Option(
+            "--cyclonedx", "-c", help="Write a CycloneDX 1.6 (ML-BOM) AIBOM to this path."
+        ),
+    ] = None,
+    resolve: Annotated[
+        bool,
+        typer.Option(
+            "--resolve/--no-resolve",
+            help="Enrich Hugging Face models/datasets via the hub API (network).",
+        ),
+    ] = False,
+    hf_cache: Annotated[
+        Path | None,
+        typer.Option("--hf-cache", help="Directory for cached HF metadata (offline snapshots)."),
+    ] = None,
     min_confidence: Annotated[
         float,
         typer.Option("--min-confidence", help="Drop entities whose best evidence is below this."),
@@ -96,6 +115,11 @@ def scan(
         metadata=ScanMetadata(tool_version=__version__, target=str(target.resolve()))
     )
     RepoCollector(target).collect(inventory)
+
+    if resolve or hf_cache is not None:
+        client = HFClient(cache_dir=hf_cache, offline=not resolve)
+        HuggingFaceResolver(client).resolve(inventory)
+
     _apply_confidence_filter(inventory, min_confidence)
 
     if not quiet:
@@ -104,6 +128,10 @@ def scan(
     if output is not None:
         output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")
         console.print(f"[green]written[/green] inventory to [bold]{output}[/bold]")
+
+    if cyclonedx is not None:
+        cyclonedx.write_text(to_cyclonedx_json(inventory), encoding="utf-8")
+        console.print(f"[green]written[/green] CycloneDX AIBOM to [bold]{cyclonedx}[/bold]")
 
 
 def _apply_confidence_filter(inventory: Inventory, threshold: float) -> None:

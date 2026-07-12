@@ -124,10 +124,10 @@ Python 3.12+, FastAPI, React+TypeScript, Pydantic v2 everywhere, strict typing (
 
 ## 10. Milestones
 
-| M | Deliverable |
-|---|---|
-| M1 | Schema + repo collector + evidence engine |
-| M2 | HF resolver + AIBOM (CycloneDX) export |
-| M3 | Risk rules TDR-001..010 + scoring + HTML report |
-| M4 | Graph engine + FastAPI + React dashboard |
-| M5 | Demo fixture repo, docs, packaging (PyPI), Arsenal submission |
+| M | Deliverable | Status |
+|---|---|---|
+| M1 | Schema + repo collector + evidence engine | ✅ done |
+| M2 | HF resolver + AIBOM (CycloneDX) export | ✅ done |
+| M3 | Risk rules TDR-001..010 + scoring + HTML report | next |
+| M4 | Graph engine + FastAPI + React dashboard | planned |
+| M5 | Demo fixture repo, docs, packaging (PyPI), Arsenal submission | planned |
