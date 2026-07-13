@@ -54,6 +54,10 @@ def test_scan_returns_full_payload(client: TestClient) -> None:
     rule_ids = {f["rule_id"] for f in data["findings"]}
     assert {"TDR-001", "TDR-003", "TDR-009"} <= rule_ids
 
+    stats = data["stats"]
+    assert stats["files_scanned"] > 0
+    assert stats["clone_ms"] is not None  # API scans time the clone step
+
     graph = data["graph"]
     assert len(graph["nodes"]) == len(data["inventory"]["entities"])
     node_ids = {n["id"] for n in graph["nodes"]}

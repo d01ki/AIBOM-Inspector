@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -89,13 +90,17 @@ def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
     except CloneError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
+        clone_started = time.monotonic()
         with cloner(req.repo_url) as path:
-            return run_scan(
+            clone_ms = int((time.monotonic() - clone_started) * 1000)
+            result = run_scan(
                 path,
                 resolve=req.resolve,
                 min_confidence=req.min_confidence,
                 display_target=display,
             )
+            result.inventory.stats.clone_ms = clone_ms
+            return result
     except CloneError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -105,6 +110,7 @@ def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
     return {
         "repo_url": repo_url,
         "metadata": inv.metadata.model_dump(),
+        "stats": inv.stats.model_dump(),
         "counts": inv.counts(),
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": [f.model_dump() for f in result.findings],

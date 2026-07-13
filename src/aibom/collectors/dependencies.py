@@ -110,8 +110,12 @@ class DependencyCollector(Collector):
                     self._parse_pipfile(inventory, path, rel)
                 elif name == "package.json":
                     self._parse_package_json(inventory, path, rel)
+                else:
+                    continue
             except (OSError, ValueError):
                 continue
+            if rel not in inventory.stats.manifests_parsed:
+                inventory.stats.manifests_parsed.append(rel)
 
     # -- iteration -------------------------------------------------------------
 

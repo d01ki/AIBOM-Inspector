@@ -24,6 +24,22 @@ class ScanMetadata(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class ScanStats(BaseModel):
+    """What the scan actually did — proof of work for the UI and reports.
+
+    A static scan is fast (it reads text, nothing more), which users can
+    mistake for "it did nothing". These counters make the work inspectable.
+    """
+
+    files_scanned: int = Field(default=0, description="Files read line-by-line.")
+    bytes_scanned: int = Field(default=0, description="Total size of the files read.")
+    manifests_parsed: list[str] = Field(
+        default_factory=list, description="Dependency manifests parsed (repo-relative)."
+    )
+    duration_ms: int | None = Field(default=None, description="Scan wall time (excl. clone).")
+    clone_ms: int | None = Field(default=None, description="Clone wall time (API scans only).")
+
+
 class Inventory(BaseModel):
     """A normalized collection of AI supply-chain entities + relationships."""
 
@@ -31,6 +47,7 @@ class Inventory(BaseModel):
     entities: list[Entity] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
     signals: list[RiskSignal] = Field(default_factory=list)
+    stats: ScanStats = Field(default_factory=ScanStats)
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.

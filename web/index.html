@@ -134,6 +134,33 @@
     </div>
     <div class="chips" id="chips"></div>
 
+    <details class="card" style="margin-top:14px">
+      <summary style="cursor:pointer;font-weight:600">What does this score mean?</summary>
+      <div style="font-size:13px;line-height:1.6;margin-top:10px">
+        <p style="margin:0 0 8px">The score measures the <strong>supply-chain hygiene of the
+        AI components detected in this repository</strong> — models, datasets, prompts,
+        agents, AI services, and AI packages. It is <em>not</em> a general security audit
+        of the codebase; a repository with no AI components shows "no AI components
+        detected" instead of a score.</p>
+        <p style="margin:0 0 8px"><strong>Categories.</strong>
+        <em>integrity</em>: can what you load be silently swapped or execute code
+        (pickle weights, unpinned models/packages, known CVEs)?
+        <em>provenance</em>: do you know where components come from (typosquats,
+        missing model cards, undocumented datasets)?
+        <em>licensing</em>: are licenses known and usable?
+        <em>configuration</em>: risky settings and exposure
+        (trust_remote_code, hardcoded secrets, MCP tool surfaces).</p>
+        <p style="margin:0 0 8px"><strong>Formula.</strong> Each category starts at 100 and
+        loses points per finding — critical −40, high −20, medium −10, low −3 — floored
+        at 0, counting at most 3 findings per rule. Overall =
+        0.55 × mean + 0.45 × worst category, so one bad category is not averaged away.</p>
+        <p style="margin:0"><strong>Grades.</strong> A ≥ 90 (good hygiene) · B ≥ 75 (minor
+        issues) · C ≥ 60 (needs attention) · D ≥ 40 (poor hygiene) · F &lt; 40 (serious
+        issues). Every point lost is traceable to a finding with a
+        <code>file:line</code> evidence trail below.</p>
+      </div>
+    </details>
+
     <h2>Dependency graph</h2>
     <div class="graphgrid">
       <div>
@@ -200,6 +227,24 @@ function setStatus(msg, isErr) {
   const s = $("status"); s.textContent = msg; s.className = isErr ? "err" : "";
 }
 
+// Proof-of-work line: what the scan actually read, and how long each step took.
+function statsLine(repo, st) {
+  if (!st) return "Scanned " + repo + ".";
+  const kb = st.bytes_scanned >= 1048576
+    ? (st.bytes_scanned / 1048576).toFixed(1) + " MB"
+    : Math.max(1, Math.round(st.bytes_scanned / 1024)) + " KB";
+  let msg = `Read ${st.files_scanned} files (${kb})`;
+  if (st.manifests_parsed && st.manifests_parsed.length) {
+    msg += ` · manifests: ${st.manifests_parsed.slice(0, 4).join(", ")}`
+      + (st.manifests_parsed.length > 4 ? ` +${st.manifests_parsed.length - 4}` : "");
+  }
+  const parts = [];
+  if (st.clone_ms != null) parts.push(`clone ${(st.clone_ms / 1000).toFixed(1)}s`);
+  if (st.duration_ms != null) parts.push(`scan ${(st.duration_ms / 1000).toFixed(1)}s`);
+  if (parts.length) msg += ` · ${parts.join(" + ")}`;
+  return msg;
+}
+
 async function scan() {
   const repo = $("repo").value.trim();
   const api = $("api").value.trim().replace(/\/$/, "");
@@ -217,7 +262,7 @@ async function scan() {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
     render(data);
-    setStatus("Scanned " + repo + ".", false);
+    setStatus(statsLine(repo, data.stats), false);
     $("download").disabled = false;
   } catch (e) {
     setStatus("Scan failed: " + e.message +
@@ -242,8 +287,10 @@ function render(d) {
   } else {
   $("scoreNum").textContent = sc.overall;
   const gradeColor = { A:"#2e8b57", B:"#6a9c3a", C:"#b8860b", D:"#d64500", F:"#b3123b" }[sc.grade] || "";
+  const gradeWord = { A:"good hygiene", B:"minor issues", C:"needs attention",
+                      D:"poor hygiene", F:"serious issues" }[sc.grade] || "";
   $("scoreNum").style.color = gradeColor;
-  $("scoreGrade").textContent = "/ 100 · grade " + sc.grade;
+  $("scoreGrade").textContent = `/ 100 · grade ${sc.grade} — ${gradeWord}`;
 
   $("cats").innerHTML = sc.categories.map(c => {
     const col = c.score >= 75 ? "#2e8b57" : c.score >= 50 ? "#b8860b" : "#b3123b";

@@ -70,7 +70,8 @@ def render_html(
         f"<style>{_CSS}</style></head><body><div class='wrap'>",
         "<h1>AIBOM Inspector report</h1>",
         f"<p class='sub'>{escape(meta.target)} · "
-        f"{escape(meta.tool)} {escape(meta.tool_version)} · {escape(meta.created_at)}</p>",
+        f"{escape(meta.tool)} {escape(meta.tool_version)} · {escape(meta.created_at)}"
+        f"{_stats_suffix(inventory)}</p>",
         # "Nothing found" must not read as a triumphant 100/A.
         _score_cards(score)
         if inventory.entities
@@ -85,6 +86,18 @@ def render_html(
         "</div></body></html>",
     ]
     return "".join(parts)
+
+
+def _stats_suffix(inventory: Inventory) -> str:
+    st = inventory.stats
+    if not st.files_scanned:
+        return ""
+    parts = f" · read {st.files_scanned} files ({st.bytes_scanned // 1024} KB)"
+    if st.duration_ms is not None:
+        parts += f" in {st.duration_ms} ms"
+    if st.manifests_parsed:
+        parts += f" · manifests: {escape(', '.join(st.manifests_parsed))}"
+    return parts
 
 
 def _score_cards(score: SecurityScore) -> str:

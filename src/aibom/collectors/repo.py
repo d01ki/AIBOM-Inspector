@@ -244,11 +244,14 @@ class RepoCollector(Collector):
 
     def _scan_text_file(self, inventory: Inventory, path: Path, rel: str) -> None:
         try:
-            if path.stat().st_size > _MAX_FILE_BYTES:
+            size = path.stat().st_size
+            if size > _MAX_FILE_BYTES:
                 return
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return
+        inventory.stats.files_scanned += 1
+        inventory.stats.bytes_scanned += size
 
         # Notebooks are JSON with the code escaped; unescape quotes so the
         # detectors see the code as written (line numbers are unaffected).

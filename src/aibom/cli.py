@@ -146,6 +146,12 @@ def scan(
             _render_risk(findings, score)
         else:
             console.print("[dim]Nothing to score: no AI components were detected.[/dim]")
+        st = inventory.stats
+        manifests = f" · manifests: {', '.join(st.manifests_parsed)}" if st.manifests_parsed else ""
+        console.print(
+            f"[dim]Read {st.files_scanned} files ({st.bytes_scanned // 1024} KB) "
+            f"in {st.duration_ms} ms{manifests}[/dim]"
+        )
 
     if output is not None:
         output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")

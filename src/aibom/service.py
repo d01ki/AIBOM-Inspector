@@ -7,6 +7,7 @@ the CLI and the FastAPI backend cannot drift apart.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def run_scan(
     """
     if vulns is None:
         vulns = resolve
+    started = time.monotonic()
     inventory = Inventory(
         metadata=ScanMetadata(
             tool_version=__version__,
@@ -70,6 +72,7 @@ def run_scan(
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
         findings = order_findings(findings + OSVMapper().map(inventory))
     score = score_findings(findings)
+    inventory.stats.duration_ms = int((time.monotonic() - started) * 1000)
     return ScanResult(inventory=inventory, findings=findings, score=score)
 
 
