@@ -1,3 +1,14 @@
+---
+title: AIBOM Inspector
+emoji: 🧬
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+license: apache-2.0
+---
+
 # AIBOM Inspector
 
 > **Discover, inventory, and analyze AI supply chains — the "Dependency-Track for AI."**
@@ -155,33 +166,32 @@ The UI is static; the backend is a small container. Host them separately:
 [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes it on every
 push to `main` — enable it once under *Settings → Pages → Source = GitHub Actions*.
 
-**Backend → a free container host.** The image honors `$PORT`, so it runs
-as-is on the common free tiers. Two card-free options:
+**Backend → Hugging Face Spaces (free, no credit card, recommended).**
+This repo is Space-ready: the YAML frontmatter at the top of this README declares
+a Docker Space on port 8000, and the [`Dockerfile`](Dockerfile) builds it. A Space
+serves **both the UI and the API from one URL**, so you need no separate frontend
+and no CORS.
 
-*Render (from this repo, simplest).* [`render.yaml`](render.yaml) is a blueprint:
-on [render.com](https://render.com) → **New → Blueprint** → pick this repo. Free
-web services sleep after ~15 min idle and cold-start on the next request.
-
-*Hugging Face Spaces (no card, on-brand).* Create a **Docker** Space, push this
-repo into it, and give the Space's `README.md` this frontmatter:
-
-```yaml
----
-title: AIBOM Inspector
-emoji: 🧬
-sdk: docker
-app_port: 8000
----
+```bash
+# 1. Create a new Space at https://huggingface.co/new-space  (SDK: Docker, blank)
+# 2. Push this repo into it (use an HF write token as the git password):
+git remote add space https://huggingface.co/spaces/<user>/aibom-inspector
+git push space HEAD:main
 ```
 
-*Or run it anywhere with Docker:*
+Open `https://<user>-aibom-inspector.hf.space` — done. (First build takes a few
+minutes; the Space sleeps when idle and wakes on the next visit.)
+
+**Alternative — Render** (also free, from this repo): [`render.yaml`](render.yaml)
+is a blueprint — on [render.com](https://render.com) → **New → Blueprint** → pick
+this repo. Then use it as the *API endpoint* for the Pages frontend.
+
+**Or run the image anywhere with Docker:**
 
 ```bash
 docker build -t aibom .
-docker run -p 8000:8000 -e AIBOM_CORS_ORIGINS="https://<user>.github.io" aibom
+docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
 ```
-
-Then open the Pages site and set its *API endpoint* field to your backend URL.
 
 - `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
   defaults to `*` for local demos). Not needed if the backend also serves the UI.
