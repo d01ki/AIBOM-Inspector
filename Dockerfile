@@ -27,5 +27,6 @@ ENV AIBOM_CORS_ORIGINS="*"
 ENV AIBOM_WEB_DIR="/app/web"
 EXPOSE 8000
 
-# Bind to all interfaces inside the container.
-CMD ["uvicorn", "aibom.server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Honor $PORT so free hosts that inject it work unchanged (Render, Cloud Run);
+# defaults to 8000 locally. Bind to all interfaces inside the container.
+CMD ["sh", "-c", "uvicorn aibom.server.app:app --host 0.0.0.0 --port ${PORT:-8000}"]

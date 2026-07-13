@@ -155,7 +155,26 @@ The UI is static; the backend is a small container. Host them separately:
 [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes it on every
 push to `main` — enable it once under *Settings → Pages → Source = GitHub Actions*.
 
-**Backend → any container host** (Render, Fly.io, Cloud Run, a VM):
+**Backend → a free container host.** The image honors `$PORT`, so it runs
+as-is on the common free tiers. Two card-free options:
+
+*Render (from this repo, simplest).* [`render.yaml`](render.yaml) is a blueprint:
+on [render.com](https://render.com) → **New → Blueprint** → pick this repo. Free
+web services sleep after ~15 min idle and cold-start on the next request.
+
+*Hugging Face Spaces (no card, on-brand).* Create a **Docker** Space, push this
+repo into it, and give the Space's `README.md` this frontmatter:
+
+```yaml
+---
+title: AIBOM Inspector
+emoji: 🧬
+sdk: docker
+app_port: 8000
+---
+```
+
+*Or run it anywhere with Docker:*
 
 ```bash
 docker build -t aibom .
@@ -165,9 +184,10 @@ docker run -p 8000:8000 -e AIBOM_CORS_ORIGINS="https://<user>.github.io" aibom
 Then open the Pages site and set its *API endpoint* field to your backend URL.
 
 - `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
-  defaults to `*` for local demos).
+  defaults to `*` for local demos). Not needed if the backend also serves the UI.
 - `AIBOM_WEB_DIR` — where the backend finds the UI to also serve at `/` (set in
-  the image). Handy for an all-in-one single-origin deploy with no CORS at all.
+  the image). Handy for an **all-in-one single-origin deploy with no CORS** —
+  e.g. a Hugging Face Space serves both the UI and the API from one URL.
 
 ## What it detects (M1)
 

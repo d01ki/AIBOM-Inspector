@@ -1,0 +1,17 @@
+# Render blueprint — free backend for the AIBOM Inspector API + UI.
+# Deploy: push to GitHub, then on render.com → New → Blueprint → pick this repo.
+# The free plan sleeps after ~15 min idle (first request after that cold-starts).
+services:
+  - type: web
+    name: aibom-inspector-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Render injects PORT automatically; the container honors it.
+      # Lock this down to your GitHub Pages origin once the frontend is live,
+      # e.g. https://<user>.github.io  (comma-separated for several).
+      - key: AIBOM_CORS_ORIGINS
+        value: "*"
