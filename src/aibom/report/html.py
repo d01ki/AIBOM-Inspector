@@ -71,14 +71,17 @@ def render_html(
         "<h1>AIBOM Inspector report</h1>",
         f"<p class='sub'>{escape(meta.target)} · "
         f"{escape(meta.tool)} {escape(meta.tool_version)} · {escape(meta.created_at)}</p>",
-        _score_cards(score),
+        # "Nothing found" must not read as a triumphant 100/A.
+        _score_cards(score)
+        if inventory.entities
+        else "<div class='empty'>No AI components detected — nothing to score.</div>",
         _severity_chips(score),
         _findings_section(findings),
         _inventory_section(inventory),
         "<footer>Static, evidence-backed analysis. Scores are computed from deterministic "
         "rules only (no LLM). Each category starts at 100 and loses points per finding "
-        "(critical 40 / high 20 / medium 10 / low 3); the overall score is their mean."
-        "</footer>",
+        "(critical 40 / high 20 / medium 10 / low 3, max 3 findings per rule); overall = "
+        "0.55 &times; mean + 0.45 &times; worst category.</footer>",
         "</div></body></html>",
     ]
     return "".join(parts)

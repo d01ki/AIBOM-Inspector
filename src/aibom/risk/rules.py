@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from aibom.inventory import Inventory
-from aibom.models.entities import Dataset, EntityType, Model
+from aibom.models.entities import Dataset, EntityType, Model, Package, Service
 from aibom.models.evidence import Evidence
 from aibom.models.findings import Finding, RiskCategory, Severity
 from aibom.spdx import is_known_license, is_spdx
@@ -349,6 +349,64 @@ def tdr_010_deprecated_model(inv: Inventory) -> list[Finding]:
     return out
 
 
+# ── TDR-011 — MCP server implementation (LLM-invokable tool surface) ─────────
+
+
+def tdr_011_mcp_server_surface(inv: Inventory) -> list[Finding]:
+    out: list[Finding] = []
+    for svc in inv.by_type(EntityType.SERVICE):
+        if not isinstance(svc, Service) or svc.kind != "mcp":
+            continue
+        if not svc.name.startswith("mcp-server@"):
+            continue  # client configs are covered by inventory, not this rule
+        out.append(
+            Finding(
+                rule_id="TDR-011",
+                title="MCP server exposes an LLM-invokable tool surface",
+                severity=Severity.LOW,
+                category=RiskCategory.CONFIGURATION,
+                description=(
+                    f"'{svc.name}' implements an MCP server: its tools execute with the "
+                    "host's privileges whenever a connected LLM client calls them."
+                ),
+                remediation="Review each exposed tool for command/path injection, restrict "
+                "transports and authentication, and least-privilege the host process.",
+                entity_id=svc.id,
+                entity_name=svc.name,
+                source_evidence=_copy_evidence(svc.source_evidence),
+            )
+        )
+    return out
+
+
+# ── TDR-012 — AI package without a pinned version ────────────────────────────
+
+
+def tdr_012_unpinned_package(inv: Inventory) -> list[Finding]:
+    out: list[Finding] = []
+    for pkg in inv.by_type(EntityType.PACKAGE):
+        if not isinstance(pkg, Package) or pkg.version_pinned:
+            continue
+        spec = f" ({pkg.version})" if pkg.version else ""
+        out.append(
+            Finding(
+                rule_id="TDR-012",
+                title="AI package version is not pinned",
+                severity=Severity.LOW,
+                category=RiskCategory.INTEGRITY,
+                description=(
+                    f"'{pkg.name}'{spec} is declared without an exact version; a compromised "
+                    "or breaking upstream release would be installed silently."
+                ),
+                remediation=f"Pin an exact version (e.g. {pkg.name}==X.Y.Z) or use a lockfile.",
+                entity_id=pkg.id,
+                entity_name=pkg.name,
+                source_evidence=_copy_evidence(pkg.source_evidence),
+            )
+        )
+    return out
+
+
 #: Registry of all rules, evaluated in order.
 ALL_RULES: list[Rule] = [
     tdr_001_pickle_weights,
@@ -361,4 +419,6 @@ ALL_RULES: list[Rule] = [
     tdr_008_dataset_provenance,
     tdr_009_trust_remote_code,
     tdr_010_deprecated_model,
+    tdr_011_mcp_server_surface,
+    tdr_012_unpinned_package,
 ]

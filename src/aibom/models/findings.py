@@ -81,10 +81,13 @@ class CategoryScore(BaseModel):
 class SecurityScore(BaseModel):
     """Weighted aggregate security score (0–100) plus its breakdown.
 
-    Formula (documented here and in the report for reproducibility):
-    each category starts at 100 and loses ``severity.deduction`` points per
-    finding in that category, floored at 0. The overall score is the mean of the
-    four category scores, rounded to the nearest integer.
+    Formula (documented here, in the report, and in the web UI for
+    reproducibility): each category starts at 100 and loses
+    ``severity.deduction`` points per finding (critical 40 / high 20 /
+    medium 10 / low 3), floored at 0, counting at most 3 findings per rule.
+    The overall score blends the mean with the worst category
+    (``0.55 * mean + 0.45 * worst``) so one wrecked category cannot be
+    averaged away.
     """
 
     overall: int

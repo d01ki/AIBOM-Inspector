@@ -142,7 +142,10 @@ def scan(
 
     if not quiet:
         _render(inventory)
-        _render_risk(findings, score)
+        if inventory.entities:
+            _render_risk(findings, score)
+        else:
+            console.print("[dim]Nothing to score: no AI components were detected.[/dim]")
 
     if output is not None:
         output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")

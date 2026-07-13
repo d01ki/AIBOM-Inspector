@@ -35,15 +35,21 @@ def run_scan(
     target: str | Path,
     *,
     resolve: bool = False,
+    vulns: bool | None = None,
     hf_cache: str | Path | None = None,
     min_confidence: float = 0.0,
     display_target: str | None = None,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
+    ``resolve`` enables Hugging Face metadata enrichment (network).
+    ``vulns`` enables OSV known-vulnerability mapping for pinned AI packages
+    (network); it defaults to ``resolve`` so callers with network get both.
     ``display_target`` overrides the target string recorded in the metadata
     (used by the API so reports show the repo URL, not a temp path).
     """
+    if vulns is None:
+        vulns = resolve
     inventory = Inventory(
         metadata=ScanMetadata(
             tool_version=__version__,
@@ -60,7 +66,7 @@ def run_scan(
     apply_confidence_filter(inventory, min_confidence)
 
     findings = evaluate_risk(inventory)
-    if resolve:
+    if vulns:
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
         findings = order_findings(findings + OSVMapper().map(inventory))
     score = score_findings(findings)

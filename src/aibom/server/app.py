@@ -25,10 +25,15 @@ Cloner = Callable[[str], AbstractContextManager[Path]]
 
 
 class ScanRequest(BaseModel):
-    """Body for ``POST /api/scan`` and ``/api/report``."""
+    """Body for ``POST /api/scan`` and ``/api/report``.
+
+    The backend has network by definition (it just cloned the repo), so
+    enrichment — HF metadata resolution and OSV vulnerability mapping —
+    defaults to on; pass ``resolve: false`` for a purely static scan.
+    """
 
     repo_url: str = Field(description="Public repo URL, e.g. https://github.com/owner/repo")
-    resolve: bool = Field(default=False, description="Enrich HF models/datasets via the hub.")
+    resolve: bool = Field(default=True, description="Enrich via HF hub + map OSV vulns.")
     min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 

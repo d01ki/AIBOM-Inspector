@@ -37,7 +37,10 @@ def test_health(client: TestClient) -> None:
 
 
 def test_scan_returns_full_payload(client: TestClient) -> None:
-    resp = client.post("/api/scan", json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector"})
+    resp = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "resolve": False},
+    )
     assert resp.status_code == 200
     data = resp.json()
 
@@ -58,7 +61,10 @@ def test_scan_returns_full_payload(client: TestClient) -> None:
 
 
 def test_report_returns_html(client: TestClient) -> None:
-    resp = client.post("/api/report", json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector"})
+    resp = client.post(
+        "/api/report",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "resolve": False},
+    )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
     assert resp.text.startswith("<!DOCTYPE html>")

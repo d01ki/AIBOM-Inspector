@@ -134,11 +134,17 @@ severity, a `file:line` evidence trail, and a remediation.
 | TDR-008 | Dataset with no provenance metadata | Low | — |
 | TDR-009 | `trust_remote_code=True` | High | — |
 | TDR-010 | Deprecated / superseded model referenced | Medium | — |
+| TDR-011 | MCP server exposes an LLM-invokable tool surface | Low | — |
+| TDR-012 | AI package declared without a pinned version | Low | — |
+| OSV-* | Known vulnerability in a pinned AI package (OSV.dev) | per advisory | ✔ (network) |
 
 **Security score (0–100):** each of the four categories {integrity, provenance,
 licensing, configuration} starts at 100 and loses points per finding
-(critical 40 / high 20 / medium 10 / low 3, floored at 0); the overall score is
-their mean. The formula is printed in the report itself for reproducibility.
+(critical 40 / high 20 / medium 10 / low 3, floored at 0, counting at most
+3 findings per rule). The overall score is `0.55 × mean + 0.45 × worst category`,
+so one wrecked category cannot be averaged away by categories with no components.
+An empty inventory renders as "no AI components detected", not as 100/A. The
+formula is printed in the report itself for reproducibility.
 
 Try it against the bundled deliberately-vulnerable demo app:
 

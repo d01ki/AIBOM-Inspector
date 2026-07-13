@@ -28,11 +28,11 @@ def test_clean_scan_scores_100() -> None:
     assert all(c.score == 100 for c in score.categories)
 
 
-def test_category_deductions() -> None:
+def test_category_deductions_and_worst_blend() -> None:
     findings = [
-        _finding(Severity.HIGH, RiskCategory.INTEGRITY),      # -20
-        _finding(Severity.MEDIUM, RiskCategory.INTEGRITY),    # -10
-        _finding(Severity.CRITICAL, RiskCategory.CONFIGURATION),  # -40
+        _finding(Severity.HIGH, RiskCategory.INTEGRITY, rule="TDR-A"),      # -20
+        _finding(Severity.MEDIUM, RiskCategory.INTEGRITY, rule="TDR-B"),    # -10
+        _finding(Severity.CRITICAL, RiskCategory.CONFIGURATION, rule="TDR-C"),  # -40
     ]
     score = score_findings(findings)
     by_cat = {c.category: c.score for c in score.categories}
@@ -40,12 +40,46 @@ def test_category_deductions() -> None:
     assert by_cat[RiskCategory.CONFIGURATION] == 60
     assert by_cat[RiskCategory.PROVENANCE] == 100
     assert by_cat[RiskCategory.LICENSING] == 100
-    # mean of 70, 100, 100, 60 = 82.5 -> 82 or 83 (round-half-to-even -> 82)
-    assert score.overall == round((70 + 100 + 100 + 60) / 4)
+    # overall blends mean (82.5) with worst (60): 0.55*82.5 + 0.45*60 = 72.375
+    assert score.overall == 72
+
+
+def test_one_bad_category_cannot_be_averaged_away() -> None:
+    # A category at 0 with everything else clean must not read as a B.
+    findings = [
+        _finding(Severity.CRITICAL, RiskCategory.INTEGRITY, rule=f"TDR-{i}")
+        for i in range(3)
+    ]
+    score = score_findings(findings)
+    # mean = (0+100+100+100)/4 = 75, worst = 0 -> 0.55*75 = 41 (D), not 75 (B)
+    assert score.overall == 41
+    assert score.grade in {"D", "F"}
+
+
+def test_per_rule_deduction_cap() -> None:
+    # 10 findings of ONE rule deduct at most 3x; an 11th different rule still counts.
+    same_rule = [
+        _finding(Severity.MEDIUM, RiskCategory.INTEGRITY, rule="TDR-SAME")
+        for _ in range(10)
+    ]
+    score = score_findings(same_rule)
+    by_cat = {c.category: c.score for c in score.categories}
+    assert by_cat[RiskCategory.INTEGRITY] == 70  # 100 - 3*10, not 100 - 10*10
+    # counts still reflect every finding
+    assert next(
+        c for c in score.categories if c.category is RiskCategory.INTEGRITY
+    ).finding_count == 10
+
+    other = same_rule + [_finding(Severity.MEDIUM, RiskCategory.INTEGRITY, rule="TDR-OTHER")]
+    by_cat2 = {c.category: c.score for c in score_findings(other).categories}
+    assert by_cat2[RiskCategory.INTEGRITY] == 60
 
 
 def test_score_floors_at_zero() -> None:
-    findings = [_finding(Severity.CRITICAL, RiskCategory.INTEGRITY) for _ in range(5)]
+    findings = [
+        _finding(Severity.CRITICAL, RiskCategory.INTEGRITY, rule=f"TDR-{i}")
+        for i in range(5)
+    ]
     by_cat = {c.category: c.score for c in score_findings(findings).categories}
     assert by_cat[RiskCategory.INTEGRITY] == 0
 

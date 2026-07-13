@@ -109,7 +109,7 @@
       </div>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="resolve"> Resolve Hugging Face metadata (slower, network)</label>
+      <label class="check"><input type="checkbox" id="resolve" checked> Enrich: Hugging Face metadata + known vulnerabilities (OSV)</label>
     </div>
     <div class="row">
       <div class="small">
@@ -168,8 +168,9 @@
   <footer>
     Findings are deterministic and rule-based (no LLM). Score: each category
     {integrity, provenance, licensing, configuration} starts at 100 and loses points per
-    finding (critical 40 / high 20 / medium 10 / low 3), floored at 0; overall is their mean.
-    Run the API with <code>aibom serve</code>.
+    finding (critical 40 / high 20 / medium 10 / low 3, max 3 findings per rule), floored
+    at 0; overall = 0.55 × mean + 0.45 × worst category, so one wrecked category can't be
+    averaged away. Run the API with <code>aibom serve</code>.
   </footer>
 </div>
 
