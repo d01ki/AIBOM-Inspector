@@ -38,16 +38,17 @@ _AI_PYPI = {
     "onnxruntime", "onnx", "optimum", "timm", "peft", "trl", "bitsandbytes",
     "sentencepiece", "gpt4all", "openai-whisper", "spacy", "scikit-learn",
     "xgboost", "lightgbm", "catboost", "replicate", "groq", "instructorai",
+    "mcp", "fastmcp", "modelcontextprotocol",
 }
 _AI_PYPI_PREFIXES = ("langchain", "llama-index", "llamaindex", "llama-cpp")
 
 _AI_NPM = {
     "openai", "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai",
     "cohere-ai", "@mistralai/mistralai", "ai", "langchain", "llamaindex",
-    "ollama", "replicate", "groq-sdk", "openai-edge",
+    "ollama", "replicate", "groq-sdk", "openai-edge", "fastmcp",
 }
 _AI_NPM_PREFIXES = ("@langchain/", "@llamaindex/", "@huggingface/", "@ai-sdk/",
-                    "@anthropic-ai/")
+                    "@anthropic-ai/", "@modelcontextprotocol/")
 
 _RE_REQ = re.compile(
     r"""^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*"""

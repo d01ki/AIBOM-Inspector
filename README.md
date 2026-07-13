@@ -209,7 +209,7 @@ GitHub Actions*).
   the image). Handy for an **all-in-one single-origin deploy with no CORS** —
   e.g. a Hugging Face Space serves both the UI and the API from one URL.
 
-## What it detects (M1)
+## What it detects
 
 | Component | Signals |
 |---|---|
@@ -217,8 +217,8 @@ GitHub Actions*).
 | **Datasets** | `load_dataset(...)` |
 | **Prompts** | template files (`prompts/`, `*.prompt`, `*.jinja`), hardcoded system prompts |
 | **Agents** | LangChain/LangGraph constructors (`create_react_agent`, `AgentExecutor`, …) |
-| **Services** | provider SDK imports (`openai`, `anthropic`, …), explicit `base_url`, MCP server configs |
-| **Packages** | AI/ML libraries declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl |
+| **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
+| **Packages** | AI/ML libraries declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm, incl. `mcp`/`fastmcp`/`@modelcontextprotocol/*`), with version + purl |
 
 ## Design principles
 

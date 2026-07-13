@@ -38,6 +38,7 @@ _IGNORE_DIRS = {
 _TEXT_SUFFIXES = {
     ".py", ".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".cfg",
     ".ini", ".jinja", ".jinja2", ".j2", ".prompt", ".sh", ".env",
+    ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".ipynb",
 }
 _TEXT_NAMES = {"dockerfile", "requirements.txt", "pipfile", ".env"}
 
@@ -80,6 +81,34 @@ _RE_TRUST_REMOTE = re.compile(r"""trust_remote_code\s*=\s*True""")
 
 # An mcpServers entry used as a JSON/dict key — an actual MCP config, not a mention.
 _RE_MCP = re.compile(r"""['"]mcpServers['"]\s*:""")
+
+# MCP *server* implementations (the supply-chain surface an AI client consumes):
+# Python mcp / fastmcp usage, or the TS server SDK.
+_RE_MCP_SERVER_PY = re.compile(
+    r"""(?:^\s*from\s+(?:mcp|fastmcp)(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+(?:mcp|fastmcp)\b"""
+    r"""|\bFastMCP\s*\()"""
+)
+_RE_MCP_SERVER_JS = re.compile(
+    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:sdk|server)[^'"]*['"]"""
+)
+
+# JS/TS provider SDK imports (ESM import-from or CJS require of an AI SDK).
+_JS_PROVIDER_IMPORTS: dict[str, tuple[str, str | None]] = {
+    "openai": ("openai", "https://api.openai.com"),
+    "@anthropic-ai/sdk": ("anthropic", "https://api.anthropic.com"),
+    "@google/generative-ai": ("google", "https://generativelanguage.googleapis.com"),
+    "@google/genai": ("google", "https://generativelanguage.googleapis.com"),
+    "cohere-ai": ("cohere", "https://api.cohere.ai"),
+    "@mistralai/mistralai": ("mistral", "https://api.mistral.ai"),
+    "groq-sdk": ("groq", "https://api.groq.com"),
+    "ollama": ("ollama", "http://localhost:11434"),
+}
+_RE_JS_IMPORT = re.compile(
+    r"""(?:import\s[^;]*?from\s*|import\s*|require\s*\(\s*)['"]("""
+    + "|".join(re.escape(k) for k in _JS_PROVIDER_IMPORTS)
+    + r""")['"]"""
+)
 
 # Hardcoded-secret heuristics. A provider key with a recognizable prefix, or an
 # assignment of a secret-ish name to a literal string that is *not* an env
@@ -221,6 +250,11 @@ class RepoCollector(Collector):
         except OSError:
             return
 
+        # Notebooks are JSON with the code escaped; unescape quotes so the
+        # detectors see the code as written (line numbers are unaffected).
+        if path.suffix.lower() == ".ipynb":
+            text = text.replace('\\"', '"')
+
         lines = text.splitlines()
         # per-file buckets used to draw intra-file relationship edges
         buckets: dict[type[Entity], list[str]] = defaultdict(list)
@@ -341,6 +375,17 @@ class RepoCollector(Collector):
             found.append(
                 Service(name=f"mcp-config@{rel}", kind="mcp",
                         source_evidence=[ev("mcp-config", line, 0.8)])
+            )
+        if _RE_MCP_SERVER_PY.search(line) or _RE_MCP_SERVER_JS.search(line):
+            found.append(
+                Service(name=f"mcp-server@{rel}", kind="mcp",
+                        source_evidence=[ev("mcp-server", line, 0.85)])
+            )
+        for m in _RE_JS_IMPORT.finditer(line):
+            js_svc, js_endpoint = _JS_PROVIDER_IMPORTS[m.group(1)]
+            found.append(
+                Service(name=js_svc, kind="api", endpoint=js_endpoint,
+                        source_evidence=[ev("provider-import-js", line, 0.6)])
             )
 
         # agents (ignore import statements — those are dependencies, not constructions)
