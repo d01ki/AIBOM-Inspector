@@ -120,11 +120,16 @@ def _mount_frontend(app: FastAPI) -> None:
 
 
 def _find_web_dir() -> Path | None:
-    # Explicit override (used by the Docker image / non-editable installs).
+    here = Path(__file__).resolve()
     env = os.environ.get("AIBOM_WEB_DIR")
-    candidates = [Path(env)] if env else []
-    # Source/editable layout: <root>/web alongside <root>/src/aibom/server/app.py.
-    candidates.append(Path(__file__).resolve().parents[3] / "web")
+    candidates = [
+        # Explicit override (Docker image / any custom layout).
+        *( [Path(env)] if env else [] ),
+        # Installed wheel: web/ shipped inside the package as aibom/web.
+        here.parents[1] / "web",
+        # Source / editable layout: <root>/web next to <root>/src/aibom/…
+        here.parents[3] / "web",
+    ]
     for candidate in candidates:
         if (candidate / "index.html").exists():
             return candidate

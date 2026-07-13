@@ -71,6 +71,12 @@ Roadmap → [SPEC.md](SPEC.md): dependency-graph visualization, plugin collector
 ## Install
 
 ```bash
+# from PyPI
+pip install aibom              # CLI only
+pip install "aibom[server]"    # + the web API/UI (aibom serve)
+```
+
+```bash
 # from source (uv recommended)
 git clone https://github.com/d01ki/AIBOM-Inspector
 cd AIBOM-Inspector
@@ -220,6 +226,16 @@ GitHub Actions*).
 uv run pytest            # tests
 uv run ruff check .      # lint
 uv run mypy              # types
+```
+
+### Releasing
+
+Publishing is automated via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+(OIDC — no tokens). One-time: add a trusted publisher on PyPI for this repo,
+workflow `release.yml`, environment `pypi`. Then push a tag:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0   # builds, twine-checks, and publishes
 ```
 
 ## License

@@ -10,9 +10,16 @@ keywords = ["aibom", "sbom", "ai-security", "supply-chain", "cyclonedx", "mlbom"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
 ]
 dependencies = [
     "pydantic>=2.6",
@@ -42,6 +49,7 @@ aibom = "aibom.cli:app"
 [project.urls]
 Homepage = "https://github.com/d01ki/AIBOM-Inspector"
 Repository = "https://github.com/d01ki/AIBOM-Inspector"
+Issues = "https://github.com/d01ki/AIBOM-Inspector/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -49,6 +57,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aibom"]
+
+# Ship the web UI inside the wheel (as aibom/web) so `pip install aibom[server]`
+# + `aibom serve` serves the UI, not just the API.
+[tool.hatch.build.targets.wheel.force-include]
+"web" = "aibom/web"
 
 [tool.ruff]
 line-length = 100
