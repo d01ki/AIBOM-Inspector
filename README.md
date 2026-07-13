@@ -58,7 +58,8 @@ resolves it, and adds graph + risk analysis on top.
   presence, serialization formats, author, downloads, gated status (network-optional,
   cache-backed, offline-friendly; **never downloads or loads weights**)
 - ✅ **CycloneDX 1.6 (ML-BOM) export** — `machine-learning-model` / `data` components,
-  services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace
+  services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace;
+  **validated against the official CycloneDX 1.6 JSON schema** in the test suite
 - ✅ **Deterministic risk rules (TDR-001…010)** + a reproducible 0–100 security score
   over integrity / provenance / licensing / configuration
 - ✅ **Self-contained HTML report** (score, evidence-backed findings, inventory)
