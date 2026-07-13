@@ -160,38 +160,35 @@ to see the component and its evidence trail.
 
 ## Deploy
 
-The UI is static; the backend is a small container. Host them separately:
+The backend is a small container that serves the UI too, so one free service
+runs the whole app from a single URL.
 
-**Frontend → GitHub Pages.** [`web/`](web/) is a single static file.
-[`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes it on every
-push to `main` — enable it once under *Settings → Pages → Source = GitHub Actions*.
+**Render (free, no credit card, recommended).** The scanner needs server-side
+compute (it clones and analyzes repos), so it must run on a compute host — not a
+static-only one. [`render.yaml`](render.yaml) is a blueprint: on
+[render.com](https://render.com) → **New → Blueprint** → pick this repo → **Apply**.
+A few minutes later the whole app (UI at `/`, API at `/api/*`) is live at
+`https://aibom-inspector-api.onrender.com`. Free instances sleep after ~15 min
+idle and cold-start on the next request.
 
-**Backend → Hugging Face Spaces (free, no credit card, recommended).**
-This repo is Space-ready: the YAML frontmatter at the top of this README declares
-a Docker Space on port 8000, and the [`Dockerfile`](Dockerfile) builds it. A Space
-serves **both the UI and the API from one URL**, so you need no separate frontend
-and no CORS.
-
-```bash
-# 1. Create a new Space at https://huggingface.co/new-space  (SDK: Docker, blank)
-# 2. Push this repo into it (use an HF write token as the git password):
-git remote add space https://huggingface.co/spaces/<user>/aibom-inspector
-git push space HEAD:main
-```
-
-Open `https://<user>-aibom-inspector.hf.space` — done. (First build takes a few
-minutes; the Space sleeps when idle and wakes on the next visit.)
-
-**Alternative — Render** (also free, from this repo): [`render.yaml`](render.yaml)
-is a blueprint — on [render.com](https://render.com) → **New → Blueprint** → pick
-this repo. Then use it as the *API endpoint* for the Pages frontend.
-
-**Or run the image anywhere with Docker:**
+**Run the image anywhere with Docker:**
 
 ```bash
 docker build -t aibom .
 docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
 ```
+
+**Static-only hosts (GitHub Pages / HF *Static* Spaces).** These can host the
+[`web/`](web/) UI for free, but **not** the scanner — point the UI's *API endpoint*
+field at a compute backend (e.g. your Render URL) and set `AIBOM_CORS_ORIGINS` on
+the backend to the UI's origin. [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+publishes `web/` to Pages on push to `main` (enable *Settings → Pages → Source =
+GitHub Actions*).
+
+> **Note:** Hugging Face **Docker** Spaces now require a paid (PRO) plan; only
+> **Static** Spaces are free. The Space frontmatter at the top of this README is
+> kept for anyone on PRO — `git push` this repo to a Docker Space and it runs
+> as-is. For a free deploy, use Render above.
 
 - `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
   defaults to `*` for local demos). Not needed if the backend also serves the UI.
