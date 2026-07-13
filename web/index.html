@@ -268,7 +268,7 @@ function render(d) {
   $("invSummary").textContent = "(" +
     Object.entries(d.counts).map(([k, v]) => v + " " + k).join(" · ") + ")";
   ib.innerHTML = ents.length ? ents.map(e => {
-    const prov = e.provider || e.source || "—";
+    const prov = e.provider || e.source || e.ecosystem || "—";
     const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
     return `<tr><td>${esc(e.type)}</td><td>${esc(e.name)}</td>`
       + `<td>${esc(prov)}</td><td><code>${esc(loc)}</code></td></tr>`;
@@ -301,7 +301,7 @@ async function download() {
 // ── dependency graph (dependency-free SVG force layout) ──────────────────────
 const SVGNS = "http://www.w3.org/2000/svg";
 const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
-  agent:"#2e7d5b", service:"#556", license:"#667" };
+  agent:"#2e7d5b", service:"#556", package:"#8a6d3b", license:"#667" };
 let graphFindings = [];
 
 function nodeColor(n) {

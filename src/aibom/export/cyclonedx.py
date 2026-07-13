@@ -27,6 +27,7 @@ from aibom.models.entities import (
     Dataset,
     Entity,
     Model,
+    Package,
     Prompt,
     Service,
 )
@@ -109,6 +110,8 @@ def _component(entity: Entity) -> dict[str, Any]:
         return _prompt_component(entity)
     if isinstance(entity, Agent):
         return _agent_component(entity)
+    if isinstance(entity, Package):
+        return _package_component(entity)
     # Fallback for any future entity type: a generic component.
     return _base_component("library", entity)
 
@@ -188,6 +191,19 @@ def _agent_component(agent: Agent) -> dict[str, Any]:
     _append_prop(props, "aibom:framework", agent.framework)
     if agent.tools:
         _append_prop(props, "aibom:tools", ",".join(agent.tools))
+    _dedupe_or_drop_props(comp)
+    return comp
+
+
+def _package_component(pkg: Package) -> dict[str, Any]:
+    comp = _base_component("library", pkg)
+    if pkg.version:
+        comp["version"] = pkg.version
+    if pkg.purl:
+        comp["purl"] = pkg.purl
+    props: list[dict[str, str]] = comp.setdefault("properties", [])
+    _append_prop(props, "aibom:ecosystem", pkg.ecosystem)
+    props.append(_prop("aibom:version_pinned", _b(pkg.version_pinned)))
     _dedupe_or_drop_props(comp)
     return comp
 

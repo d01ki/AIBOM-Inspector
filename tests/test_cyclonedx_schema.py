@@ -16,6 +16,7 @@ from aibom.models.entities import (
     Agent,
     Dataset,
     Model,
+    Package,
     Prompt,
     Relationship,
     RelationshipType,
@@ -74,7 +75,15 @@ def test_fully_resolved_bom_is_schema_valid() -> None:
     service = Service(
         name="openai", kind="api", endpoint="https://api.openai.com", source_evidence=[_ev()]
     )
-    for e in (model, weird_license, dataset, prompt, agent, service):
+    package = Package(
+        name="transformers", ecosystem="PyPI", version="4.40.0", version_pinned=True,
+        source_evidence=[_ev()],
+    )
+    npm_pkg = Package(
+        name="@anthropic-ai/sdk", ecosystem="npm", version="0.20.0", version_pinned=True,
+        source_evidence=[_ev()],
+    )
+    for e in (model, weird_license, dataset, prompt, agent, service, package, npm_pkg):
         inv.add_entity(e)
     inv.add_relationship(Relationship(
         source_id=agent.id, target_id=model.id,

@@ -25,9 +25,13 @@ def evaluate(inventory: Inventory) -> list[Finding]:
     return RiskEngine().evaluate(inventory)
 
 
-def _order(findings: list[Finding]) -> list[Finding]:
+def order_findings(findings: list[Finding]) -> list[Finding]:
     """Sort most-severe first, then by rule id and entity for stable output."""
     return sorted(
         findings,
         key=lambda f: (-f.severity.rank, f.rule_id, f.entity_name or "", f.title),
     )
+
+
+# Backwards-compatible alias.
+_order = order_findings

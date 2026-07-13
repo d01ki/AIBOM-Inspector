@@ -52,6 +52,7 @@ _TYPE_STYLE = {
     EntityType.PROMPT: "bold yellow",
     EntityType.AGENT: "bold green",
     EntityType.SERVICE: "bold blue",
+    EntityType.PACKAGE: "bold white",
     EntityType.LICENSE: "white",
 }
 
@@ -214,7 +215,12 @@ def _render(inventory: Inventory) -> None:
     detail.add_column("Provider/Source", style="dim")
     detail.add_column("Evidence", style="dim")
     for entity in sorted(inventory.entities, key=lambda e: (e.type.value, e.name)):
-        provider = getattr(entity, "provider", None) or getattr(entity, "source", None) or ""
+        provider = (
+            getattr(entity, "provider", None)
+            or getattr(entity, "source", None)
+            or getattr(entity, "ecosystem", None)
+            or ""
+        )
         ev = entity.source_evidence[0].location() if entity.source_evidence else ""
         detail.add_row(
             f"[{_TYPE_STYLE[entity.type]}]{entity.type.value}[/]", entity.name, provider, ev

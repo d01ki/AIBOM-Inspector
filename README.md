@@ -46,6 +46,11 @@ resolves it, and adds graph + risk analysis on top.
 
 **Early alpha (v0.1, M1–M4).** Implemented today:
 
+- ✅ **Dependency-manifest collector** — finds AI/ML libraries in `requirements*.txt`,
+  `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm) with versions and purls, so
+  the AIBOM is useful on real repos, not just ones with inline `from_pretrained`
+- ✅ **Vulnerability mapping** — with `--resolve`, pinned packages are checked against
+  [OSV.dev](https://osv.dev) and matching CVE/GHSA advisories become evidence-backed findings
 - ✅ **Web app** — a FastAPI backend (`aibom serve`) + a static single-page UI:
   paste a public repo URL, get the AIBOM, findings, and score in the browser
 - ✅ **Interactive dependency graph** — app → agents → models / prompts / services,
@@ -95,7 +100,8 @@ aibom scan ./path/to/repo --output inventory.json
 # generate a CycloneDX 1.6 (ML-BOM) AIBOM — import it into Dependency-Track
 aibom scan ./path/to/repo --cyclonedx aibom.cdx.json
 
-# enrich Hugging Face models/datasets with hub metadata (license, formats, …)
+# online enrichment: Hugging Face metadata (license, formats, …) AND OSV
+# vulnerability mapping for pinned AI packages
 aibom scan ./path/to/repo --resolve --cyclonedx aibom.cdx.json
 
 # cache HF metadata for offline / air-gapped re-scans
@@ -212,6 +218,7 @@ GitHub Actions*).
 | **Prompts** | template files (`prompts/`, `*.prompt`, `*.jinja`), hardcoded system prompts |
 | **Agents** | LangChain/LangGraph constructors (`create_react_agent`, `AgentExecutor`, …) |
 | **Services** | provider SDK imports (`openai`, `anthropic`, …), explicit `base_url`, MCP server configs |
+| **Packages** | AI/ML libraries declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl |
 
 ## Design principles
 

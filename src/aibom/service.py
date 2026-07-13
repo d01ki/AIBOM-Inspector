@@ -11,12 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aibom import __version__
+from aibom.collectors.dependencies import DependencyCollector
 from aibom.collectors.repo import RepoCollector
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.findings import Finding, SecurityScore
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
 from aibom.risk.engine import evaluate as evaluate_risk
+from aibom.risk.engine import order_findings
 from aibom.risk.scoring import score_findings
+from aibom.vuln.osv import OSVMapper
 
 
 @dataclass
@@ -48,6 +51,7 @@ def run_scan(
         )
     )
     RepoCollector(target).collect(inventory)
+    DependencyCollector(target).collect(inventory)
 
     if resolve or hf_cache is not None:
         client = HFClient(cache_dir=hf_cache, offline=not resolve)
@@ -56,6 +60,9 @@ def run_scan(
     apply_confidence_filter(inventory, min_confidence)
 
     findings = evaluate_risk(inventory)
+    if resolve:
+        # Online enrichment: map declared packages to known vulnerabilities (OSV).
+        findings = order_findings(findings + OSVMapper().map(inventory))
     score = score_findings(findings)
     return ScanResult(inventory=inventory, findings=findings, score=score)
 

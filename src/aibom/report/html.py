@@ -147,7 +147,12 @@ def _findings_section(findings: list[Finding]) -> str:
 def _inventory_section(inventory: Inventory) -> str:
     rows: list[str] = []
     for entity in sorted(inventory.entities, key=lambda e: (e.type.value, e.name)):
-        provider = getattr(entity, "provider", None) or getattr(entity, "source", None) or "—"
+        provider = (
+            getattr(entity, "provider", None)
+            or getattr(entity, "source", None)
+            or getattr(entity, "ecosystem", None)
+            or "—"
+        )
         loc = entity.source_evidence[0].location() if entity.source_evidence else "—"
         rows.append(
             "<tr>"

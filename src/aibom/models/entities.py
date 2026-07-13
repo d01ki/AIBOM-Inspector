@@ -23,6 +23,7 @@ class EntityType(str, Enum):
     PROMPT = "prompt"
     AGENT = "agent"
     SERVICE = "service"
+    PACKAGE = "package"
     LICENSE = "license"
 
 
@@ -127,6 +128,26 @@ class Service(Entity):
     type: EntityType = EntityType.SERVICE
     endpoint: str | None = None
     kind: str = Field(default="api", description="'api' | 'mcp' | 'other'.")
+
+
+class Package(Entity):
+    """A software dependency (an AI library) declared in a manifest."""
+
+    type: EntityType = EntityType.PACKAGE
+    ecosystem: str | None = Field(default=None, description="'PyPI' | 'npm' | 'conda'.")
+    version: str | None = Field(default=None, description="Declared version, if any.")
+    version_pinned: bool = Field(default=False, description="True for an exact (==) pin.")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def purl(self) -> str | None:
+        """Package URL (purl), e.g. ``pkg:pypi/transformers@4.40`` — enables
+        ecosystem vulnerability correlation (OSV, Dependency-Track)."""
+        eco = {"pypi": "pypi", "npm": "npm", "conda": "conda"}.get((self.ecosystem or "").lower())
+        if not eco:
+            return None
+        base = f"pkg:{eco}/{self.name}"
+        return f"{base}@{self.version}" if self.version else base
 
 
 class License(Entity):

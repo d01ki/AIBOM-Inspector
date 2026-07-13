@@ -99,6 +99,11 @@ Rule-based, deterministic, YAML-defined. Each finding: `rule_id`, severity (info
 | TDR-009 | `trust_remote_code=True` usage | High |
 | TDR-010 | Deprecated/yanked model referenced | Medium |
 
+**Package vulnerabilities:** the dependency collector extracts AI/ML libraries
+(with versions + purls) from `requirements*.txt` / `pyproject.toml` / `Pipfile` /
+`package.json`, and (with `--resolve`) pinned versions are mapped to known
+CVE/GHSA advisories via OSV.dev — each match becoming an evidence-backed finding.
+
 **Security score** = weighted aggregate (0–100) over categories {integrity, provenance, licensing, configuration}, formula documented in the report itself. **LLM assistance is opt-in and limited to natural-language explanation of deterministic findings** — never the source of a score (reproducibility requirement).
 
 ## 7. Engineering Rules
