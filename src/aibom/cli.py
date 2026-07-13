@@ -15,15 +15,12 @@ from rich.console import Console
 from rich.table import Table
 
 from aibom import __version__
-from aibom.collectors.repo import RepoCollector
 from aibom.export.cyclonedx import to_cyclonedx_json
-from aibom.inventory import Inventory, ScanMetadata
+from aibom.inventory import Inventory
 from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
 from aibom.report.html import render_html
-from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
-from aibom.risk.engine import evaluate as evaluate_risk
-from aibom.risk.scoring import score_findings
+from aibom.service import run_scan
 
 
 def _make_output_encode_safe() -> None:
@@ -137,19 +134,10 @@ def scan(
 
     fail_threshold = _parse_severity(fail_on)
 
-    inventory = Inventory(
-        metadata=ScanMetadata(tool_version=__version__, target=str(target.resolve()))
+    result = run_scan(
+        target, resolve=resolve, hf_cache=hf_cache, min_confidence=min_confidence
     )
-    RepoCollector(target).collect(inventory)
-
-    if resolve or hf_cache is not None:
-        client = HFClient(cache_dir=hf_cache, offline=not resolve)
-        HuggingFaceResolver(client).resolve(inventory)
-
-    _apply_confidence_filter(inventory, min_confidence)
-
-    findings = evaluate_risk(inventory)
-    score = score_findings(findings)
+    inventory, findings, score = result.inventory, result.findings, result.score
 
     if not quiet:
         _render(inventory)
@@ -184,19 +172,23 @@ def _parse_severity(value: str | None) -> Severity | None:
         raise typer.Exit(code=2) from None
 
 
-def _apply_confidence_filter(inventory: Inventory, threshold: float) -> None:
-    if threshold <= 0.0:
-        return
-    keep = [
-        e for e in inventory.entities
-        if any(ev.confidence >= threshold for ev in e.source_evidence)
-    ]
-    kept_ids = {e.id for e in keep}
-    inventory.entities = keep
-    inventory.relationships = [
-        r for r in inventory.relationships
-        if r.source_id in kept_ids and r.target_id in kept_ids
-    ]
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option("--host", help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8000,
+) -> None:
+    """Run the HTTP API + web UI (requires the 'server' extra)."""
+    try:
+        import uvicorn
+    except ModuleNotFoundError:
+        console.print(
+            "[red]error:[/red] the server extra is not installed. "
+            "Install it with [bold]pip install 'aibom[server]'[/bold]."
+        )
+        raise typer.Exit(code=2) from None
+
+    console.print(f"AIBOM Inspector API on [bold]http://{host}:{port}[/bold]  (Ctrl-C to stop)")
+    uvicorn.run("aibom.server.app:app", host=host, port=port, log_level="info")
 
 
 def _render(inventory: Inventory) -> None:

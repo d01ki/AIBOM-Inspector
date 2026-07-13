@@ -33,7 +33,10 @@ resolves it, and adds graph + risk analysis on top.
 
 ## Status
 
-**Early alpha (v0.1, M1–M3).** Implemented today:
+**Early alpha (v0.1, M1–M4).** Implemented today:
+
+- ✅ **Web app** — a FastAPI backend (`aibom serve`) + a static single-page UI:
+  paste a public repo URL, get the AIBOM, findings, and score in the browser
 
 - ✅ Unified Pydantic schema with mandatory evidence
 - ✅ Static repository collector (models, datasets, prompts, agents, services)
@@ -49,7 +52,7 @@ resolves it, and adds graph + risk analysis on top.
 - ✅ CLI (`aibom scan`) with JSON inventory, CycloneDX, HTML report, and severity exit codes
 - ✅ Golden-fixture test suite
 
-Roadmap → [SPEC.md](SPEC.md): FastAPI + React dashboard, plugin collectors.
+Roadmap → [SPEC.md](SPEC.md): dependency-graph visualization, plugin collectors.
 
 ## Install
 
@@ -116,6 +119,32 @@ Try it against the bundled deliberately-vulnerable demo app:
 ```bash
 aibom scan tests/fixtures/vulnerable-ai-app
 ```
+
+## Web app
+
+Run the HTTP API + browser UI locally (paste a repo URL, get the AIBOM + score):
+
+```bash
+uv pip install -e ".[server]"     # or: pip install 'aibom[server]'
+aibom serve                        # http://127.0.0.1:8000
+```
+
+The backend shallow-clones the URL into a throwaway temp dir, runs the same
+static pipeline as the CLI, and returns JSON — it **never executes the cloned
+code**. Clone URLs are validated against a host allowlist (github.com,
+gitlab.com, bitbucket.org, codeberg.org) and passed to git as argv, not a shell
+string.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/scan` `{repo_url, resolve?}` | Inventory + CycloneDX + findings + score (JSON) |
+| `POST /api/report` `{repo_url, resolve?}` | Self-contained HTML report |
+| `GET /api/health` | Liveness + version |
+
+**Hosting on GitHub Pages:** the UI in [`web/`](web/) is a single static file.
+Publish it via Pages (or any static host) and point its *API endpoint* field at
+your running backend. Set `AIBOM_CORS_ORIGINS` on the backend to your Pages
+origin (defaults to `*` for local demos).
 
 ## What it detects (M1)
 

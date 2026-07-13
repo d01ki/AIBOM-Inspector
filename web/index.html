@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIBOM Inspector</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --fg: #1c2330; --muted: #5a6472;
+    --border: #e6e8ec; --accent: #2f5bd7; --shadow: 0 1px 3px rgba(0,0,0,.08);
+    --chip-crit: #b3123b; --chip-high: #d64500; --chip-med: #b8860b;
+    --chip-low: #3a7d3a; --chip-info: #5a6472;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --fg: #e6e9ef; --muted: #9aa4b2;
+      --border: #2a313d; --accent: #6f8fe6; --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 72px; }
+  header h1 { font-size: 26px; margin: 0 0 4px; }
+  header p { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 18px 20px; }
+  .controls { display: grid; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text], input[type=url] { width: 100%; padding: 10px 12px; font-size: 14px;
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; }
+  .grow { flex: 1 1 320px; }
+  .small { flex: 0 0 240px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--fg); }
+  .check input { width: 16px; height: 16px; }
+  #status { margin: 18px 0 0; font-size: 14px; color: var(--muted); min-height: 20px; }
+  #status.err { color: var(--chip-crit); }
+  .results { margin-top: 24px; display: none; }
+  .cards { display: flex; flex-wrap: wrap; gap: 16px; }
+  .score { flex: 0 0 170px; text-align: center; }
+  .score .num { font-size: 52px; font-weight: 700; line-height: 1; }
+  .score .grade { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .cats { flex: 1 1 300px; }
+  .cat { margin: 10px 0; }
+  .cat .r { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 4px; }
+  .chips { margin: 16px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 12px; font-weight: 600; color: #fff; padding: 3px 10px; border-radius: 999px; }
+  h2 { font-size: 18px; margin: 32px 0 12px; }
+  .tablewrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; vertical-align: top;
+    border-bottom: 1px solid var(--border); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .sev { font-weight: 700; color: #fff; padding: 2px 8px; border-radius: 6px; font-size: 11px;
+    white-space: nowrap; text-transform: capitalize; }
+  code { background: var(--border); padding: 1px 5px; border-radius: 4px; font-size: 12px;
+    word-break: break-all; }
+  .rem { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .empty { color: var(--chip-low); }
+  footer { margin-top: 44px; color: var(--muted); font-size: 12px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AIBOM Inspector</h1>
+    <p>Discover, inventory, and risk-analyze the AI supply chain of a public repository.
+       Static &amp; evidence-backed — the scanner never runs the code it scans.</p>
+  </header>
+
+  <div class="card controls">
+    <div>
+      <label for="repo">Repository URL</label>
+      <div class="row">
+        <input class="grow" type="url" id="repo" placeholder="https://github.com/owner/repo"
+               value="https://github.com/d01ki/AIBOM-Inspector" autocomplete="off">
+        <button id="scan">Scan</button>
+      </div>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="resolve"> Resolve Hugging Face metadata (slower, network)</label>
+    </div>
+    <div class="row">
+      <div class="small">
+        <label for="api">API endpoint</label>
+        <input type="text" id="api" autocomplete="off">
+      </div>
+      <div style="align-self:flex-end">
+        <button class="ghost" id="download" disabled>Download HTML report</button>
+      </div>
+    </div>
+  </div>
+
+  <p id="status"></p>
+
+  <div class="results" id="results">
+    <div class="cards">
+      <div class="card score">
+        <div class="num" id="scoreNum">–</div>
+        <div class="grade" id="scoreGrade">/ 100</div>
+      </div>
+      <div class="card cats" id="cats"></div>
+    </div>
+    <div class="chips" id="chips"></div>
+
+    <h2>Findings <span class="grade" id="findingCount"></span></h2>
+    <div class="tablewrap"><table id="findings">
+      <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Where</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+    <h2>Inventory <span class="grade" id="invSummary"></span></h2>
+    <div class="tablewrap"><table id="inventory">
+      <thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th><th>Evidence</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <footer>
+    Findings are deterministic and rule-based (no LLM). Score: each category
+    {integrity, provenance, licensing, configuration} starts at 100 and loses points per
+    finding (critical 40 / high 20 / medium 10 / low 3), floored at 0; overall is their mean.
+    Run the API with <code>aibom serve</code>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+const SEV_COLOR = { critical: "#b3123b", high: "#d64500", medium: "#b8860b", low: "#3a7d3a", info: "#5a6472" };
+const $ = (id) => document.getElementById(id);
+
+// Default the API endpoint to this page's origin (works when the backend serves
+// this file). On GitHub Pages, point it at your running backend.
+$("api").value = /^https?:$/.test(location.protocol) && location.host
+  ? location.origin : "http://localhost:8000";
+
+let lastRequest = null;
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s == null ? "" : String(s);
+  return d.innerHTML;
+}
+function evLoc(ev) {
+  if (!ev) return "";
+  return ev.line_start === ev.line_end ? `${ev.file}:${ev.line_start}`
+    : `${ev.file}:${ev.line_start}-${ev.line_end}`;
+}
+function setStatus(msg, isErr) {
+  const s = $("status"); s.textContent = msg; s.className = isErr ? "err" : "";
+}
+
+async function scan() {
+  const repo = $("repo").value.trim();
+  const api = $("api").value.trim().replace(/\/$/, "");
+  if (!repo) { setStatus("Enter a repository URL.", true); return; }
+  lastRequest = { repo_url: repo, resolve: $("resolve").checked, api };
+
+  $("scan").disabled = true; $("download").disabled = true;
+  $("results").style.display = "none";
+  setStatus("Cloning and scanning " + repo + " …", false);
+  try {
+    const resp = await fetch(api + "/api/scan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_url: repo, resolve: lastRequest.resolve }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    render(data);
+    setStatus("Scanned " + repo + ".", false);
+    $("download").disabled = false;
+  } catch (e) {
+    setStatus("Scan failed: " + e.message +
+      "  (Is the API reachable at " + api + "? Start it with `aibom serve`.)", true);
+  } finally {
+    $("scan").disabled = false;
+  }
+}
+
+function render(d) {
+  const sc = d.score;
+  $("scoreNum").textContent = sc.overall;
+  const gradeColor = { A:"#2e8b57", B:"#6a9c3a", C:"#b8860b", D:"#d64500", F:"#b3123b" }[sc.grade] || "";
+  $("scoreNum").style.color = gradeColor;
+  $("scoreGrade").textContent = "/ 100 · grade " + sc.grade;
+
+  $("cats").innerHTML = sc.categories.map(c => {
+    const col = c.score >= 75 ? "#2e8b57" : c.score >= 50 ? "#b8860b" : "#b3123b";
+    return `<div class="cat"><div class="r"><span>${esc(c.category)}</span>`
+      + `<span>${c.score} · ${c.finding_count} finding(s)</span></div>`
+      + `<div class="bar"><span style="width:${c.score}%;background:${col}"></span></div></div>`;
+  }).join("");
+
+  $("chips").innerHTML = ["critical","high","medium","low","info"].map(s => {
+    const n = sc.severity_counts[s] || 0;
+    return n ? `<span class="chip" style="background:${SEV_COLOR[s]}">${n} ${s}</span>` : "";
+  }).join("");
+
+  const fb = $("findings").querySelector("tbody");
+  $("findingCount").textContent = d.findings.length ? "(" + d.findings.length + ")" : "";
+  if (!d.findings.length) {
+    fb.innerHTML = `<tr><td colspan="4" class="empty">No risk findings. 🎉</td></tr>`;
+  } else {
+    fb.innerHTML = d.findings.map(f => {
+      const locs = (f.source_evidence || []).slice(0, 4).map(evLoc).join(", ") || "—";
+      return `<tr><td><span class="sev" style="background:${SEV_COLOR[f.severity]}">${esc(f.severity)}</span></td>`
+        + `<td><code>${esc(f.rule_id)}</code></td>`
+        + `<td><strong>${esc(f.title)}</strong><br>${esc(f.description)}`
+        + `<div class="rem">Fix: ${esc(f.remediation)}</div></td>`
+        + `<td>${esc(f.entity_name || "—")}<br><code>${esc(locs)}</code></td></tr>`;
+    }).join("");
+  }
+
+  const ib = $("inventory").querySelector("tbody");
+  const ents = (d.inventory.entities || []).slice().sort((a, b) =>
+    (a.type + a.name).localeCompare(b.type + b.name));
+  $("invSummary").textContent = "(" +
+    Object.entries(d.counts).map(([k, v]) => v + " " + k).join(" · ") + ")";
+  ib.innerHTML = ents.length ? ents.map(e => {
+    const prov = e.provider || e.source || "—";
+    const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
+    return `<tr><td>${esc(e.type)}</td><td>${esc(e.name)}</td>`
+      + `<td>${esc(prov)}</td><td><code>${esc(loc)}</code></td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="empty">No AI components discovered.</td></tr>`;
+
+  $("results").style.display = "block";
+}
+
+async function download() {
+  if (!lastRequest) return;
+  setStatus("Building HTML report …", false);
+  try {
+    const resp = await fetch(lastRequest.api + "/api/report", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_url: lastRequest.repo_url, resolve: lastRequest.resolve }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "aibom-report.html";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Report downloaded.", false);
+  } catch (e) {
+    setStatus("Report failed: " + e.message, true);
+  }
+}
+
+$("scan").addEventListener("click", scan);
+$("download").addEventListener("click", download);
+$("repo").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
+</script>
+</body>
+</html>
