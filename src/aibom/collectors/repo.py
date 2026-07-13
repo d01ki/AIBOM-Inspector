@@ -62,16 +62,24 @@ _RE_LOAD_DATASET = re.compile(r"""load_dataset\(\s*['"]([^'"]+)['"]""")
 _RE_LLM_MODEL = re.compile(
     r"""['"]((?:gpt-|o1|o3|o4|chatgpt-|claude-)[A-Za-z0-9._\-]+)['"]"""
 )
+# A SYSTEM-ish variable assigned a *string literal* — the hardcoded-prompt shape.
+# Requiring the string RHS avoids matching expressions like ``= re.compile(...)``.
 _RE_SYSTEM_PROMPT_VAR = re.compile(
-    r"""^\s*(?:[A-Z_]*SYSTEM[A-Z_]*(?:PROMPT|MESSAGE)?|system_prompt|system_message)\s*="""
+    r"""^\s*(?:[A-Z_]*SYSTEM[A-Z_]*(?:PROMPT|MESSAGE)?|system_prompt|system_message)"""
+    r"""\s*=\s*[rbfRBF]{0,2}['"]"""
 )
 _RE_ROLE_SYSTEM = re.compile(r"""["']role["']\s*:\s*["']system["']""")
 _RE_BASE_URL = re.compile(r"""base_url\s*=\s*['"](https?://[^'"]+)['"]""")
+# Require a call ``ctor(`` — matches real agent construction, not bare mentions of
+# the name in prose, imports, or regex/string literals (precision over recall).
 _RE_AGENT_CTOR = re.compile(
     r"""\b(initialize_agent|create_react_agent|create_tool_calling_agent"""
-    r"""|create_openai_functions_agent|create_openai_tools_agent|AgentExecutor)\b"""
+    r"""|create_openai_functions_agent|create_openai_tools_agent|AgentExecutor)\s*\("""
 )
 _RE_TRUST_REMOTE = re.compile(r"""trust_remote_code\s*=\s*True""")
+
+# An mcpServers entry used as a JSON/dict key — an actual MCP config, not a mention.
+_RE_MCP = re.compile(r"""['"]mcpServers['"]\s*:""")
 
 # Hardcoded-secret heuristics. A provider key with a recognizable prefix, or an
 # assignment of a secret-ish name to a literal string that is *not* an env
@@ -329,7 +337,7 @@ class RepoCollector(Collector):
                 Service(name=m.group(1), kind="api", endpoint=m.group(1),
                         source_evidence=[ev("base-url", line, 0.7)])
             )
-        if '"mcpServers"' in line or "'mcpServers'" in line:
+        if _RE_MCP.search(line):
             found.append(
                 Service(name=f"mcp-config@{rel}", kind="mcp",
                         source_evidence=[ev("mcp-config", line, 0.8)])
