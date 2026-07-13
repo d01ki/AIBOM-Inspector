@@ -147,10 +147,27 @@ The UI renders an interactive dependency graph from `/api/scan`'s `graph`
 (`{nodes, edges}`): nodes are colored by their worst finding severity; click one
 to see the component and its evidence trail.
 
-**Hosting on GitHub Pages:** the UI in [`web/`](web/) is a single static file.
-Publish it via Pages (or any static host) and point its *API endpoint* field at
-your running backend. Set `AIBOM_CORS_ORIGINS` on the backend to your Pages
-origin (defaults to `*` for local demos).
+## Deploy
+
+The UI is static; the backend is a small container. Host them separately:
+
+**Frontend → GitHub Pages.** [`web/`](web/) is a single static file.
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes it on every
+push to `main` — enable it once under *Settings → Pages → Source = GitHub Actions*.
+
+**Backend → any container host** (Render, Fly.io, Cloud Run, a VM):
+
+```bash
+docker build -t aibom .
+docker run -p 8000:8000 -e AIBOM_CORS_ORIGINS="https://<user>.github.io" aibom
+```
+
+Then open the Pages site and set its *API endpoint* field to your backend URL.
+
+- `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
+  defaults to `*` for local demos).
+- `AIBOM_WEB_DIR` — where the backend finds the UI to also serve at `/` (set in
+  the image). Handy for an all-in-one single-origin deploy with no CORS at all.
 
 ## What it detects (M1)
 

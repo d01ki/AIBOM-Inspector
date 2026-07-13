@@ -120,9 +120,15 @@ def _mount_frontend(app: FastAPI) -> None:
 
 
 def _find_web_dir() -> Path | None:
-    # repo layout: <root>/web and <root>/src/aibom/server/app.py
-    candidate = Path(__file__).resolve().parents[3] / "web"
-    return candidate if (candidate / "index.html").exists() else None
+    # Explicit override (used by the Docker image / non-editable installs).
+    env = os.environ.get("AIBOM_WEB_DIR")
+    candidates = [Path(env)] if env else []
+    # Source/editable layout: <root>/web alongside <root>/src/aibom/server/app.py.
+    candidates.append(Path(__file__).resolve().parents[3] / "web")
+    for candidate in candidates:
+        if (candidate / "index.html").exists():
+            return candidate
+    return None
 
 
 # Convenience target for ``uvicorn aibom.server.app:app``.
