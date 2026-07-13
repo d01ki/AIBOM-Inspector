@@ -68,6 +68,27 @@
   .empty { color: var(--chip-low); }
   footer { margin-top: 44px; color: var(--muted); font-size: 12px; }
   a { color: var(--accent); }
+
+  /* dependency graph */
+  .graphgrid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 760px) { .graphgrid { grid-template-columns: 1fr 260px; } }
+  #graph { width: 100%; }
+  #graph svg { width: 100%; height: auto; display: block; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; touch-action: none; }
+  #graph .node { cursor: pointer; }
+  #graph .node text { font-size: 9px; fill: var(--fg); pointer-events: none; }
+  #graph .edge { stroke: var(--muted); stroke-opacity: .4; stroke-width: 1.2; }
+  #graph circle { stroke: var(--card); stroke-width: 1.5; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 2px 0; font-size: 12px;
+    color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #graphDetail { align-self: start; font-size: 13px; }
+  #graphDetail .dt-type { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); }
+  #graphDetail h3 { margin: 2px 0 8px; font-size: 15px; word-break: break-all; }
+  #graphDetail .dt-find { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+  #graphDetail .muted { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -112,6 +133,24 @@
       <div class="card cats" id="cats"></div>
     </div>
     <div class="chips" id="chips"></div>
+
+    <h2>Dependency graph</h2>
+    <div class="graphgrid">
+      <div>
+        <div id="graph"></div>
+        <div class="legend">
+          <span><i style="background:#b3123b"></i>critical</span>
+          <span><i style="background:#d64500"></i>high</span>
+          <span><i style="background:#b8860b"></i>medium</span>
+          <span><i style="background:#3a7d3a"></i>low</span>
+          <span><i style="background:#6b7280"></i>no finding</span>
+          <span class="muted">· click a node for evidence</span>
+        </div>
+      </div>
+      <div class="card" id="graphDetail">
+        <span class="muted">Click a node to see the component and its evidence-backed findings.</span>
+      </div>
+    </div>
 
     <h2>Findings <span class="grade" id="findingCount"></span></h2>
     <div class="tablewrap"><table id="findings">
@@ -221,6 +260,8 @@ function render(d) {
     }).join("");
   }
 
+  renderGraph(d.graph || { nodes: [], edges: [] }, d.findings || []);
+
   const ib = $("inventory").querySelector("tbody");
   const ents = (d.inventory.entities || []).slice().sort((a, b) =>
     (a.type + a.name).localeCompare(b.type + b.name));
@@ -255,6 +296,179 @@ async function download() {
   } catch (e) {
     setStatus("Report failed: " + e.message, true);
   }
+}
+
+// ── dependency graph (dependency-free SVG force layout) ──────────────────────
+const SVGNS = "http://www.w3.org/2000/svg";
+const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
+  agent:"#2e7d5b", service:"#556", license:"#667" };
+let graphFindings = [];
+
+function nodeColor(n) {
+  return n.severity ? SEV_COLOR[n.severity] : (TYPE_COLOR[n.type] || "#6b7280");
+}
+function svgEl(name, attrs) {
+  const el = document.createElementNS(SVGNS, name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderGraph(graph, findings) {
+  graphFindings = findings;
+  const host = $("graph");
+  host.innerHTML = "";
+  detailReset();
+  if (!graph.nodes.length) { host.innerHTML = "<p class='muted'>No components to graph.</p>"; return; }
+
+  const W = 800, H = 520, PAD = 46;
+  const nodes = graph.nodes.map((n, i) => {
+    const a = (i / graph.nodes.length) * Math.PI * 2;
+    return { ...n, x: W/2 + Math.cos(a)*150, y: H/2 + Math.sin(a)*150, vx:0, vy:0 };
+  });
+  const byId = {}; nodes.forEach(n => byId[n.id] = n);
+  const links = graph.edges.map(e => ({ s: byId[e.source], t: byId[e.target], type: e.type }))
+    .filter(l => l.s && l.t);
+  const adj = {}; nodes.forEach(n => adj[n.id] = new Set());
+  links.forEach(l => { adj[l.s.id].add(l.t.id); adj[l.t.id].add(l.s.id); });
+
+  simulate(nodes, links, W, H);
+  fit(nodes, W, H, PAD);
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "AI dependency graph" });
+  const gEdges = svgEl("g", {}), gNodes = svgEl("g", {});
+  svg.appendChild(gEdges); svg.appendChild(gNodes);
+
+  const lineEls = links.map(l => {
+    const ln = svgEl("line", { class: "edge", x1: l.s.x, y1: l.s.y, x2: l.t.x, y2: l.t.y });
+    gEdges.appendChild(ln); l.el = ln; return ln;
+  });
+
+  nodes.forEach(n => {
+    const g = svgEl("g", { class: "node" });
+    const r = n.type === "agent" ? 11 : 8.5;
+    const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
+    const label = n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label;
+    const t = svgEl("text", { x: n.x, y: n.y + r + 9, "text-anchor": "middle" });
+    t.textContent = label;
+    g.appendChild(c); g.appendChild(t);
+    gNodes.appendChild(g);
+    n.circle = c; n.text = t; n.radius = r;
+    g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj); });
+    enableDrag(g, n, svg, W, H, links);
+  });
+
+  svg.addEventListener("click", () => clearSelection(nodes, lineEls));
+  host.appendChild(svg);
+  host._nodes = nodes; host._lines = lineEls;
+}
+
+function simulate(nodes, links, W, H) {
+  const REP = 2400, SPRING = 0.045, LEN = 92, GRAV = 0.008, DAMP = 0.86;
+  for (let it = 0; it < 340; it++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx*dx + dy*dy || 0.01;
+        const f = REP / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      }
+    }
+    for (const l of links) {
+      let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+      const f = SPRING * (d - LEN);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      l.s.vx += fx; l.s.vy += fy; l.t.vx -= fx; l.t.vy -= fy;
+    }
+    for (const n of nodes) {
+      n.vx += (W/2 - n.x) * GRAV; n.vy += (H/2 - n.y) * GRAV;
+      n.vx *= DAMP; n.vy *= DAMP;
+      n.x += Math.max(-14, Math.min(14, n.vx));
+      n.y += Math.max(-14, Math.min(14, n.vy));
+    }
+  }
+}
+
+function fit(nodes, W, H, pad) {
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const sx = (W - 2*pad) / Math.max(1, maxX - minX);
+  const sy = (H - 2*pad) / Math.max(1, maxY - minY);
+  const s = Math.min(sx, sy, 2.2);
+  nodes.forEach(n => {
+    n.x = pad + (n.x - minX) * s + (W - 2*pad - (maxX - minX)*s)/2;
+    n.y = pad + (n.y - minY) * s + (H - 2*pad - (maxY - minY)*s)/2;
+  });
+}
+
+function selectNode(node, nodes, links, adj) {
+  const keep = adj[node.id];
+  nodes.forEach(n => {
+    const on = n.id === node.id || keep.has(n.id);
+    n.circle.setAttribute("opacity", on ? 1 : 0.16);
+    n.text.setAttribute("opacity", on ? 1 : 0.16);
+  });
+  links.forEach(l => {
+    const on = l.s.id === node.id || l.t.id === node.id;
+    l.el.setAttribute("stroke-opacity", on ? 0.85 : 0.06);
+  });
+  detailShow(node);
+}
+
+function clearSelection(nodes, lineEls) {
+  nodes.forEach(n => { n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1); });
+  lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.4));
+  detailReset();
+}
+
+function enableDrag(g, n, svg, W, H, links) {
+  let dragging = false;
+  const toSvg = (ev) => {
+    const r = svg.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H };
+  };
+  g.addEventListener("pointerdown", (ev) => {
+    dragging = true; g.setPointerCapture(ev.pointerId); ev.stopPropagation();
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const p = toSvg(ev); n.x = p.x; n.y = p.y;
+    n.circle.setAttribute("cx", n.x); n.circle.setAttribute("cy", n.y);
+    n.text.setAttribute("x", n.x); n.text.setAttribute("y", n.y + n.radius + 9);
+    links.forEach(l => {
+      if (l.s === n) { l.el.setAttribute("x1", n.x); l.el.setAttribute("y1", n.y); }
+      if (l.t === n) { l.el.setAttribute("x2", n.x); l.el.setAttribute("y2", n.y); }
+    });
+  });
+  g.addEventListener("pointerup", (ev) => { dragging = false; g.releasePointerCapture(ev.pointerId); });
+}
+
+function detailReset() {
+  $("graphDetail").innerHTML =
+    "<span class='muted'>Click a node to see the component and its evidence-backed findings.</span>";
+}
+
+function detailShow(node) {
+  const mine = graphFindings.filter(f => f.entity_id === node.id);
+  let html = `<span class="dt-type">${esc(node.type)}</span><h3>${esc(node.label)}</h3>`;
+  if (node.provider) html += `<div class="muted">provider: ${esc(node.provider)}</div>`;
+  if (node.location) html += `<div class="muted">at <code>${esc(node.location)}</code></div>`;
+  if (!mine.length) {
+    html += `<div class="dt-find muted">No findings on this component.</div>`;
+  } else {
+    for (const f of mine) {
+      const loc = (f.source_evidence || []).slice(0, 3).map(evLoc).join(", ");
+      html += `<div class="dt-find"><span class="sev" style="background:${SEV_COLOR[f.severity]}">`
+        + `${esc(f.severity)}</span> <code>${esc(f.rule_id)}</code><br>`
+        + `<strong>${esc(f.title)}</strong><div class="muted">${esc(loc)}</div></div>`;
+    }
+  }
+  $("graphDetail").innerHTML = html;
 }
 
 $("scan").addEventListener("click", scan);

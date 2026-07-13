@@ -51,6 +51,11 @@ def test_scan_returns_full_payload(client: TestClient) -> None:
     rule_ids = {f["rule_id"] for f in data["findings"]}
     assert {"TDR-001", "TDR-003", "TDR-009"} <= rule_ids
 
+    graph = data["graph"]
+    assert len(graph["nodes"]) == len(data["inventory"]["entities"])
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert all(e["source"] in node_ids and e["target"] in node_ids for e in graph["edges"])
+
 
 def test_report_returns_html(client: TestClient) -> None:
     resp = client.post("/api/report", json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector"})

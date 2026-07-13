@@ -129,5 +129,5 @@ Python 3.12+, FastAPI, React+TypeScript, Pydantic v2 everywhere, strict typing (
 | M1 | Schema + repo collector + evidence engine | ✅ done |
 | M2 | HF resolver + AIBOM (CycloneDX) export | ✅ done |
 | M3 | Risk rules TDR-001..010 + scoring + HTML report | ✅ done |
-| M4 | FastAPI backend + web UI (repo URL → AIBOM + score) | ✅ done · graph viz pending |
+| M4 | FastAPI backend + web UI + interactive dependency graph | ✅ done |
 | M5 | Demo fixture repo, docs, packaging (PyPI), Arsenal submission | planned |

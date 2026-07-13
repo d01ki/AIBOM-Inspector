@@ -37,6 +37,8 @@ resolves it, and adds graph + risk analysis on top.
 
 - ✅ **Web app** — a FastAPI backend (`aibom serve`) + a static single-page UI:
   paste a public repo URL, get the AIBOM, findings, and score in the browser
+- ✅ **Interactive dependency graph** — app → agents → models / prompts / services,
+  nodes colored by risk; click a node for its evidence-backed findings (no JS deps)
 
 - ✅ Unified Pydantic schema with mandatory evidence
 - ✅ Static repository collector (models, datasets, prompts, agents, services)
@@ -137,9 +139,13 @@ string.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/scan` `{repo_url, resolve?}` | Inventory + CycloneDX + findings + score (JSON) |
+| `POST /api/scan` `{repo_url, resolve?}` | Inventory + CycloneDX + findings + score + dependency graph (JSON) |
 | `POST /api/report` `{repo_url, resolve?}` | Self-contained HTML report |
 | `GET /api/health` | Liveness + version |
+
+The UI renders an interactive dependency graph from `/api/scan`'s `graph`
+(`{nodes, edges}`): nodes are colored by their worst finding severity; click one
+to see the component and its evidence trail.
 
 **Hosting on GitHub Pages:** the UI in [`web/`](web/) is a single static file.
 Publish it via Pages (or any static host) and point its *API endpoint* field at

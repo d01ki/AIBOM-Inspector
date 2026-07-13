@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from aibom import __version__
 from aibom.export.cyclonedx import to_cyclonedx
+from aibom.graph import build_graph
 from aibom.report.html import render_html
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
 from aibom.service import ScanResult, run_scan
@@ -102,6 +103,7 @@ def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
         "counts": inv.counts(),
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": [f.model_dump() for f in result.findings],
+        "graph": build_graph(inv, result.findings),
         "inventory": inv.model_dump(),
         "cyclonedx": to_cyclonedx(inv),
     }
