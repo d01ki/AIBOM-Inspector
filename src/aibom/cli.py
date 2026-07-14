@@ -142,10 +142,12 @@ def scan(
 
     if not quiet:
         _render(inventory)
-        if inventory.entities:
+        if inventory.has_ai_components():
             _render_risk(findings, score)
         else:
-            console.print("[dim]Nothing to score: no AI components were detected.[/dim]")
+            n_deps = len(inventory.by_type(EntityType.PACKAGE))
+            extra = f" ({n_deps} non-AI dependencies catalogued)" if n_deps else ""
+            console.print(f"[dim]Nothing to score: no AI components were detected{extra}.[/dim]")
         st = inventory.stats
         manifests = f" · manifests: {', '.join(st.manifests_parsed)}" if st.manifests_parsed else ""
         console.print(
@@ -223,13 +225,18 @@ def _render(inventory: Inventory) -> None:
     detail.add_column("Name")
     detail.add_column("Provider/Source", style="dim")
     detail.add_column("Evidence", style="dim")
-    for entity in sorted(inventory.entities, key=lambda e: (e.type.value, e.name)):
+    for entity in sorted(
+        inventory.entities,
+        key=lambda e: (e.type.value, not getattr(e, "ai", False), e.name),
+    ):
         provider = (
             getattr(entity, "provider", None)
             or getattr(entity, "source", None)
             or getattr(entity, "ecosystem", None)
             or ""
         )
+        if getattr(entity, "ai", False):
+            provider = f"{provider} [bold cyan]· AI[/bold cyan]" if provider else "AI"
         ev = entity.source_evidence[0].location() if entity.source_evidence else ""
         detail.add_row(
             f"[{_TYPE_STYLE[entity.type]}]{entity.type.value}[/]", entity.name, provider, ev

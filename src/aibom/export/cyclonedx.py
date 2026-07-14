@@ -204,6 +204,7 @@ def _package_component(pkg: Package) -> dict[str, Any]:
     props: list[dict[str, str]] = comp.setdefault("properties", [])
     _append_prop(props, "aibom:ecosystem", pkg.ecosystem)
     props.append(_prop("aibom:version_pinned", _b(pkg.version_pinned)))
+    props.append(_prop("aibom:ai", _b(pkg.ai)))
     _dedupe_or_drop_props(comp)
     return comp
 

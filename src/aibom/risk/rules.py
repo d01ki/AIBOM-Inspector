@@ -387,6 +387,8 @@ def tdr_012_unpinned_package(inv: Inventory) -> list[Finding]:
     for pkg in inv.by_type(EntityType.PACKAGE):
         if not isinstance(pkg, Package) or pkg.version_pinned:
             continue
+        if not pkg.ai:
+            continue  # the full BOM lists every dep; the AI rules stay AI-scoped
         spec = f" ({pkg.version})" if pkg.version else ""
         out.append(
             Finding(

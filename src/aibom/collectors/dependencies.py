@@ -1,11 +1,11 @@
-"""DependencyCollector — find AI libraries declared in dependency manifests.
+"""DependencyCollector — inventory every dependency declared in manifests.
 
 Reads ``requirements*.txt``, ``pyproject.toml``, ``Pipfile`` (PyPI) and
 ``package.json`` (npm), and emits a :class:`~aibom.models.entities.Package` for
-each dependency that belongs to the AI/ML ecosystem. This is what lets the tool
-produce a useful AIBOM for *arbitrary* repositories, not just ones that call
-``from_pretrained`` inline. It parses text only — it never installs or runs
-anything.
+**every** dependency — a complete BOM — flagging the ones that belong to the
+AI/ML ecosystem (``Package.ai``). The AI layer (models, prompts, agents,
+services + AI-aware risk rules) is what this tool adds on top of a conventional
+SBOM. It parses text only — it never installs or runs anything.
 """
 
 from __future__ import annotations
@@ -147,6 +147,7 @@ class DependencyCollector(Collector):
         self, inventory: Inventory, rel: str, lineno: int, snippet: str,
         name: str, ecosystem: str, version: str | None, pinned: bool,
     ) -> None:
+        ai = _is_ai_pypi(name) if ecosystem == "PyPI" else _is_ai_npm(name)
         ev = Evidence(
             file=rel, line_start=lineno, line_end=lineno, snippet=snippet.strip()[:200],
             matched_pattern=f"{ecosystem.lower()}-dependency", confidence=0.9,
@@ -154,7 +155,7 @@ class DependencyCollector(Collector):
         inventory.add_entity(
             Package(
                 name=name, ecosystem=ecosystem, version=version,
-                version_pinned=pinned, source_evidence=[ev],
+                version_pinned=pinned, ai=ai, source_evidence=[ev],
             )
         )
 
@@ -167,7 +168,7 @@ class DependencyCollector(Collector):
             if not stripped or stripped.startswith(("#", "-")):
                 continue
             m = _RE_REQ.match(stripped)
-            if not m or not _is_ai_pypi(m.group(1)):
+            if not m:
                 continue
             op, ver = m.group(2), m.group(3)
             pinned = op in {"==", "==="}
@@ -211,8 +212,6 @@ class DependencyCollector(Collector):
         sections = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
         for section in sections:
             for name, spec in (data.get(section, {}) or {}).items():
-                if not _is_ai_npm(name):
-                    continue
                 version, pinned = _npm_version(str(spec))
                 self._emit(inventory, rel, _find_line(lines, f'"{name}"'), f'"{name}": "{spec}"',
                            name, "npm", version, pinned)
@@ -221,7 +220,7 @@ class DependencyCollector(Collector):
 
     def _emit_pep508(self, inventory: Inventory, rel: str, lines: list[str], spec: str) -> None:
         nm = _RE_PEP508_NAME.match(spec)
-        if not nm or not _is_ai_pypi(nm.group(1)):
+        if not nm:
             return
         version, pinned = _pep508_version(spec)
         self._emit(inventory, rel, _find_line(lines, nm.group(1)), spec,
@@ -231,8 +230,6 @@ class DependencyCollector(Collector):
         self, inventory: Inventory, rel: str, lines: list[str], name: str,
         ver: tuple[str | None, bool],
     ) -> None:
-        if not _is_ai_pypi(name):
-            return
         version, pinned = ver
         self._emit(inventory, rel, _find_line(lines, name), name, name, "PyPI", version, pinned)
 

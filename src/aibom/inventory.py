@@ -89,6 +89,18 @@ class Inventory(BaseModel):
         """Return all entities of a given type."""
         return [e for e in self.entities if e.type == entity_type]
 
+    def has_ai_components(self) -> bool:
+        """True if anything AI-related was found.
+
+        Non-AI packages are part of the complete BOM but do not count as AI
+        usage — a repo whose only hits are ordinary dependencies should read
+        as "no AI components detected", not be scored.
+        """
+        return any(
+            e.type != EntityType.PACKAGE or bool(getattr(e, "ai", False))
+            for e in self.entities
+        )
+
     def counts(self) -> dict[str, int]:
         """Return a {type: count} summary."""
         result: dict[str, int] = {}

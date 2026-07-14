@@ -56,3 +56,29 @@ def test_empty_inventory_graph() -> None:
     inv = Inventory(metadata=ScanMetadata(tool_version=__version__, target="/x"))
     g = build_graph(inv, [])
     assert g == {"nodes": [], "edges": []}
+
+
+def test_plain_packages_hidden_unless_flagged() -> None:
+    from aibom import __version__
+    from aibom.inventory import ScanMetadata
+    from aibom.models.entities import Package
+    from aibom.models.evidence import Evidence
+    from aibom.models.findings import Finding, RiskCategory, Severity
+
+    ev = Evidence(file="requirements.txt", line_start=1, line_end=1,
+                  snippet="x", matched_pattern="pypi-dependency", confidence=0.9)
+    inv = Inventory(metadata=ScanMetadata(tool_version=__version__, target="/x"))
+    ai_pkg = inv.add_entity(Package(name="transformers", ecosystem="PyPI", ai=True,
+                                    source_evidence=[ev]))
+    plain = inv.add_entity(Package(name="flask", ecosystem="PyPI", source_evidence=[ev]))
+    vuln_plain = inv.add_entity(Package(name="requests", ecosystem="PyPI",
+                                        source_evidence=[ev]))
+
+    finding = Finding(rule_id="OSV-X", title="t", severity=Severity.HIGH,
+                      category=RiskCategory.INTEGRITY, description="d", remediation="r",
+                      entity_id=vuln_plain.id, entity_name=vuln_plain.name,
+                      source_evidence=[ev])
+    ids = {n["id"] for n in build_graph(inv, [finding])["nodes"]}
+    assert ai_pkg.id in ids          # AI package always shown
+    assert vuln_plain.id in ids      # plain dep with a finding shown
+    assert plain.id not in ids       # healthy plain dep left to the inventory table

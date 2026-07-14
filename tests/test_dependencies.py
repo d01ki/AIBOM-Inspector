@@ -25,21 +25,23 @@ def test_requirements_txt(tmp_path: Any) -> None:
     (tmp_path / "requirements.txt").write_text(
         "transformers==4.40.0\n"
         "torch>=2.0\n"
-        "requests==2.31.0\n"      # not AI -> ignored
+        "requests==2.31.0\n"      # not AI -> catalogued with ai=False
         "openai\n"
         "# a comment\n"
         "-r other.txt\n",
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
-    assert set(pkgs) == {"transformers", "torch", "openai"}
+    assert set(pkgs) == {"transformers", "torch", "openai", "requests"}
+    assert pkgs["transformers"].ai is True
+    assert pkgs["requests"].ai is False
     assert pkgs["transformers"].version == "4.40.0"
     assert pkgs["transformers"].version_pinned is True
     assert pkgs["transformers"].purl == "pkg:pypi/transformers@4.40.0"
     assert pkgs["torch"].version == "2.0"
     assert pkgs["torch"].version_pinned is False
     assert pkgs["openai"].version is None
-    assert "requests" not in pkgs
+    assert pkgs["requests"].version_pinned is True  # full BOM keeps exact pins too
 
 
 def test_pyproject_toml(tmp_path: Any) -> None:
@@ -51,11 +53,11 @@ def test_pyproject_toml(tmp_path: Any) -> None:
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
-    assert set(pkgs) == {"anthropic", "langchain-core", "sentence-transformers"}
+    assert set(pkgs) == {"anthropic", "langchain-core", "sentence-transformers", "flask"}
+    assert pkgs["flask"].ai is False
     assert pkgs["langchain-core"].version == "0.2.1"
     assert pkgs["langchain-core"].version_pinned is True
     assert pkgs["anthropic"].version_pinned is False
-    assert "flask" not in pkgs
 
 
 def test_package_json(tmp_path: Any) -> None:
@@ -70,7 +72,9 @@ def test_package_json(tmp_path: Any) -> None:
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
-    assert set(pkgs) == {"openai", "@anthropic-ai/sdk"}
+    assert set(pkgs) == {"openai", "@anthropic-ai/sdk", "express"}
+    assert pkgs["@anthropic-ai/sdk"].ai is True
+    assert pkgs["express"].ai is False
     assert pkgs["openai"].ecosystem == "npm"
     assert pkgs["openai"].version == "4.0.0"
     assert pkgs["openai"].version_pinned is False
@@ -88,7 +92,7 @@ def test_poetry_dependencies(tmp_path: Any) -> None:
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
-    assert set(pkgs) == {"torch", "openai"}
+    assert set(pkgs) == {"torch", "openai", "flask"}
     assert pkgs["openai"].version == "1.14.0"
     assert pkgs["openai"].version_pinned is True
     assert pkgs["torch"].version_pinned is False
@@ -104,14 +108,29 @@ def test_pipfile(tmp_path: Any) -> None:
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
-    assert set(pkgs) == {"transformers", "anthropic"}
+    assert set(pkgs) == {"transformers", "anthropic", "requests"}
     assert pkgs["transformers"].version == "4.40.0"
     assert pkgs["transformers"].version_pinned is True
 
 
-def test_no_ai_deps_yields_nothing(tmp_path: Any) -> None:
+def test_plain_deps_catalogued_but_not_ai(tmp_path: Any) -> None:
     (tmp_path / "requirements.txt").write_text("requests\nflask\nnumpy\n", encoding="utf-8")
-    assert not _scan(tmp_path).by_type(EntityType.PACKAGE)
+    inv = _scan(tmp_path)
+    pkgs = inv.by_type(EntityType.PACKAGE)
+    assert len(pkgs) == 3                      # complete BOM: everything catalogued
+    assert all(p.ai is False for p in pkgs)    # type: ignore[attr-defined]
+    assert inv.has_ai_components() is False    # ...but none of it counts as AI usage
+
+
+def test_same_name_across_ecosystems_stays_distinct(tmp_path: Any) -> None:
+    (tmp_path / "requirements.txt").write_text("openai==1.14.0\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"openai": "4.0.0"}}\n', encoding="utf-8"
+    )
+    pkgs = _scan(tmp_path).by_type(EntityType.PACKAGE)
+    ecosystems = {(p.name, p.ecosystem) for p in pkgs}  # type: ignore[attr-defined]
+    assert ("openai", "PyPI") in ecosystems
+    assert ("openai", "npm") in ecosystems
 
 
 def test_every_package_has_evidence(tmp_path: Any) -> None:

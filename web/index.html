@@ -274,16 +274,20 @@ async function scan() {
 
 function render(d) {
   const sc = d.score;
-  const totalEntities = Object.values(d.counts || {}).reduce((a, b) => a + b, 0);
+  const allEnts = (d.inventory && d.inventory.entities) || [];
+  // Non-AI packages complete the BOM but don't count as AI usage.
+  const totalEntities = allEnts.filter(e => e.type !== "package" || e.ai).length;
+  const plainDeps = allEnts.length - totalEntities;
   if (!totalEntities) {
-    // An empty inventory means "nothing found", not "perfectly safe" —
+    // "Nothing AI found" means exactly that, not "perfectly safe" —
     // don't present a triumphant 100/A over zero evidence.
     $("scoreNum").textContent = "—";
     $("scoreNum").style.color = "";
     $("scoreGrade").textContent = "no AI components detected";
     $("cats").innerHTML = "<span class='muted'>Nothing to score: the scanner found no "
       + "models, datasets, prompts, agents, AI services, or AI packages in this "
-      + "repository.</span>";
+      + "repository." + (plainDeps ? ` (${plainDeps} ordinary dependencies were still `
+      + "catalogued below and in the CycloneDX BOM.)" : "") + "</span>";
   } else {
   $("scoreNum").textContent = sc.overall;
   const gradeColor = { A:"#2e8b57", B:"#6a9c3a", C:"#b8860b", D:"#d64500", F:"#b3123b" }[sc.grade] || "";
@@ -324,16 +328,22 @@ function render(d) {
   renderGraph(d.graph || { nodes: [], edges: [] }, d.findings || []);
 
   const ib = $("inventory").querySelector("tbody");
-  const ents = (d.inventory.entities || []).slice().sort((a, b) =>
-    (a.type + a.name).localeCompare(b.type + b.name));
+  const ents = allEnts.slice().sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    const aiDiff = (b.ai ? 1 : 0) - (a.ai ? 1 : 0);  // AI packages first
+    return aiDiff !== 0 ? aiDiff : a.name.localeCompare(b.name);
+  });
   $("invSummary").textContent = "(" +
     Object.entries(d.counts).map(([k, v]) => v + " " + k).join(" · ") + ")";
   ib.innerHTML = ents.length ? ents.map(e => {
     const prov = e.provider || e.source || e.ecosystem || "—";
     const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
-    return `<tr><td>${esc(e.type)}</td><td>${esc(e.name)}</td>`
+    const typeCell = e.type === "package" && e.ai
+      ? "package <strong style='color:var(--accent)'>· AI</strong>"
+      : esc(e.type);
+    return `<tr><td>${typeCell}</td><td>${esc(e.name)}</td>`
       + `<td>${esc(prov)}</td><td><code>${esc(loc)}</code></td></tr>`;
-  }).join("") : `<tr><td colspan="4" class="empty">No AI components discovered.</td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="empty">No components discovered.</td></tr>`;
 
   $("results").style.display = "block";
 }

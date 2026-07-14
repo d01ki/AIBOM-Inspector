@@ -30,6 +30,14 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
     nodes: list[dict[str, Any]] = []
     for e in inventory.entities:
         sev = worst.get(e.id)
+        # Keep the graph readable: plain (non-AI) dependencies only appear when
+        # something is wrong with them; the full list lives in the inventory.
+        if (
+            e.type.value == "package"
+            and not bool(getattr(e, "ai", False))
+            and sev is None
+        ):
+            continue
         location = e.source_evidence[0].location() if e.source_evidence else None
         nodes.append(
             {

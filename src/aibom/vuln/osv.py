@@ -65,19 +65,27 @@ class OSVClient:
 
 
 class OSVMapper:
-    """Map pinned AI packages in an inventory to OSV vulnerability findings."""
+    """Map pinned packages in an inventory to OSV vulnerability findings.
 
-    def __init__(self, client: VulnClient | None = None) -> None:
+    Every pinned dependency is checked (the BOM is complete), AI packages
+    first; ``max_queries`` bounds the total network calls on huge lockfiles.
+    """
+
+    def __init__(self, client: VulnClient | None = None, *, max_queries: int = 100) -> None:
         self.client = client or OSVClient()
+        self.max_queries = max_queries
 
     def map(self, inventory: Inventory) -> list[Finding]:
+        candidates = [
+            pkg
+            for pkg in inventory.by_type(EntityType.PACKAGE)
+            if isinstance(pkg, Package)
+            and pkg.version_pinned and pkg.version and pkg.ecosystem
+        ]
+        candidates.sort(key=lambda p: (not p.ai, p.name.lower()))
         findings: list[Finding] = []
-        for pkg in inventory.by_type(EntityType.PACKAGE):
-            if not isinstance(pkg, Package):
-                continue
-            if not pkg.version_pinned or not pkg.version or not pkg.ecosystem:
-                continue
-            for vuln in self.client.query(pkg.name, pkg.ecosystem, pkg.version):
+        for pkg in candidates[: self.max_queries]:
+            for vuln in self.client.query(pkg.name, pkg.ecosystem or "", pkg.version or ""):
                 findings.append(_to_finding(pkg, vuln))
         return findings
 

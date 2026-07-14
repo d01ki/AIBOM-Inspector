@@ -44,9 +44,9 @@ def test_tdr011_ignores_client_configs_and_apis() -> None:
     assert not tdr_011_mcp_server_surface(_inv(cfg, api))
 
 
-def test_tdr012_fires_on_unpinned_package() -> None:
+def test_tdr012_fires_on_unpinned_ai_package() -> None:
     pkg = Package(name="transformers", ecosystem="PyPI", version=">=4.40",
-                  version_pinned=False, source_evidence=[_ev()])
+                  version_pinned=False, ai=True, source_evidence=[_ev()])
     findings = tdr_012_unpinned_package(_inv(pkg))
     assert len(findings) == 1
     assert findings[0].severity is Severity.LOW
@@ -55,7 +55,14 @@ def test_tdr012_fires_on_unpinned_package() -> None:
 
 def test_tdr012_skips_pinned_package() -> None:
     pkg = Package(name="transformers", ecosystem="PyPI", version="4.40.0",
-                  version_pinned=True, source_evidence=[_ev()])
+                  version_pinned=True, ai=True, source_evidence=[_ev()])
+    assert not tdr_012_unpinned_package(_inv(pkg))
+
+
+def test_tdr012_skips_plain_dependencies() -> None:
+    # The complete BOM catalogues flask, but AI hygiene rules stay AI-scoped.
+    pkg = Package(name="flask", ecosystem="PyPI", version=">=3.0",
+                  version_pinned=False, ai=False, source_evidence=[_ev()])
     assert not tdr_012_unpinned_package(_inv(pkg))
 
 

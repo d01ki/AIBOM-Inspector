@@ -131,12 +131,23 @@ class Service(Entity):
 
 
 class Package(Entity):
-    """A software dependency (an AI library) declared in a manifest."""
+    """A software dependency declared in a manifest.
+
+    *All* dependencies are inventoried (a complete BOM); ``ai`` marks the ones
+    that belong to the AI/ML ecosystem — the layer this tool adds on top of a
+    conventional SBOM.
+    """
 
     type: EntityType = EntityType.PACKAGE
     ecosystem: str | None = Field(default=None, description="'PyPI' | 'npm' | 'conda'.")
     version: str | None = Field(default=None, description="Declared version, if any.")
     version_pinned: bool = Field(default=False, description="True for an exact (==) pin.")
+    ai: bool = Field(default=False, description="True if this is an AI/ML-ecosystem package.")
+
+    def natural_key(self) -> tuple[str, str]:
+        """Packages dedupe per ecosystem — 'openai' on PyPI and npm are distinct."""
+        eco = (self.ecosystem or "").lower()
+        return (self.type.value, f"{eco}:{self.name.strip().lower()}")
 
     @computed_field  # type: ignore[prop-decorator]
     @property

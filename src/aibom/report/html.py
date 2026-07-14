@@ -74,7 +74,7 @@ def render_html(
         f"{_stats_suffix(inventory)}</p>",
         # "Nothing found" must not read as a triumphant 100/A.
         _score_cards(score)
-        if inventory.entities
+        if inventory.has_ai_components()
         else "<div class='empty'>No AI components detected — nothing to score.</div>",
         _severity_chips(score),
         _findings_section(findings),
