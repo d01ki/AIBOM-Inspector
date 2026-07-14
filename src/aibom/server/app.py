@@ -34,7 +34,12 @@ class ScanRequest(BaseModel):
     """
 
     repo_url: str = Field(description="Public repo URL, e.g. https://github.com/owner/repo")
-    resolve: bool = Field(default=True, description="Enrich via HF hub + map OSV vulns.")
+    resolve: bool = Field(
+        default=True, description="Enrich HF models/datasets (license, model card, formats)."
+    )
+    vulns: bool = Field(
+        default=True, description="Map pinned dependencies to known vulnerabilities (OSV)."
+    )
     min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -96,6 +101,7 @@ def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
             result = run_scan(
                 path,
                 resolve=req.resolve,
+                vulns=req.vulns,
                 min_confidence=req.min_confidence,
                 display_target=display,
             )

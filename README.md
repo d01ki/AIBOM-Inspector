@@ -198,11 +198,12 @@ docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
 ```
 
 **Static-only hosts (GitHub Pages / HF *Static* Spaces).** These can host the
-[`web/`](web/) UI for free, but **not** the scanner — point the UI's *API endpoint*
-field at a compute backend (e.g. your Render URL) and set `AIBOM_CORS_ORIGINS` on
-the backend to the UI's origin. [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
-publishes `web/` to Pages on push to `main` (enable *Settings → Pages → Source =
-GitHub Actions*).
+[`web/`](web/) UI for free, but **not** the scanner — open the page with
+`?api=https://your-backend` so it talks to a compute backend (e.g. your Render
+URL), and set `AIBOM_CORS_ORIGINS` on the backend to the UI's origin. Served by
+the backend itself, the UI needs no configuration at all.
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes `web/` to
+Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*).
 
 > **Note:** Hugging Face **Docker** Spaces now require a paid (PRO) plan; only
 > **Static** Spaces are free. The Space frontmatter at the top of this README is

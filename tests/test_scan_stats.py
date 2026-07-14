@@ -20,3 +20,16 @@ def test_stats_serialize_in_inventory_json() -> None:
     result = run_scan(FIXTURE)
     dumped = result.inventory.model_dump()
     assert dumped["stats"]["files_scanned"] == result.inventory.stats.files_scanned
+
+
+def test_entity_subclass_fields_survive_json_dump() -> None:
+    """Regression: pydantic must dump entities by runtime class, or provider/
+    ai/purl/ecosystem silently vanish from the API payload and JSON output."""
+    result = run_scan(FIXTURE)
+    dumped = {e["name"]: e for e in result.inventory.model_dump()["entities"]}
+    bert = dumped["bert-base-uncased"]
+    assert bert["provider"] == "huggingface"
+    transformers = dumped["transformers"]
+    assert transformers["ai"] is True
+    assert transformers["ecosystem"] == "PyPI"
+    assert transformers["purl"].startswith("pkg:pypi/transformers")

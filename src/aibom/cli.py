@@ -104,6 +104,14 @@ def scan(
             help="Enrich Hugging Face models/datasets via the hub API (network).",
         ),
     ] = False,
+    vulns: Annotated[
+        bool | None,
+        typer.Option(
+            "--vulns/--no-vulns",
+            help="Map pinned dependencies to known vulnerabilities via OSV (network). "
+            "Defaults to following --resolve.",
+        ),
+    ] = None,
     hf_cache: Annotated[
         Path | None,
         typer.Option("--hf-cache", help="Directory for cached HF metadata (offline snapshots)."),
@@ -136,7 +144,7 @@ def scan(
     fail_threshold = _parse_severity(fail_on)
 
     result = run_scan(
-        target, resolve=resolve, hf_cache=hf_cache, min_confidence=min_confidence
+        target, resolve=resolve, vulns=vulns, hf_cache=hf_cache, min_confidence=min_confidence
     )
     inventory, findings, score = result.inventory, result.findings, result.score
 

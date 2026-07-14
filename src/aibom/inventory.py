@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 from aibom.models.entities import Entity, EntityType, Relationship
 from aibom.models.signals import RiskSignal
@@ -44,7 +44,10 @@ class Inventory(BaseModel):
     """A normalized collection of AI supply-chain entities + relationships."""
 
     metadata: ScanMetadata
-    entities: list[Entity] = Field(default_factory=list)
+    # SerializeAsAny: dump each entity with its *runtime* class (Model, Package…),
+    # not the base Entity schema — otherwise subclass fields (provider, ai, purl,
+    # ecosystem, …) silently vanish from JSON output and the API payload.
+    entities: list[SerializeAsAny[Entity]] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
     signals: list[RiskSignal] = Field(default_factory=list)
     stats: ScanStats = Field(default_factory=ScanStats)

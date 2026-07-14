@@ -109,16 +109,12 @@
       </div>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="resolve" checked> Enrich: Hugging Face metadata + known vulnerabilities (OSV)</label>
+      <label class="check"><input type="checkbox" id="resolve" checked>
+        Resolve Hugging Face metadata (license &amp; model-card checks)</label>
+      <span class="check" style="color:var(--muted)">Known-vulnerability mapping (OSV) always runs.</span>
     </div>
     <div class="row">
-      <div class="small">
-        <label for="api">API endpoint</label>
-        <input type="text" id="api" autocomplete="off">
-      </div>
-      <div style="align-self:flex-end">
-        <button class="ghost" id="download" disabled>Download HTML report</button>
-      </div>
+      <button class="ghost" id="download" disabled>Download HTML report</button>
     </div>
   </div>
 
@@ -206,10 +202,14 @@
 const SEV_COLOR = { critical: "#b3123b", high: "#d64500", medium: "#b8860b", low: "#3a7d3a", info: "#5a6472" };
 const $ = (id) => document.getElementById(id);
 
-// Default the API endpoint to this page's origin (works when the backend serves
-// this file). On GitHub Pages, point it at your running backend.
-$("api").value = /^https?:$/.test(location.protocol) && location.host
-  ? location.origin : "http://localhost:8000";
+// The backend serves this page, so the API lives at this page's origin.
+// Static hosting (e.g. GitHub Pages) can point elsewhere via ?api=https://host.
+function apiBase() {
+  const override = new URLSearchParams(location.search).get("api");
+  if (override) return override.replace(/\/$/, "");
+  return /^https?:$/.test(location.protocol) && location.host
+    ? location.origin : "http://localhost:8000";
+}
 
 let lastRequest = null;
 
@@ -247,7 +247,7 @@ function statsLine(repo, st) {
 
 async function scan() {
   const repo = $("repo").value.trim();
-  const api = $("api").value.trim().replace(/\/$/, "");
+  const api = apiBase();
   if (!repo) { setStatus("Enter a repository URL.", true); return; }
   lastRequest = { repo_url: repo, resolve: $("resolve").checked, api };
 

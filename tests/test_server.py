@@ -39,7 +39,8 @@ def test_health(client: TestClient) -> None:
 def test_scan_returns_full_payload(client: TestClient) -> None:
     resp = client.post(
         "/api/scan",
-        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "resolve": False},
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+              "resolve": False, "vulns": False},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -67,7 +68,8 @@ def test_scan_returns_full_payload(client: TestClient) -> None:
 def test_report_returns_html(client: TestClient) -> None:
     resp = client.post(
         "/api/report",
-        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "resolve": False},
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+              "resolve": False, "vulns": False},
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -111,3 +113,12 @@ def test_normalize_accepts_github() -> None:
 def test_normalize_rejects_bad_urls(bad: str) -> None:
     with pytest.raises(CloneError):
         normalize_repo_url(bad)
+
+
+def test_enrichment_defaults_are_on() -> None:
+    """The API has network by definition; both enrichments default to on."""
+    from aibom.server.app import ScanRequest
+
+    req = ScanRequest(repo_url="https://github.com/o/r")
+    assert req.resolve is True
+    assert req.vulns is True
