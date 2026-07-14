@@ -12,6 +12,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+from aibom.collectors.ast_python import detect_python
 from aibom.collectors.base import Collector
 from aibom.inventory import Inventory
 from aibom.models.entities import (
@@ -266,6 +267,14 @@ class RepoCollector(Collector):
         if self._is_prompt_template(path):
             ent = self._make_template_prompt(text, rel)
             buckets[Prompt].append(inventory.add_entity(ent).id)
+
+        # AST pass (Python only): resolves model/dataset names through variables,
+        # dicts, f-strings, concatenation, and env-var defaults — cases the
+        # regex detectors below cannot see. Parse failures fall back to regex.
+        if path.suffix.lower() == ".py":
+            for ast_entity in detect_python(text, rel):
+                canonical = inventory.add_entity(ast_entity)
+                buckets[type(canonical)].append(canonical.id)
 
         # Multiline-aware detectors (e.g. from_pretrained calls spanning lines).
         for entity in self._scan_calls(text, lines, rel):

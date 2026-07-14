@@ -220,7 +220,7 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 
 | Component | Signals |
 |---|---|
-| **Models** | `from_pretrained(...)`, `pipeline(model=...)`, `repo_id=`, `huggingface.co/...` URLs, LLM model ids (`gpt-*`, `claude-*`), and weight files (`.safetensors`, `.gguf`, `.pkl`, `.bin`, …) |
+| **Models** | `from_pretrained(...)`, `pipeline(model=...)`, `repo_id=`, `huggingface.co/...` URLs, LLM model ids (`gpt-*`, `claude-*`, `text-embedding-*`, …), and weight files (`.safetensors`, `.gguf`, `.pkl`, `.bin`, …). A **Python AST pass** additionally resolves model/dataset names reached through variables, dicts, f-strings, string concatenation, and `os.getenv(...)` defaults — e.g. `MODEL = os.getenv("MODEL", "gpt-4o"); client.create(model=MODEL)` — with the resolution kind recorded in the evidence |
 | **Datasets** | `load_dataset(...)` |
 | **Prompts** | template files (`prompts/`, `*.prompt`, `*.jinja`), hardcoded system prompts |
 | **Agents** | LangChain/LangGraph constructors (`create_react_agent`, `AgentExecutor`, …) |
@@ -229,7 +229,7 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 
 ## Design principles
 
-- **Static only.** The scanner reads text. It never imports, executes, or unpickles anything.
+- **Static only.** The scanner reads text and parses ASTs. It never imports, executes, `eval`s, or unpickles anything.
 - **Evidence-backed.** Every entity carries `file:line` + the matched pattern + a confidence.
 - **Deterministic.** Detection and (planned) scoring are rule-based and reproducible; LLM assistance is opt-in and limited to *explaining* findings, never producing them.
 - **Local-first.** No SaaS, no telemetry, air-gap friendly.
