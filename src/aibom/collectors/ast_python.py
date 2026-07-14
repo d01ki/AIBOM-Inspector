@@ -144,7 +144,7 @@ class _Resolver:
     def _model(
         self, r: _Resolved, rel: str, line: int, ctx: str, *, lenient: bool
     ) -> Model | None:
-        provider = _classify_model(r.value, lenient=lenient)
+        provider = classify_model(r.value, lenient=lenient)
         if provider is None:
             return None
         conf = _KIND_CONFIDENCE.get(r.kind, 0.8)
@@ -253,8 +253,11 @@ class _Resolver:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _classify_model(value: str, *, lenient: bool) -> str | None:
-    """Return a provider for a model-like string, or None if it isn't one."""
+def classify_model(value: str, *, lenient: bool) -> str | None:
+    """Return a provider for a model-like string, or None if it isn't one.
+
+    Shared by the Python and JavaScript/TypeScript resolvers.
+    """
     v = value.strip()
     if not v or " " in v or "\n" in v:
         return None

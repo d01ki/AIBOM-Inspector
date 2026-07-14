@@ -14,6 +14,7 @@ from pathlib import Path
 
 from aibom.collectors.ast_python import detect_python
 from aibom.collectors.base import Collector
+from aibom.collectors.js_resolve import detect_javascript
 from aibom.inventory import Inventory
 from aibom.models.entities import (
     Agent,
@@ -274,6 +275,10 @@ class RepoCollector(Collector):
         if path.suffix.lower() == ".py":
             for ast_entity in detect_python(text, rel):
                 canonical = inventory.add_entity(ast_entity)
+                buckets[type(canonical)].append(canonical.id)
+        elif path.suffix.lower() in {".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs"}:
+            for js_entity in detect_javascript(text, rel):
+                canonical = inventory.add_entity(js_entity)
                 buckets[type(canonical)].append(canonical.id)
 
         # Multiline-aware detectors (e.g. from_pretrained calls spanning lines).

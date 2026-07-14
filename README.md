@@ -227,6 +227,23 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 | **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
 | **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl — a complete BOM. AI/ML-ecosystem packages (incl. `mcp`/`fastmcp`/`@modelcontextprotocol/*`) are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |
 
+## Language support
+
+The scanner is polyglot, with the deepest analysis for the two dominant AI-app
+languages. Everything is static — text and AST/regex parsing only.
+
+| Language | Models / services / prompts / agents | Value resolution (var / dict / env) | Dependency BOM |
+|---|---|---|---|
+| **Python** (`.py`, `.ipynb`) | ✅ AST + regex | ✅ full (AST) | ✅ `requirements*.txt`, `pyproject.toml`, `Pipfile` |
+| **JS / TS** (`.js/.ts/.tsx/.jsx/.mjs/.cjs`) | ✅ regex + SDK/MCP imports | ✅ lightweight (`const`, `{ model }`, `process.env` default) | ✅ `package.json` |
+| **Any language** | ✅ generic: `huggingface.co/…` URLs, weight files (`.safetensors`/`.gguf`/`.pkl`…), prompt template files, `mcpServers` configs | — | — |
+
+So a Go, Rust, or Java repository is still scanned — model URLs, weight files,
+prompt files, and MCP configs are detected regardless of language — but
+model-name value resolution and dependency inventory currently cover Python and
+JS/TS. Other ecosystems (`go.mod`, `Cargo.toml`, `pom.xml`) are on the roadmap
+([docs/blackhat-implementation-plan.md](docs/blackhat-implementation-plan.md) §8).
+
 ## Design principles
 
 - **Static only.** The scanner reads text and parses ASTs. It never imports, executes, `eval`s, or unpickles anything.
