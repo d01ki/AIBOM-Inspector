@@ -1,0 +1,6 @@
+{
+  "repository": "pallets/flask",
+  "commit": "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+  "local_path": "benchmark/checkouts/flask",
+  "components": []
+}

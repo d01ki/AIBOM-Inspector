@@ -16,39 +16,117 @@ from pathlib import Path
 from typing import Any
 
 from aibom.collectors.base import Collector
+from aibom.detectors.python.parser import classify_source_context
 from aibom.inventory import Inventory
+from aibom.models.analysis import ConfidenceFactors, UsageState
 from aibom.models.entities import Package
 from aibom.models.evidence import Evidence
 
 _IGNORE_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "env", "__pycache__", ".mypy_cache",
-    ".pytest_cache", ".ruff_cache", ".tox", "dist", "build", "site-packages",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    "dist",
+    "build",
+    "site-packages",
 }
 
 # AI/ML ecosystem allowlist (normalized: lowercase, '_' -> '-'). Kept curated so
 # the AIBOM stays AI-focused rather than becoming a general SBOM.
 _AI_PYPI = {
-    "transformers", "torch", "torchvision", "torchaudio", "tensorflow", "keras",
-    "jax", "jaxlib", "flax", "openai", "anthropic", "cohere", "mistralai",
-    "google-generativeai", "google-genai", "litellm", "langgraph", "llama-index",
-    "llama-cpp-python", "ctransformers", "vllm", "sglang", "text-generation",
-    "sentence-transformers", "diffusers", "accelerate", "datasets",
-    "huggingface-hub", "tokenizers", "safetensors", "ollama", "guidance",
-    "instructor", "autogen", "autogenstudio", "pyautogen", "crewai", "haystack-ai",
-    "onnxruntime", "onnx", "optimum", "timm", "peft", "trl", "bitsandbytes",
-    "sentencepiece", "gpt4all", "openai-whisper", "spacy", "scikit-learn",
-    "xgboost", "lightgbm", "catboost", "replicate", "groq", "instructorai",
-    "mcp", "fastmcp", "modelcontextprotocol",
+    "transformers",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "tensorflow",
+    "keras",
+    "jax",
+    "jaxlib",
+    "flax",
+    "openai",
+    "anthropic",
+    "cohere",
+    "mistralai",
+    "google-generativeai",
+    "google-genai",
+    "litellm",
+    "langgraph",
+    "llama-index",
+    "llama-cpp-python",
+    "ctransformers",
+    "vllm",
+    "sglang",
+    "text-generation",
+    "sentence-transformers",
+    "diffusers",
+    "accelerate",
+    "datasets",
+    "huggingface-hub",
+    "tokenizers",
+    "safetensors",
+    "ollama",
+    "guidance",
+    "instructor",
+    "autogen",
+    "autogenstudio",
+    "pyautogen",
+    "crewai",
+    "haystack-ai",
+    "onnxruntime",
+    "onnx",
+    "optimum",
+    "timm",
+    "peft",
+    "trl",
+    "bitsandbytes",
+    "sentencepiece",
+    "gpt4all",
+    "openai-whisper",
+    "spacy",
+    "scikit-learn",
+    "xgboost",
+    "lightgbm",
+    "catboost",
+    "replicate",
+    "groq",
+    "instructorai",
+    "mcp",
+    "fastmcp",
+    "modelcontextprotocol",
 }
 _AI_PYPI_PREFIXES = ("langchain", "llama-index", "llamaindex", "llama-cpp")
 
 _AI_NPM = {
-    "openai", "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai",
-    "cohere-ai", "@mistralai/mistralai", "ai", "langchain", "llamaindex",
-    "ollama", "replicate", "groq-sdk", "openai-edge", "fastmcp",
+    "openai",
+    "@anthropic-ai/sdk",
+    "@google/generative-ai",
+    "@google/genai",
+    "cohere-ai",
+    "@mistralai/mistralai",
+    "ai",
+    "langchain",
+    "llamaindex",
+    "ollama",
+    "replicate",
+    "groq-sdk",
+    "openai-edge",
+    "fastmcp",
 }
-_AI_NPM_PREFIXES = ("@langchain/", "@llamaindex/", "@huggingface/", "@ai-sdk/",
-                    "@anthropic-ai/", "@modelcontextprotocol/")
+_AI_NPM_PREFIXES = (
+    "@langchain/",
+    "@llamaindex/",
+    "@huggingface/",
+    "@ai-sdk/",
+    "@anthropic-ai/",
+    "@modelcontextprotocol/",
+)
 
 _RE_REQ = re.compile(
     r"""^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*"""
@@ -98,6 +176,8 @@ class DependencyCollector(Collector):
         self.root = Path(root).resolve()
 
     def collect(self, inventory: Inventory) -> None:
+        if "manifest.dependencies" not in inventory.stats.detectors_run:
+            inventory.stats.detectors_run.append("manifest.dependencies")
         for path in self._iter_manifests():
             rel = self._rel(path)
             name = path.name.lower()
@@ -127,10 +207,11 @@ class DependencyCollector(Collector):
             if path.is_dir() or any(p in _IGNORE_DIRS for p in path.parts):
                 continue
             n = path.name.lower()
-            if (
-                (n.startswith("requirements") and n.endswith(".txt"))
-                or n in {"pyproject.toml", "pipfile", "package.json"}
-            ):
+            if (n.startswith("requirements") and n.endswith(".txt")) or n in {
+                "pyproject.toml",
+                "pipfile",
+                "package.json",
+            }:
                 out.append(path)
         return sorted(out)
 
@@ -144,18 +225,43 @@ class DependencyCollector(Collector):
     # -- emit ------------------------------------------------------------------
 
     def _emit(
-        self, inventory: Inventory, rel: str, lineno: int, snippet: str,
-        name: str, ecosystem: str, version: str | None, pinned: bool,
+        self,
+        inventory: Inventory,
+        rel: str,
+        lineno: int,
+        snippet: str,
+        name: str,
+        ecosystem: str,
+        version: str | None,
+        pinned: bool,
     ) -> None:
         ai = _is_ai_pypi(name) if ecosystem == "PyPI" else _is_ai_npm(name)
         ev = Evidence(
-            file=rel, line_start=lineno, line_end=lineno, snippet=snippet.strip()[:200],
-            matched_pattern=f"{ecosystem.lower()}-dependency", confidence=0.9,
+            file=rel,
+            line_start=lineno,
+            line_end=lineno,
+            snippet=snippet.strip()[:200],
+            matched_pattern=f"{ecosystem.lower()}-dependency",
+            confidence=0.9,
+            detector_id="manifest.dependencies",
+            kind="manifest",
         )
         inventory.add_entity(
             Package(
-                name=name, ecosystem=ecosystem, version=version,
-                version_pinned=pinned, ai=ai, source_evidence=[ev],
+                name=name,
+                ecosystem=ecosystem,
+                version=version,
+                version_pinned=pinned,
+                ai=ai,
+                source_evidence=[ev],
+                detector_ids=["manifest.dependencies"],
+                usage=UsageState(declared=True),
+                confidence_factors=ConfidenceFactors(
+                    syntax_confidence=0.95,
+                    value_resolution_confidence=0.9,
+                    framework_identification_confidence=1.0 if ai else 0.9,
+                ),
+                source_contexts=[classify_source_context(rel)],
             )
         )
 
@@ -172,8 +278,9 @@ class DependencyCollector(Collector):
                 continue
             op, ver = m.group(2), m.group(3)
             pinned = op in {"==", "==="}
-            self._emit(inventory, rel, lineno, line, m.group(1), "PyPI",
-                       ver if op else None, pinned)
+            self._emit(
+                inventory, rel, lineno, line, m.group(1), "PyPI", ver if op else None, pinned
+            )
 
     def _parse_pyproject(self, inventory: Inventory, path: Path, rel: str) -> None:
         raw = path.read_text(encoding="utf-8", errors="replace")
@@ -213,8 +320,16 @@ class DependencyCollector(Collector):
         for section in sections:
             for name, spec in (data.get(section, {}) or {}).items():
                 version, pinned = _npm_version(str(spec))
-                self._emit(inventory, rel, _find_line(lines, f'"{name}"'), f'"{name}": "{spec}"',
-                           name, "npm", version, pinned)
+                self._emit(
+                    inventory,
+                    rel,
+                    _find_line(lines, f'"{name}"'),
+                    f'"{name}": "{spec}"',
+                    name,
+                    "npm",
+                    version,
+                    pinned,
+                )
 
     # -- pep508 helpers --------------------------------------------------------
 
@@ -223,11 +338,23 @@ class DependencyCollector(Collector):
         if not nm:
             return
         version, pinned = _pep508_version(spec)
-        self._emit(inventory, rel, _find_line(lines, nm.group(1)), spec,
-                   nm.group(1), "PyPI", version, pinned)
+        self._emit(
+            inventory,
+            rel,
+            _find_line(lines, nm.group(1)),
+            spec,
+            nm.group(1),
+            "PyPI",
+            version,
+            pinned,
+        )
 
     def _emit_named(
-        self, inventory: Inventory, rel: str, lines: list[str], name: str,
+        self,
+        inventory: Inventory,
+        rel: str,
+        lines: list[str],
+        name: str,
         ver: tuple[str | None, bool],
     ) -> None:
         version, pinned = ver

@@ -1,0 +1,51 @@
+version: 1
+
+# Every enabled public case must have a manually reviewed ground-truth JSON and
+# an immutable commit. The first checked-in case is local and deterministic;
+# the candidate list is intentionally not counted until curation is complete.
+repositories:
+  - repository: local/vulnerable-ai-app
+    commit: fixture-v1
+    ground_truth: ground_truth/vulnerable-ai-app.json
+    enabled: true
+
+public_repositories:
+  - repository: openai/openai-quickstart-python
+    commit: ec8890d101bdc17d66512d94a76b5e7131d188a1
+    ground_truth: ground_truth_public/openai-quickstart-python.json
+    role: positive
+    enabled_by_default: false
+  - repository: pallets/flask
+    commit: 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+    ground_truth: ground_truth_public/flask.json
+    role: negative
+    enabled_by_default: false
+
+candidates:
+  - langchain-ai/langchain
+  - langchain-ai/langgraph
+  - run-llama/llama_index
+  - microsoft/autogen
+  - crewAIInc/crewAI
+  - deepset-ai/haystack
+  - BerriAI/litellm
+  - huggingface/transformers
+  - huggingface/diffusers
+  - ollama/ollama
+  - vllm-project/vllm
+  - open-webui/open-webui
+  - modelcontextprotocol/python-sdk
+  - modelcontextprotocol/servers
+  - openai/openai-cookbook
+  - anthropics/anthropic-cookbook
+  - microsoft/semantic-kernel
+  - ggml-org/llama.cpp
+  - huggingface/text-generation-inference
+  - microsoft/guidance
+
+negative_candidates:
+  - pallets/flask
+  - django/django
+  - expressjs/express
+  - psf/requests
+  - encode/httpx

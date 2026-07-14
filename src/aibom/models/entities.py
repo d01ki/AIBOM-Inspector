@@ -12,6 +12,13 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, computed_field
 
+from aibom.models.analysis import (
+    ConfidenceFactors,
+    ResolutionStep,
+    SourceContext,
+    UsageState,
+    ValueResolution,
+)
 from aibom.models.evidence import Evidence
 
 
@@ -55,6 +62,18 @@ class Entity(BaseModel):
         default_factory=list,
         description="Where this entity was observed. Must be non-empty for real findings.",
     )
+    detector_ids: list[str] = Field(
+        default_factory=list, description="Stable detectors that contributed to this entity."
+    )
+    usage: UsageState = Field(
+        default_factory=UsageState,
+        description="Declared/imported/instantiated/invoked/reachable usage states.",
+    )
+    confidence_factors: ConfidenceFactors = Field(default_factory=ConfidenceFactors)
+    resolution_path: list[ResolutionStep] = Field(default_factory=list)
+    reachability_path: list[str] = Field(default_factory=list)
+    source_contexts: list[SourceContext] = Field(default_factory=list)
+    value_resolution: ValueResolution = ValueResolution.NOT_APPLICABLE
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -86,6 +105,10 @@ class Model(Entity):
     last_modified: str | None = Field(default=None, description="ISO timestamp of last change.")
     resolved: bool = Field(
         default=False, description="True once a resolver has enriched this entity."
+    )
+    environment_variable: str | None = Field(
+        default=None,
+        description="Environment variable supplying the model when statically identifiable.",
     )
 
 

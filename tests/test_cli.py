@@ -67,7 +67,7 @@ def test_scan_writes_html_report(tmp_path: Any) -> None:
     out = tmp_path / "report.html"
     result = runner.invoke(app, ["scan", str(FIXTURE), "-q", "--report", str(out)])
     assert result.exit_code == 0
-    html = out.read_text()
+    html = out.read_text(encoding="utf-8")
     assert html.startswith("<!DOCTYPE html>")
 
 
@@ -104,3 +104,29 @@ def test_empty_scan_reports_no_components(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert result.exit_code == 0
     assert "No AI components discovered" in result.stdout
+
+
+def test_disable_detector_option_is_repeatable(tmp_path: Path) -> None:
+    source = tmp_path / "app.py"
+    source.write_text(
+        "from openai import OpenAI\n"
+        "client = OpenAI()\n"
+        'client.responses.create(model="gpt-disabled")\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "inventory.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(tmp_path),
+            "--quiet",
+            "--disable-detector",
+            "python.openai.ast",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert not [entity for entity in data["entities"] if entity["type"] == "model"]

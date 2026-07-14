@@ -1,0 +1,26 @@
+{
+  "repository": "local/vulnerable-ai-app",
+  "commit": "fixture-v1",
+  "local_path": "tests/fixtures/vulnerable-ai-app",
+  "components": [
+    {"type": "model", "name": "mistralai/Mistral-7B-Instruct-v0.2", "file": "agent.py", "line": 6, "status": "invoked"},
+    {"type": "model", "name": "gpt-4o-mini", "file": "app.py", "line": 33, "status": "invoked"},
+    {"type": "model", "name": "bert-base-uncased", "file": "app.py", "line": 13, "status": "invoked"},
+    {"type": "model", "name": "acme-ai/llama-7b-hf", "file": "app.py", "line": 16, "status": "invoked"},
+    {"type": "model", "name": "distilbert/distilbert-base-uncased", "file": "app.py", "line": 21, "status": "invoked"},
+    {"type": "model_file", "name": "weights/classifier.pkl", "file": "weights/classifier.pkl", "line": 1, "status": "declared"},
+    {"type": "dataset", "name": "imdb", "file": "app.py", "line": 24, "status": "invoked"},
+    {"type": "service", "name": "openai", "file": "app.py", "line": 8, "status": "invoked"},
+    {"type": "service", "name": "https://api.openai.com/v1", "file": "app.py", "line": 29, "status": "declared"},
+    {"type": "agent", "name": "agent@agent.py:8", "file": "agent.py", "line": 8, "status": "instantiated"},
+    {"type": "agent", "name": "agent@agent.py:9", "file": "agent.py", "line": 9, "status": "instantiated"},
+    {"type": "prompt", "name": "system-prompt@app.py:27", "file": "app.py", "line": 27, "status": "declared"},
+    {"type": "prompt", "name": "system-prompt@app.py:36", "file": "app.py", "line": 36, "status": "declared"},
+    {"type": "prompt", "name": "prompts/agent_system.prompt", "file": "prompts/agent_system.prompt", "line": 1, "status": "declared"},
+    {"type": "ai_package", "name": "transformers", "file": "requirements.txt", "line": 1, "status": "declared"},
+    {"type": "ai_package", "name": "datasets", "file": "requirements.txt", "line": 2, "status": "declared"},
+    {"type": "ai_package", "name": "openai", "file": "requirements.txt", "line": 3, "status": "declared"},
+    {"type": "ai_package", "name": "langchain", "file": "requirements.txt", "line": 4, "status": "declared"},
+    {"type": "ai_package", "name": "langchain-huggingface", "file": "requirements.txt", "line": 5, "status": "declared"}
+  ]
+}

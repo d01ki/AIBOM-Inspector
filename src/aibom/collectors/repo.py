@@ -11,9 +11,14 @@ import hashlib
 import re
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from aibom.collectors.base import Collector
+from aibom.detectors.base import ScanContext
+from aibom.detectors.python.parser import classify_source_context, parse_python
+from aibom.detectors.registry import DetectorRegistry, default_registry
 from aibom.inventory import Inventory
+from aibom.models.analysis import ConfidenceFactors, UsageState, ValueResolution
 from aibom.models.entities import (
     Agent,
     Dataset,
@@ -29,24 +34,69 @@ from aibom.models.signals import RiskSignal
 
 # Directories that never contain first-party AI supply-chain signal worth scanning.
 _IGNORE_DIRS = {
-    ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "env", "__pycache__",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "dist", "build",
-    "site-packages", ".idea", ".vscode", ".next", ".cache",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    "dist",
+    "build",
+    "site-packages",
+    ".idea",
+    ".vscode",
+    ".next",
+    ".cache",
 }
 
 # Text files worth reading line-by-line.
 _TEXT_SUFFIXES = {
-    ".py", ".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".cfg",
-    ".ini", ".jinja", ".jinja2", ".j2", ".prompt", ".sh", ".env",
-    ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".ipynb",
+    ".py",
+    ".txt",
+    ".md",
+    ".rst",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".jinja",
+    ".jinja2",
+    ".j2",
+    ".prompt",
+    ".sh",
+    ".env",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ipynb",
 }
 _TEXT_NAMES = {"dockerfile", "requirements.txt", "pipfile", ".env"}
 
 # Serialized-model weight formats, by extension. Value = confidence.
 _WEIGHT_SUFFIXES: dict[str, float] = {
-    ".safetensors": 0.95, ".gguf": 0.95, ".onnx": 0.9, ".h5": 0.85,
-    ".pt": 0.85, ".pth": 0.85, ".ckpt": 0.85, ".pkl": 0.9, ".pickle": 0.9,
-    ".msgpack": 0.8, ".bin": 0.5, ".pb": 0.6,
+    ".safetensors": 0.95,
+    ".gguf": 0.95,
+    ".onnx": 0.9,
+    ".h5": 0.85,
+    ".pt": 0.85,
+    ".pth": 0.85,
+    ".ckpt": 0.85,
+    ".pkl": 0.9,
+    ".pickle": 0.9,
+    ".msgpack": 0.8,
+    ".bin": 0.5,
+    ".pb": 0.6,
 }
 
 _MAX_FILE_BYTES = 2_000_000
@@ -60,9 +110,7 @@ _RE_HF_URL = re.compile(r"""huggingface\.co/([A-Za-z0-9][\w\-.]*/[\w\-.]+)""")
 _RE_REPO_ID = re.compile(r"""repo_id\s*=\s*['"]([^'"]+)['"]""")
 _RE_REVISION = re.compile(r"""revision\s*=\s*['"]([^'"]+)['"]""")
 _RE_LOAD_DATASET = re.compile(r"""load_dataset\(\s*['"]([^'"]+)['"]""")
-_RE_LLM_MODEL = re.compile(
-    r"""['"]((?:gpt-|o1|o3|o4|chatgpt-|claude-)[A-Za-z0-9._\-]+)['"]"""
-)
+_RE_LLM_MODEL = re.compile(r"""['"]((?:gpt-|o1|o3|o4|chatgpt-|claude-)[A-Za-z0-9._\-]+)['"]""")
 # A SYSTEM-ish variable assigned a *string literal* — the hardcoded-prompt shape.
 # Requiring the string RHS avoids matching expressions like ``= re.compile(...)``.
 _RE_SYSTEM_PROMPT_VAR = re.compile(
@@ -121,6 +169,7 @@ _RE_SECRET_ASSIGN = re.compile(
 _RE_ENV_OR_PLACEHOLDER = re.compile(
     r"""(?i)(os\.environ|getenv|your[_-]|<[^>]+>|\{\{|\$\{|xxx+|changeme|example|placeholder|\.\.\.)"""
 )
+_RE_URL = re.compile(r"https?://[^'\"\s)]+")
 
 # import <-> provider service mapping
 _PROVIDER_IMPORTS = {
@@ -180,14 +229,28 @@ class RepoCollector(Collector):
 
     name = "repo"
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        disabled_detectors: set[str] | None = None,
+        detector_registry: DetectorRegistry | None = None,
+    ) -> None:
         self.root = Path(root).resolve()
         if not self.root.exists():
             raise FileNotFoundError(f"scan target does not exist: {self.root}")
+        self.disabled_detectors = disabled_detectors or set()
+        self.detectors = detector_registry or default_registry(disabled=self.disabled_detectors)
 
     # -- public API ------------------------------------------------------------
 
     def collect(self, inventory: Inventory) -> None:
+        detector_ids = self.detectors.detector_ids
+        if "legacy.regex" not in self.disabled_detectors:
+            detector_ids.append("legacy.regex")
+        for detector_id in detector_ids:
+            if detector_id not in inventory.stats.detectors_run:
+                inventory.stats.detectors_run.append(detector_id)
         for path in self._iter_files():
             rel = self._rel(path)
             suffix = path.suffix.lower()
@@ -235,9 +298,24 @@ class RepoCollector(Collector):
             snippet=path.name,
             matched_pattern="weight-file-extension",
             confidence=_WEIGHT_SUFFIXES[suffix],
+            detector_id="generic.weight-file",
+            kind="file",
         )
         inventory.add_entity(
-            Model(name=rel, provider="local", formats=[fmt], source_evidence=[ev])
+            Model(
+                name=rel,
+                provider="local",
+                formats=[fmt],
+                source_evidence=[ev],
+                detector_ids=["generic.weight-file"],
+                usage=UsageState(declared=True),
+                confidence_factors=ConfidenceFactors(
+                    syntax_confidence=_WEIGHT_SUFFIXES[suffix],
+                    value_resolution_confidence=1.0,
+                ),
+                source_contexts=[classify_source_context(rel)],
+                value_resolution=ValueResolution.RESOLVED,
+            )
         )
 
     # -- text scanner ----------------------------------------------------------
@@ -258,25 +336,64 @@ class RepoCollector(Collector):
         if path.suffix.lower() == ".ipynb":
             text = text.replace('\\"', '"')
 
-        lines = text.splitlines()
+        legacy_text = text
+        structured_python = False
+        is_prompt_template = self._is_prompt_template(path)
+        documentation_only = path.suffix.lower() in {".md", ".rst"} and not is_prompt_template
         # per-file buckets used to draw intra-file relationship edges
         buckets: dict[type[Entity], list[str]] = defaultdict(list)
 
+        if path.suffix.lower() == ".py":
+            try:
+                python = parse_python(text, rel)
+            except (SyntaxError, ValueError) as exc:
+                line = getattr(exc, "lineno", None)
+                location = f"{rel}:{line}" if line else rel
+                inventory.stats.parse_errors.append(f"{location}: {exc}")
+            else:
+                structured_python = True
+                context = ScanContext(
+                    root=self.root,
+                    path=path,
+                    relative_path=rel,
+                    text=text,
+                    source_context=classify_source_context(rel),
+                    python=python,
+                )
+                for detection in self.detectors.detect(context):
+                    canonical = inventory.add_entity(detection.entity)
+                    buckets[type(canonical)].append(canonical.id)
+                legacy_text = python.sanitized_source()
+
+        lines = legacy_text.splitlines()
+
         # Whole-file prompt template? (prompts/ dir or template-ish extension)
-        if self._is_prompt_template(path):
+        if is_prompt_template and "legacy.regex" not in self.disabled_detectors:
             ent = self._make_template_prompt(text, rel)
+            self._annotate_legacy(ent, rel)
             buckets[Prompt].append(inventory.add_entity(ent).id)
 
-        # Multiline-aware detectors (e.g. from_pretrained calls spanning lines).
-        for entity in self._scan_calls(text, lines, rel):
-            canonical = inventory.add_entity(entity)
-            buckets[type(canonical)].append(canonical.id)
+        if "legacy.regex" not in self.disabled_detectors and not documentation_only:
+            # Structured Python detectors own model calls when parsing succeeds.
+            # Regex remains a fallback for invalid Python and non-Python text.
+            if not structured_python:
+                for entity in self._scan_calls(legacy_text, lines, rel):
+                    self._annotate_legacy(entity, rel)
+                    canonical = inventory.add_entity(entity)
+                    buckets[type(canonical)].append(canonical.id)
 
-        for lineno, line in enumerate(lines, start=1):
-            for entity in self._scan_line(line, lineno, rel):
-                canonical = inventory.add_entity(entity)
-                buckets[type(canonical)].append(canonical.id)
-            self._scan_signals(inventory, line, lineno, rel)
+            for lineno, line in enumerate(lines, start=1):
+                for entity in self._scan_line(
+                    line,
+                    lineno,
+                    rel,
+                    detect_models=not structured_python,
+                    detect_base_urls=not structured_python,
+                ):
+                    self._annotate_legacy(entity, rel)
+                    canonical = inventory.add_entity(entity)
+                    buckets[type(canonical)].append(canonical.id)
+                self._scan_signals(inventory, line, lineno, rel)
 
         self._link_intra_file(inventory, buckets)
 
@@ -284,14 +401,21 @@ class RepoCollector(Collector):
         """Detect non-entity risk signals (trust_remote_code, hardcoded secrets)."""
 
         def signal(kind: str, pattern: str, conf: float, detail: str | None = None) -> None:
+            safe_snippet = _redact_secret_literals(line)
             inventory.add_signal(
                 RiskSignal(
                     kind=kind,
                     detail=detail,
                     source_evidence=[
                         Evidence(
-                            file=rel, line_start=lineno, line_end=lineno,
-                            snippet=line.strip()[:200], matched_pattern=pattern, confidence=conf,
+                            file=rel,
+                            line_start=lineno,
+                            line_end=lineno,
+                            snippet=safe_snippet.strip()[:200],
+                            matched_pattern=pattern,
+                            confidence=conf,
+                            detector_id="legacy.regex",
+                            kind="regex",
                         )
                     ],
                 )
@@ -307,39 +431,64 @@ class RepoCollector(Collector):
         elif _RE_SECRET_ASSIGN.search(line):
             signal("hardcoded_secret", "secret-assignment", 0.6, "secret assigned a string literal")
 
-    def _scan_line(self, line: str, lineno: int, rel: str) -> list[Entity]:
+    def _scan_line(
+        self,
+        line: str,
+        lineno: int,
+        rel: str,
+        *,
+        detect_models: bool = True,
+        detect_base_urls: bool = True,
+    ) -> list[Entity]:
         found: list[Entity] = []
 
         def ev(pattern: str, snippet: str, conf: float) -> Evidence:
             return Evidence(
-                file=rel, line_start=lineno, line_end=lineno,
-                snippet=snippet.strip()[:200], matched_pattern=pattern, confidence=conf,
+                file=rel,
+                line_start=lineno,
+                line_end=lineno,
+                snippet=_redact_secret_literals(snippet).strip()[:200],
+                matched_pattern=pattern,
+                confidence=conf,
+                detector_id="legacy.regex",
+                kind="regex",
             )
 
         revision_match = _RE_REVISION.search(line)
         revision = revision_match.group(1) if revision_match else None
 
         # models — repo_id / pipeline(model=) / HF url (from_pretrained is multiline)
-        for pat, regex, conf in (
-            ("repo_id", _RE_REPO_ID, 0.85),
-            ("pipeline-model", _RE_PIPELINE_MODEL, 0.9),
-        ):
+        model_patterns = (
+            (
+                ("repo_id", _RE_REPO_ID, 0.85),
+                ("pipeline-model", _RE_PIPELINE_MODEL, 0.9),
+            )
+            if detect_models
+            else ()
+        )
+        for pat, regex, conf in model_patterns:
             for m in regex.finditer(line):
                 name = m.group(1)
                 if not _looks_like_hf_repo(name):
                     continue
                 found.append(
                     Model(
-                        name=name, provider=_model_provider(name), revision=revision,
-                        revision_pinned=revision is not None, source_evidence=[ev(pat, line, conf)],
+                        name=name,
+                        provider=_model_provider(name),
+                        revision=revision,
+                        revision_pinned=revision is not None,
+                        source_evidence=[ev(pat, line, conf)],
                     )
                 )
-        for m in _RE_HF_URL.finditer(line):
+        for m in _RE_HF_URL.finditer(line if detect_models else ""):
             found.append(
-                Model(name=m.group(1), provider="huggingface",
-                      source_evidence=[ev("hf-url", line, 0.9)])
+                Model(
+                    name=m.group(1),
+                    provider="huggingface",
+                    source_evidence=[ev("hf-url", line, 0.9)],
+                )
             )
-        for m in _RE_LLM_MODEL.finditer(line):
+        for m in _RE_LLM_MODEL.finditer(line if detect_models else ""):
             name = m.group(1)
             provider = "anthropic" if name.startswith("claude-") else "openai"
             found.append(
@@ -349,16 +498,21 @@ class RepoCollector(Collector):
         # datasets
         for m in _RE_LOAD_DATASET.finditer(line):
             found.append(
-                Dataset(name=m.group(1), source="huggingface",
-                        source_evidence=[ev("load_dataset", line, 0.9)])
+                Dataset(
+                    name=m.group(1),
+                    source="huggingface",
+                    source_evidence=[ev("load_dataset", line, 0.9)],
+                )
             )
 
         # prompts — hardcoded system prompt
         if _RE_SYSTEM_PROMPT_VAR.search(line) or _RE_ROLE_SYSTEM.search(line):
             found.append(
                 Prompt(
-                    name=f"system-prompt@{rel}:{lineno}", kind="system",
-                    content_hash=_sha(line), source_evidence=[ev("system-prompt", line, 0.7)],
+                    name=f"system-prompt@{rel}:{lineno}",
+                    kind="system",
+                    content_hash=_sha(line),
+                    source_evidence=[ev("system-prompt", line, 0.7)],
                 )
             )
 
@@ -366,37 +520,61 @@ class RepoCollector(Collector):
         for key, (svc_name, endpoint) in _PROVIDER_IMPORTS.items():
             if re.search(rf"""^\s*(?:import|from)\s+{re.escape(key)}\b""", line):
                 found.append(
-                    Service(name=svc_name, kind="api", endpoint=endpoint,
-                            source_evidence=[ev("provider-import", line, 0.6)])
+                    Service(
+                        name=svc_name,
+                        kind="api",
+                        endpoint=endpoint,
+                        source_evidence=[ev("provider-import", line, 0.6)],
+                    )
                 )
-        for m in _RE_BASE_URL.finditer(line):
+        for m in _RE_BASE_URL.finditer(line if detect_base_urls else ""):
+            sanitized_endpoint = _sanitize_endpoint(m.group(1))
+            if sanitized_endpoint is None:
+                continue
             found.append(
-                Service(name=m.group(1), kind="api", endpoint=m.group(1),
-                        source_evidence=[ev("base-url", line, 0.7)])
+                Service(
+                    name=sanitized_endpoint,
+                    kind="api",
+                    endpoint=sanitized_endpoint,
+                    source_evidence=[ev("base-url", line, 0.7)],
+                )
             )
         if _RE_MCP.search(line):
             found.append(
-                Service(name=f"mcp-config@{rel}", kind="mcp",
-                        source_evidence=[ev("mcp-config", line, 0.8)])
+                Service(
+                    name=f"mcp-config@{rel}",
+                    kind="mcp",
+                    source_evidence=[ev("mcp-config", line, 0.8)],
+                )
             )
         if _RE_MCP_SERVER_PY.search(line) or _RE_MCP_SERVER_JS.search(line):
             found.append(
-                Service(name=f"mcp-server@{rel}", kind="mcp",
-                        source_evidence=[ev("mcp-server", line, 0.85)])
+                Service(
+                    name=f"mcp-server@{rel}",
+                    kind="mcp",
+                    source_evidence=[ev("mcp-server", line, 0.85)],
+                )
             )
         for m in _RE_JS_IMPORT.finditer(line):
             js_svc, js_endpoint = _JS_PROVIDER_IMPORTS[m.group(1)]
             found.append(
-                Service(name=js_svc, kind="api", endpoint=js_endpoint,
-                        source_evidence=[ev("provider-import-js", line, 0.6)])
+                Service(
+                    name=js_svc,
+                    kind="api",
+                    endpoint=js_endpoint,
+                    source_evidence=[ev("provider-import-js", line, 0.6)],
+                )
             )
 
         # agents (ignore import statements — those are dependencies, not constructions)
         is_import = bool(re.match(r"""^\s*(?:import|from)\s""", line))
         for m in () if is_import else _RE_AGENT_CTOR.finditer(line):
             found.append(
-                Agent(name=f"agent@{rel}:{lineno}", framework="langchain",
-                      source_evidence=[ev(f"agent-ctor:{m.group(1)}", line, 0.8)])
+                Agent(
+                    name=f"agent@{rel}:{lineno}",
+                    framework="langchain",
+                    source_evidence=[ev(f"agent-ctor:{m.group(1)}", line, 0.8)],
+                )
             )
 
         return found
@@ -424,14 +602,50 @@ class RepoCollector(Collector):
                     revision_pinned=revision is not None,
                     source_evidence=[
                         Evidence(
-                            file=rel, line_start=lineno, line_end=lineno,
-                            snippet=snippet[:200], matched_pattern="from_pretrained",
+                            file=rel,
+                            line_start=lineno,
+                            line_end=lineno,
+                            snippet=_redact_secret_literals(snippet[:200]),
+                            matched_pattern="from_pretrained",
                             confidence=0.95,
+                            detector_id="legacy.regex",
+                            kind="regex",
                         )
                     ],
                 )
             )
         return found
+
+    @staticmethod
+    def _annotate_legacy(entity: Entity, rel: str) -> None:
+        """Add normalized analysis metadata to compatibility-detector results."""
+        if "legacy.regex" not in entity.detector_ids:
+            entity.detector_ids.append("legacy.regex")
+        context = classify_source_context(rel)
+        if context not in entity.source_contexts:
+            entity.source_contexts.append(context)
+        for item in entity.source_evidence:
+            item.detector_id = item.detector_id or "legacy.regex"
+            if item.kind == "source":
+                item.kind = "regex"
+
+        entity.usage.declared = True
+        pattern = entity.source_evidence[0].matched_pattern if entity.source_evidence else ""
+        if isinstance(entity, Model):
+            entity.usage.invoked = pattern in {"from_pretrained", "pipeline-model", "repo_id"}
+            entity.value_resolution = ValueResolution.RESOLVED
+        elif isinstance(entity, Dataset):
+            entity.usage.invoked = pattern == "load_dataset"
+            entity.value_resolution = ValueResolution.RESOLVED
+        elif isinstance(entity, Agent):
+            entity.usage.instantiated = True
+        elif isinstance(entity, Service):
+            entity.usage.imported = pattern in {"provider-import", "provider-import-js"}
+            entity.usage.instantiated = pattern == "mcp-server"
+
+        confidence = max((item.confidence for item in entity.source_evidence), default=0.5)
+        entity.confidence_factors.syntax_confidence = confidence
+        entity.confidence_factors.framework_identification_confidence = confidence
 
     # -- prompt templates ------------------------------------------------------
 
@@ -445,11 +659,16 @@ class RepoCollector(Collector):
     @staticmethod
     def _make_template_prompt(text: str, rel: str) -> Prompt:
         n_lines = max(len(text.splitlines()), 1)
+        content_hash = _sha(text)
         ev = Evidence(
-            file=rel, line_start=1, line_end=n_lines, snippet=text.strip()[:200],
-            matched_pattern="prompt-template-file", confidence=0.85,
+            file=rel,
+            line_start=1,
+            line_end=n_lines,
+            snippet=f"<prompt content sha256:{content_hash}>",
+            matched_pattern="prompt-template-file",
+            confidence=0.85,
         )
-        return Prompt(name=rel, kind="template", content_hash=_sha(text), source_evidence=[ev])
+        return Prompt(name=rel, kind="template", content_hash=content_hash, source_evidence=[ev])
 
     # -- relationships ---------------------------------------------------------
 
@@ -469,12 +688,17 @@ class RepoCollector(Collector):
                 for target_id in buckets.get(entity_cls, []):
                     inventory.add_relationship(
                         Relationship(
-                            source_id=agent_id, target_id=target_id, relationship=rel_type,
+                            source_id=agent_id,
+                            target_id=target_id,
+                            relationship=rel_type,
                             source_evidence=[
                                 Evidence(
-                                    file="<inferred>", line_start=1, line_end=1,
+                                    file="<inferred>",
+                                    line_start=1,
+                                    line_end=1,
                                     snippet="agent and target co-located in file",
-                                    matched_pattern="intra-file-colocation", confidence=0.5,
+                                    matched_pattern="intra-file-colocation",
+                                    confidence=0.5,
                                 )
                             ],
                         )
@@ -483,3 +707,32 @@ class RepoCollector(Collector):
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _redact_secret_literals(text: str) -> str:
+    """Remove likely credential values before evidence leaves the scanner."""
+    redacted = _RE_PROVIDER_KEY.sub("<redacted>", text)
+    redacted = _RE_SECRET_ASSIGN.sub(
+        lambda match: match.group(0).replace(match.group(1), "<redacted>"),
+        redacted,
+    )
+
+    def sanitize_url(match: re.Match[str]) -> str:
+        return _sanitize_endpoint(match.group(0)) or "<redacted-url>"
+
+    return _RE_URL.sub(sanitize_url, redacted)
+
+
+def _sanitize_endpoint(value: str) -> str | None:
+    """Keep endpoint identity while dropping credentials, query, and fragment."""
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None:
+        host = f"{host}:{port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))

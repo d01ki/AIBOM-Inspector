@@ -1,0 +1,18 @@
+{
+  "repository": "openai/openai-quickstart-python",
+  "commit": "ec8890d101bdc17d66512d94a76b5e7131d188a1",
+  "local_path": "benchmark/checkouts/openai-quickstart-python",
+  "components": [
+    {"type": "service", "name": "openai", "file": "examples/assistant-basic/assistant.py", "line": 1, "status": "invoked"},
+    {"type": "model", "name": "gpt-3.5-turbo", "file": "examples/assistant-basic/assistant.py", "line": 11, "status": "invoked"},
+    {"type": "model", "name": "gpt-3.5-turbo-0125", "file": "examples/assistant-functions/functions.py", "line": 64, "status": "invoked"},
+    {"type": "prompt", "name": "system-prompt@examples/assistant-flask/app.py:18", "file": "examples/assistant-flask/app.py", "line": 18, "status": "declared"},
+    {"type": "prompt", "name": "system-prompt@examples/assistant-flask/app.py:188", "file": "examples/assistant-flask/app.py", "line": 188, "status": "declared"},
+    {"type": "prompt", "name": "system-prompt@examples/chat-basic/app.py:16", "file": "examples/chat-basic/app.py", "line": 16, "status": "declared"},
+    {"type": "prompt", "name": "system-prompt@examples/chat-basic/app.py:61", "file": "examples/chat-basic/app.py", "line": 61, "status": "declared"},
+    {"type": "prompt", "name": "assistant-instructions@examples/assistant-basic/assistant.py:11", "file": "examples/assistant-basic/assistant.py", "line": 11, "status": "invoked"},
+    {"type": "prompt", "name": "assistant-instructions@examples/assistant-functions/functions.py:64", "file": "examples/assistant-functions/functions.py", "line": 64, "status": "invoked"},
+    {"type": "prompt", "name": "assistant-instructions@examples/assistant-flask/app.py:116", "file": "examples/assistant-flask/app.py", "line": 116, "status": "invoked"},
+    {"type": "ai_package", "name": "openai", "file": "requirements.txt", "line": 15, "status": "declared"}
+  ]
+}

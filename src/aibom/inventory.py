@@ -7,12 +7,17 @@ in-memory source of truth that the AIBOM, graph, and risk engines consume.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from typing import TypeVar
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
-from aibom.models.entities import Entity, EntityType, Relationship
+from aibom.models.analysis import Reachability
+from aibom.models.entities import Agent, Entity, EntityType, Model, Relationship, Service
 from aibom.models.signals import RiskSignal
+
+T = TypeVar("T")
 
 
 class ScanMetadata(BaseModel):
@@ -38,6 +43,13 @@ class ScanStats(BaseModel):
     )
     duration_ms: int | None = Field(default=None, description="Scan wall time (excl. clone).")
     clone_ms: int | None = Field(default=None, description="Clone wall time (API scans only).")
+    detectors_run: list[str] = Field(
+        default_factory=list, description="Detector IDs used during the scan."
+    )
+    parse_errors: list[str] = Field(
+        default_factory=list,
+        description="Files that required a legacy fallback because structured parsing failed.",
+    )
 
 
 class Inventory(BaseModel):
@@ -60,7 +72,7 @@ class Inventory(BaseModel):
         """
         for existing in self.entities:
             if existing.natural_key() == entity.natural_key():
-                _merge_evidence(existing, entity)
+                _merge_entity(existing, entity)
                 return existing
         self.entities.append(entity)
         return entity
@@ -100,8 +112,7 @@ class Inventory(BaseModel):
         as "no AI components detected", not be scored.
         """
         return any(
-            e.type != EntityType.PACKAGE or bool(getattr(e, "ai", False))
-            for e in self.entities
+            e.type != EntityType.PACKAGE or bool(getattr(e, "ai", False)) for e in self.entities
         )
 
     def counts(self) -> dict[str, int]:
@@ -120,3 +131,65 @@ def _merge_evidence(into: Entity, other: Entity) -> None:
         if key not in seen:
             into.source_evidence.append(ev)
             seen.add(key)
+
+
+def _merge_entity(into: Entity, other: Entity) -> None:
+    """Merge additive detector analysis without changing the stable natural key."""
+    _merge_evidence(into, other)
+    _extend_unique(into.detector_ids, other.detector_ids)
+    _extend_unique(into.source_contexts, other.source_contexts)
+    _extend_unique(into.reachability_path, other.reachability_path)
+
+    seen_steps = {
+        (s.file, s.line, s.column, s.symbol, s.value, s.operation) for s in into.resolution_path
+    }
+    for step in other.resolution_path:
+        key = (step.file, step.line, step.column, step.symbol, step.value, step.operation)
+        if key not in seen_steps:
+            into.resolution_path.append(step)
+            seen_steps.add(key)
+
+    into.usage.declared = into.usage.declared or other.usage.declared
+    into.usage.imported = into.usage.imported or other.usage.imported
+    into.usage.instantiated = into.usage.instantiated or other.usage.instantiated
+    into.usage.invoked = into.usage.invoked or other.usage.invoked
+    into.usage.runtime_observed = into.usage.runtime_observed or other.usage.runtime_observed
+    into.usage.reachable = _merge_reachability(into.usage.reachable, other.usage.reachable)
+
+    for field in type(into.confidence_factors).model_fields:
+        current = getattr(into.confidence_factors, field)
+        candidate = getattr(other.confidence_factors, field)
+        setattr(into.confidence_factors, field, max(current, candidate))
+
+    if (
+        other.value_resolution.value == "resolved"
+        or into.value_resolution.value == "not_applicable"
+    ):
+        into.value_resolution = other.value_resolution
+
+    if isinstance(into, Model) and isinstance(other, Model):
+        into.provider = into.provider or other.provider
+        into.revision = into.revision or other.revision
+        into.revision_pinned = into.revision_pinned or other.revision_pinned
+        into.environment_variable = into.environment_variable or other.environment_variable
+        _extend_unique(into.formats, other.formats)
+    elif isinstance(into, Service) and isinstance(other, Service):
+        into.endpoint = into.endpoint or other.endpoint
+    elif isinstance(into, Agent) and isinstance(other, Agent):
+        into.framework = into.framework or other.framework
+        _extend_unique(into.tools, other.tools)
+        _extend_unique(into.model_refs, other.model_refs)
+
+
+def _merge_reachability(left: Reachability, right: Reachability) -> Reachability:
+    if Reachability.TRUE in {left, right}:
+        return Reachability.TRUE
+    if Reachability.UNKNOWN in {left, right}:
+        return Reachability.UNKNOWN
+    return Reachability.FALSE
+
+
+def _extend_unique(target: list[T], values: Iterable[T]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)

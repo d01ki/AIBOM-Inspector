@@ -123,6 +123,7 @@ def _base_component(ctype: str, entity: Entity) -> dict[str, Any]:
         "name": entity.name,
     }
     props = _evidence_props(entity.source_evidence)
+    props.extend(_analysis_props(entity))
     if props:
         comp["properties"] = props
     return comp
@@ -148,7 +149,8 @@ def _model_component(model: Model) -> dict[str, Any]:
     _append_prop(props, "aibom:gated", _b(model.gated) if model.gated is not None else None)
     _append_prop(props, "aibom:last_modified", model.last_modified)
     _append_prop(
-        props, "aibom:has_model_card",
+        props,
+        "aibom:has_model_card",
         _b(model.has_model_card) if model.has_model_card is not None else None,
     )
     props.append(_prop("aibom:resolved", _b(model.resolved)))
@@ -230,6 +232,7 @@ def _service(service: Service) -> dict[str, Any]:
     if service.endpoint:
         svc["endpoints"] = [service.endpoint]
     props = _evidence_props(service.source_evidence)
+    props.extend(_analysis_props(service))
     props.append(_prop("aibom:service_kind", service.kind))
     svc["properties"] = props
     return svc
@@ -270,6 +273,29 @@ def _evidence_props(evidence: list[Evidence]) -> list[dict[str, str]]:
     for ev in evidence:
         props.append(_prop("aibom:evidence", f"{ev.location()} [{ev.matched_pattern}]"))
         props.append(_prop("aibom:evidence_confidence", f"{ev.confidence:.2f}"))
+    return props
+
+
+def _analysis_props(entity: Entity) -> list[dict[str, str]]:
+    props: list[dict[str, str]] = []
+    if entity.detector_ids:
+        props.append(_prop("aibom:detectors", ",".join(sorted(entity.detector_ids))))
+    usage = entity.usage
+    for name in ("declared", "imported", "instantiated", "invoked", "runtime_observed"):
+        props.append(_prop(f"aibom:usage:{name}", _b(getattr(usage, name))))
+    props.append(_prop("aibom:usage:reachable", usage.reachable.value))
+    if entity.source_contexts:
+        props.append(
+            _prop(
+                "aibom:source_contexts",
+                ",".join(sorted(context.value for context in entity.source_contexts)),
+            )
+        )
+    props.append(_prop("aibom:value_resolution", entity.value_resolution.value))
+    for step in entity.resolution_path:
+        location = f"{step.file}:{step.line}" if step.line is not None else step.file
+        symbol = f" {step.symbol}" if step.symbol else ""
+        props.append(_prop("aibom:resolution_step", f"{location} [{step.operation}]{symbol}"))
     return props
 
 

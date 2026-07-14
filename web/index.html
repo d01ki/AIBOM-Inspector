@@ -183,7 +183,8 @@
 
     <h2>Inventory <span class="grade" id="invSummary"></span></h2>
     <div class="tablewrap"><table id="inventory">
-      <thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th><th>Evidence</th></tr></thead>
+      <thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th><th>Usage</th>
+        <th>Context</th><th>Evidence / Detector</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </div>
@@ -222,6 +223,14 @@ function evLoc(ev) {
   if (!ev) return "";
   return ev.line_start === ev.line_end ? `${ev.file}:${ev.line_start}`
     : `${ev.file}:${ev.line_start}-${ev.line_end}`;
+}
+
+function usageLabel(usage) {
+  if (!usage) return "—";
+  const states = ["declared", "imported", "instantiated", "invoked"]
+    .filter(name => usage[name]);
+  states.push("reachable:" + (usage.reachable || "unknown"));
+  return states.join(" → ");
 }
 function setStatus(msg, isErr) {
   const s = $("status"); s.textContent = msg; s.className = isErr ? "err" : "";
@@ -338,12 +347,15 @@ function render(d) {
   ib.innerHTML = ents.length ? ents.map(e => {
     const prov = e.provider || e.source || e.ecosystem || "—";
     const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
+    const contexts = (e.source_contexts || []).join(", ") || "—";
+    const detectors = (e.detector_ids || []).join(", ") || "—";
     const typeCell = e.type === "package" && e.ai
       ? "package <strong style='color:var(--accent)'>· AI</strong>"
       : esc(e.type);
     return `<tr><td>${typeCell}</td><td>${esc(e.name)}</td>`
-      + `<td>${esc(prov)}</td><td><code>${esc(loc)}</code></td></tr>`;
-  }).join("") : `<tr><td colspan="4" class="empty">No components discovered.</td></tr>`;
+      + `<td>${esc(prov)}</td><td>${esc(usageLabel(e.usage))}</td>`
+      + `<td>${esc(contexts)}</td><td><code>${esc(loc)}</code><br>${esc(detectors)}</td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">No components discovered.</td></tr>`;
 
   $("results").style.display = "block";
 }
@@ -529,6 +541,13 @@ function detailShow(node) {
   let html = `<span class="dt-type">${esc(node.type)}</span><h3>${esc(node.label)}</h3>`;
   if (node.provider) html += `<div class="muted">provider: ${esc(node.provider)}</div>`;
   if (node.location) html += `<div class="muted">at <code>${esc(node.location)}</code></div>`;
+  if (node.usage) html += `<div class="muted">${esc(usageLabel(node.usage))}</div>`;
+  if (node.source_contexts && node.source_contexts.length) {
+    html += `<div class="muted">context: ${esc(node.source_contexts.join(", "))}</div>`;
+  }
+  if (node.detectors && node.detectors.length) {
+    html += `<div class="muted">detectors: ${esc(node.detectors.join(", "))}</div>`;
+  }
   if (!mine.length) {
     html += `<div class="dt-find muted">No findings on this component.</div>`;
   } else {

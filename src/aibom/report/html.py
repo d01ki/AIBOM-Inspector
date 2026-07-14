@@ -25,7 +25,7 @@ _CSS = """
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   color: #1c2330; background: #f5f6f8; }
-.wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 32px 20px 64px; }
 h1 { font-size: 24px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 36px 0 12px; }
 .sub { color: #5a6472; margin: 0 0 24px; font-size: 13px; word-break: break-all; }
@@ -59,9 +59,7 @@ footer { margin-top: 40px; color: #8a929e; font-size: 12px; }
 """
 
 
-def render_html(
-    inventory: Inventory, findings: list[Finding], score: SecurityScore
-) -> str:
+def render_html(inventory: Inventory, findings: list[Finding], score: SecurityScore) -> str:
     meta = inventory.metadata
     parts: list[str] = [
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>",
@@ -170,12 +168,18 @@ def _inventory_section(inventory: Inventory) -> str:
             or "—"
         )
         loc = entity.source_evidence[0].location() if entity.source_evidence else "—"
+        confidence = max((ev.confidence for ev in entity.source_evidence), default=0.0)
+        contexts = ", ".join(sorted(item.value for item in entity.source_contexts)) or "—"
+        detectors = ", ".join(sorted(entity.detector_ids)) or "—"
         rows.append(
             "<tr>"
             f"<td>{escape(entity.type.value)}</td>"
             f"<td>{escape(entity.name)}</td>"
             f"<td>{escape(str(provider))}</td>"
-            f"<td><code>{escape(loc)}</code></td>"
+            f"<td>{escape(_usage_label(entity))}</td>"
+            f"<td>{escape(contexts)}</td>"
+            f"<td>{confidence:.2f}</td>"
+            f"<td><code>{escape(loc)}</code><br>{escape(detectors)}</td>"
             "</tr>"
         )
     if not rows:
@@ -184,6 +188,20 @@ def _inventory_section(inventory: Inventory) -> str:
     summary = " · ".join(f"{v} {k}" for k, v in counts.items())
     return (
         f"<h2>Inventory <span style='font-size:13px;color:#5a6472'>({escape(summary)})</span></h2>"
-        "<table><thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th><th>Evidence</th>"
+        "<table><thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th>"
+        "<th>Usage</th><th>Context</th><th>Confidence</th><th>Evidence / Detector</th>"
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
     )
+
+
+def _usage_label(entity: object) -> str:
+    usage = getattr(entity, "usage", None)
+    if usage is None:
+        return "—"
+    states = [
+        name
+        for name in ("declared", "imported", "instantiated", "invoked")
+        if bool(getattr(usage, name, False))
+    ]
+    states.append(f"reachable:{usage.reachable.value}")
+    return " → ".join(states)

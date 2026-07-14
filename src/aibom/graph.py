@@ -32,11 +32,7 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         sev = worst.get(e.id)
         # Keep the graph readable: plain (non-AI) dependencies only appear when
         # something is wrong with them; the full list lives in the inventory.
-        if (
-            e.type.value == "package"
-            and not bool(getattr(e, "ai", False))
-            and sev is None
-        ):
+        if e.type.value == "package" and not bool(getattr(e, "ai", False)) and sev is None:
             continue
         location = e.source_evidence[0].location() if e.source_evidence else None
         nodes.append(
@@ -48,6 +44,9 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
                 "severity": sev.value if sev else None,
                 "finding_count": counts.get(e.id, 0),
                 "location": location,
+                "detectors": sorted(e.detector_ids),
+                "usage": e.usage.model_dump(mode="json"),
+                "source_contexts": sorted(context.value for context in e.source_contexts),
             }
         )
 
@@ -61,8 +60,6 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         if key in seen:
             continue
         seen.add(key)
-        edges.append(
-            {"source": r.source_id, "target": r.target_id, "type": r.relationship.value}
-        )
+        edges.append({"source": r.source_id, "target": r.target_id, "type": r.relationship.value})
 
     return {"nodes": nodes, "edges": edges}

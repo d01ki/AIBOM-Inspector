@@ -46,6 +46,13 @@ resolves it, and adds graph + risk analysis on top.
 
 **Early alpha (v0.1, M1–M4).** Implemented today:
 
+- ✅ **Python AST detectors** for OpenAI, Anthropic, and Hugging Face usage,
+  including import aliases, actual API invocations, and auditable value resolution
+- ✅ **Usage and reachability evidence** — declared/imported/instantiated/invoked
+  states, same-file entrypoint paths, confidence factors, detector IDs, and
+  production/test/example/docs source contexts
+- ✅ **Reproducible benchmark harness** — category Precision/Recall/F1 plus
+  explicit false-positive and false-negative reports
 - ✅ **Dependency-manifest collector** — finds AI/ML libraries in `requirements*.txt`,
   `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm) with versions and purls, so
   the AIBOM is useful on real repos, not just ones with inline `from_pretrained`
@@ -115,7 +122,17 @@ aibom scan ./path/to/repo --fail-on high
 
 # drop low-confidence detections
 aibom scan ./path/to/repo --min-confidence 0.8
+
+# disable one detector while debugging or enforcing an organization profile
+aibom scan ./path/to/repo --disable-detector python.openai.ast
+
+# evaluate checked-out repositories against reviewed ground truth
+python benchmark/evaluate.py
 ```
+
+The reproducible reports include a deterministic local fixture and a
+[two-repository public evaluation](benchmark/reports/external-latest.md). The
+public report is regression evidence, not a claim of broad ecosystem coverage.
 
 ## Risk rules & scoring
 
@@ -220,7 +237,7 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 
 | Component | Signals |
 |---|---|
-| **Models** | `from_pretrained(...)`, `pipeline(model=...)`, `repo_id=`, `huggingface.co/...` URLs, LLM model ids (`gpt-*`, `claude-*`), and weight files (`.safetensors`, `.gguf`, `.pkl`, `.bin`, …) |
+| **Models** | Python AST-confirmed OpenAI/Anthropic calls, `from_pretrained(...)`, `pipeline(model=...)`, variables/dictionaries/f-strings/environment defaults, `repo_id=`, HF URLs, and weight files (`.safetensors`, `.gguf`, `.pkl`, `.bin`, …) |
 | **Datasets** | `load_dataset(...)` |
 | **Prompts** | template files (`prompts/`, `*.prompt`, `*.jinja`), hardcoded system prompts |
 | **Agents** | LangChain/LangGraph constructors (`create_react_agent`, `AgentExecutor`, …) |
@@ -240,7 +257,13 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 uv run pytest            # tests
 uv run ruff check .      # lint
 uv run mypy              # types
+python benchmark/evaluate.py  # precision/recall benchmark
 ```
+
+Implementation details: [architecture](docs/architecture.md),
+[detection methodology](docs/detection-methodology.md),
+[benchmark methodology](docs/benchmark-methodology.md), and
+[known limitations](docs/limitations.md).
 
 ### Releasing
 

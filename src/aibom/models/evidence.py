@@ -19,6 +19,12 @@ class Evidence(BaseModel):
     file: str = Field(description="Repo-relative path of the file the match came from.")
     line_start: int = Field(ge=1, description="1-indexed first line of the match.")
     line_end: int = Field(ge=1, description="1-indexed last line of the match.")
+    column_start: int | None = Field(
+        default=None, ge=1, description="Optional 1-indexed first column of the match."
+    )
+    column_end: int | None = Field(
+        default=None, ge=1, description="Optional 1-indexed last column of the match."
+    )
     snippet: str = Field(description="The matched source text (trimmed).")
     matched_pattern: str = Field(
         description="Identifier of the detector/pattern that produced this evidence."
@@ -29,6 +35,10 @@ class Evidence(BaseModel):
         le=1.0,
         description="Detector confidence that this observation is a true positive.",
     )
+    detector_id: str | None = Field(
+        default=None, description="Stable identifier of the detector that produced this evidence."
+    )
+    kind: str = Field(default="source", description="Evidence kind, e.g. AST, regex, or manifest.")
 
     def location(self) -> str:
         """Return a clickable-style `path:line` reference."""

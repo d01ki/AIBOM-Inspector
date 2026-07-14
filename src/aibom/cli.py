@@ -76,7 +76,10 @@ def main(
     _version: Annotated[
         bool | None,
         typer.Option(
-            "--version", "-V", callback=_version_callback, is_eager=True,
+            "--version",
+            "-V",
+            callback=_version_callback,
+            is_eager=True,
             help="Show version and exit.",
         ),
     ] = None,
@@ -132,6 +135,13 @@ def scan(
         float,
         typer.Option("--min-confidence", help="Drop entities whose best evidence is below this."),
     ] = 0.0,
+    disable_detector: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--disable-detector",
+            help="Disable a detector by stable ID; repeat the option to disable several.",
+        ),
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
@@ -144,7 +154,12 @@ def scan(
     fail_threshold = _parse_severity(fail_on)
 
     result = run_scan(
-        target, resolve=resolve, vulns=vulns, hf_cache=hf_cache, min_confidence=min_confidence
+        target,
+        resolve=resolve,
+        vulns=vulns,
+        hf_cache=hf_cache,
+        min_confidence=min_confidence,
+        disabled_detectors=set(disable_detector or []),
     )
     inventory, findings, score = result.inventory, result.findings, result.score
 
@@ -175,9 +190,7 @@ def scan(
         report.write_text(render_html(inventory, findings, score), encoding="utf-8")
         console.print(f"[green]written[/green] HTML report to [bold]{report}[/bold]")
 
-    if fail_threshold is not None and any(
-        f.severity.rank >= fail_threshold.rank for f in findings
-    ):
+    if fail_threshold is not None and any(f.severity.rank >= fail_threshold.rank for f in findings):
         raise typer.Exit(code=1)
 
 
@@ -218,9 +231,7 @@ def _render(inventory: Inventory) -> None:
     summary.add_column("Count", justify="right")
     for etype in EntityType:
         if counts.get(etype.value):
-            summary.add_row(
-                f"[{_TYPE_STYLE[etype]}]{etype.value}[/]", str(counts[etype.value])
-            )
+            summary.add_row(f"[{_TYPE_STYLE[etype]}]{etype.value}[/]", str(counts[etype.value]))
     summary.add_row("[dim]relationships[/dim]", str(len(inventory.relationships)))
     console.print(summary)
 

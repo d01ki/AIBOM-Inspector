@@ -40,6 +40,7 @@ def run_scan(
     hf_cache: str | Path | None = None,
     min_confidence: float = 0.0,
     display_target: str | None = None,
+    disabled_detectors: set[str] | None = None,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
@@ -58,7 +59,7 @@ def run_scan(
             target=display_target or str(Path(target).resolve()),
         )
     )
-    RepoCollector(target).collect(inventory)
+    RepoCollector(target, disabled_detectors=disabled_detectors).collect(inventory)
     DependencyCollector(target).collect(inventory)
 
     if resolve or hf_cache is not None:
@@ -81,12 +82,10 @@ def apply_confidence_filter(inventory: Inventory, threshold: float) -> None:
     if threshold <= 0.0:
         return
     keep = [
-        e for e in inventory.entities
-        if any(ev.confidence >= threshold for ev in e.source_evidence)
+        e for e in inventory.entities if any(ev.confidence >= threshold for ev in e.source_evidence)
     ]
     kept_ids = {e.id for e in keep}
     inventory.entities = keep
     inventory.relationships = [
-        r for r in inventory.relationships
-        if r.source_id in kept_ids and r.target_id in kept_ids
+        r for r in inventory.relationships if r.source_id in kept_ids and r.target_id in kept_ids
     ]

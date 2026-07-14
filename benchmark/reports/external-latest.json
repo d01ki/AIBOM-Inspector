@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "repository_count": 2,
+  "overall": {
+    "true_positives": 8,
+    "false_positives": 0,
+    "false_negatives": 3,
+    "precision": 1.0,
+    "recall": 0.7273,
+    "f1": 0.8421
+  },
+  "categories": {
+    "models": {
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "services": {
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "prompts": {
+      "true_positives": 4,
+      "false_positives": 0,
+      "false_negatives": 3,
+      "precision": 1.0,
+      "recall": 0.5714,
+      "f1": 0.7273
+    },
+    "agents": {
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "tools": {
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "mcp": {
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "datasets": {
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "model_files": {
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "ai_packages": {
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    }
+  },
+  "repositories": [
+    {
+      "repository": "pallets/flask",
+      "commit": "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+      "overall": {
+        "true_positives": 0,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": null,
+        "recall": null,
+        "f1": null
+      },
+      "categories": {
+        "models": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "services": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "prompts": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "agents": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "tools": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "mcp": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "datasets": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "model_files": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "ai_packages": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        }
+      },
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "repository": "openai/openai-quickstart-python",
+      "commit": "ec8890d101bdc17d66512d94a76b5e7131d188a1",
+      "overall": {
+        "true_positives": 8,
+        "false_positives": 0,
+        "false_negatives": 3,
+        "precision": 1.0,
+        "recall": 0.7273,
+        "f1": 0.8421
+      },
+      "categories": {
+        "models": {
+          "true_positives": 2,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "services": {
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "prompts": {
+          "true_positives": 4,
+          "false_positives": 0,
+          "false_negatives": 3,
+          "precision": 1.0,
+          "recall": 0.5714,
+          "f1": 0.7273
+        },
+        "agents": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "tools": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "mcp": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "datasets": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "model_files": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "ai_packages": {
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "false_positives": [],
+      "false_negatives": [
+        {
+          "category": "prompts",
+          "name": "assistant-instructions@examples/assistant-basic/assistant.py:11",
+          "file": "examples/assistant-basic/assistant.py",
+          "line": 11
+        },
+        {
+          "category": "prompts",
+          "name": "assistant-instructions@examples/assistant-functions/functions.py:64",
+          "file": "examples/assistant-functions/functions.py",
+          "line": 64
+        },
+        {
+          "category": "prompts",
+          "name": "assistant-instructions@examples/assistant-flask/app.py:116",
+          "file": "examples/assistant-flask/app.py",
+          "line": 116
+        }
+      ]
+    }
+  ]
+}

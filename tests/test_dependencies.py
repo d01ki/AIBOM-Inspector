@@ -25,7 +25,7 @@ def test_requirements_txt(tmp_path: Any) -> None:
     (tmp_path / "requirements.txt").write_text(
         "transformers==4.40.0\n"
         "torch>=2.0\n"
-        "requests==2.31.0\n"      # not AI -> catalogued with ai=False
+        "requests==2.31.0\n"  # not AI -> catalogued with ai=False
         "openai\n"
         "# a comment\n"
         "-r other.txt\n",
@@ -42,13 +42,16 @@ def test_requirements_txt(tmp_path: Any) -> None:
     assert pkgs["torch"].version_pinned is False
     assert pkgs["openai"].version is None
     assert pkgs["requests"].version_pinned is True  # full BOM keeps exact pins too
+    assert pkgs["transformers"].usage.declared is True
+    assert pkgs["transformers"].usage.imported is False
+    assert pkgs["transformers"].detector_ids == ["manifest.dependencies"]
 
 
 def test_pyproject_toml(tmp_path: Any) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\n'
+        "[project]\n"
         'dependencies = ["anthropic>=0.25", "langchain-core==0.2.1", "flask>=3.0"]\n'
-        '[project.optional-dependencies]\n'
+        "[project.optional-dependencies]\n"
         'ml = ["sentence-transformers"]\n',
         encoding="utf-8",
     )
@@ -62,13 +65,13 @@ def test_pyproject_toml(tmp_path: Any) -> None:
 
 def test_package_json(tmp_path: Any) -> None:
     (tmp_path / "package.json").write_text(
-        '{\n'
+        "{\n"
         '  "dependencies": {\n'
         '    "openai": "^4.0.0",\n'
         '    "@anthropic-ai/sdk": "0.20.0",\n'
         '    "express": "^4.18.0"\n'
-        '  }\n'
-        '}\n',
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
@@ -84,7 +87,7 @@ def test_package_json(tmp_path: Any) -> None:
 
 def test_poetry_dependencies(tmp_path: Any) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.poetry.dependencies]\n'
+        "[tool.poetry.dependencies]\n"
         'python = "^3.10"\n'
         'torch = "^2.0.0"\n'
         'openai = "1.14.0"\n'
@@ -100,11 +103,7 @@ def test_poetry_dependencies(tmp_path: Any) -> None:
 
 def test_pipfile(tmp_path: Any) -> None:
     (tmp_path / "Pipfile").write_text(
-        '[packages]\n'
-        'transformers = "==4.40.0"\n'
-        'requests = "*"\n'
-        '[dev-packages]\n'
-        'anthropic = "*"\n',
+        '[packages]\ntransformers = "==4.40.0"\nrequests = "*"\n[dev-packages]\nanthropic = "*"\n',
         encoding="utf-8",
     )
     pkgs = _packages(_scan(tmp_path))
@@ -117,9 +116,9 @@ def test_plain_deps_catalogued_but_not_ai(tmp_path: Any) -> None:
     (tmp_path / "requirements.txt").write_text("requests\nflask\nnumpy\n", encoding="utf-8")
     inv = _scan(tmp_path)
     pkgs = inv.by_type(EntityType.PACKAGE)
-    assert len(pkgs) == 3                      # complete BOM: everything catalogued
-    assert all(p.ai is False for p in pkgs)    # type: ignore[attr-defined]
-    assert inv.has_ai_components() is False    # ...but none of it counts as AI usage
+    assert len(pkgs) == 3  # complete BOM: everything catalogued
+    assert all(p.ai is False for p in pkgs)  # type: ignore[attr-defined]
+    assert inv.has_ai_components() is False  # ...but none of it counts as AI usage
 
 
 def test_same_name_across_ecosystems_stays_distinct(tmp_path: Any) -> None:

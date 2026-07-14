@@ -1,5 +1,13 @@
 """Unified data model (Pydantic v2) for the AIBOM Inspector inventory."""
 
+from aibom.models.analysis import (
+    ConfidenceFactors,
+    Reachability,
+    ResolutionStep,
+    SourceContext,
+    UsageState,
+    ValueResolution,
+)
 from aibom.models.entities import (
     Agent,
     Dataset,
@@ -16,6 +24,7 @@ from aibom.models.evidence import Evidence
 
 __all__ = [
     "Agent",
+    "ConfidenceFactors",
     "Dataset",
     "Entity",
     "EntityType",
@@ -23,7 +32,12 @@ __all__ = [
     "License",
     "Model",
     "Prompt",
+    "Reachability",
     "Relationship",
     "RelationshipType",
+    "ResolutionStep",
     "Service",
+    "SourceContext",
+    "UsageState",
+    "ValueResolution",
 ]

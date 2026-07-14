@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/d01ki/AIBOM-Inspector/benchmark/ground-truth.schema.json",
+  "title": "AIBOM Inspector ground truth",
+  "type": "object",
+  "required": ["repository", "commit", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "repository": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "minLength": 1},
+    "local_path": {"type": "string", "minLength": 1},
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "name"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "enum": [
+              "model", "service", "prompt", "agent", "tool", "mcp",
+              "dataset", "model_file", "ai_package", "package"
+            ]
+          },
+          "name": {"type": "string", "minLength": 1},
+          "file": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 1},
+          "status": {
+            "enum": ["declared", "imported", "instantiated", "invoked", "reachable"]
+          }
+        }
+      }
+    }
+  }
+}

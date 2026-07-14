@@ -22,8 +22,12 @@ from aibom.risk.rules import (
 
 def _ev(file: str = "app.py", line: int = 1) -> Evidence:
     return Evidence(
-        file=file, line_start=line, line_end=line, snippet="x",
-        matched_pattern="test", confidence=0.9,
+        file=file,
+        line_start=line,
+        line_end=line,
+        snippet="x",
+        matched_pattern="test",
+        confidence=0.9,
     )
 
 
@@ -77,8 +81,13 @@ def test_findings_are_severity_ordered(fixture_inventory: Inventory) -> None:
 
 
 def test_tdr004_missing_model_card() -> None:
-    m = Model(name="a/b", provider="huggingface", resolved=True, has_model_card=False,
-              source_evidence=[_ev()])
+    m = Model(
+        name="a/b",
+        provider="huggingface",
+        resolved=True,
+        has_model_card=False,
+        source_evidence=[_ev()],
+    )
     assert tdr_004_missing_model_card(_inv(m))
     # unresolved -> no claim
     m2 = Model(name="a/c", provider="huggingface", source_evidence=[_ev()])
@@ -90,22 +99,38 @@ def test_tdr005_unknown_and_nonspdx_license() -> None:
     findings = tdr_005_license(_inv(unknown))
     assert findings and findings[0].severity is Severity.MEDIUM
 
-    weird = Model(name="a/c", provider="huggingface", resolved=True,
-                  license="my-custom-thing", source_evidence=[_ev()])
+    weird = Model(
+        name="a/c",
+        provider="huggingface",
+        resolved=True,
+        license="my-custom-thing",
+        source_evidence=[_ev()],
+    )
     findings = tdr_005_license(_inv(weird))
     assert findings and findings[0].severity is Severity.LOW
 
-    ok = Model(name="a/d", provider="huggingface", resolved=True,
-               license="apache-2.0", source_evidence=[_ev()])
+    ok = Model(
+        name="a/d",
+        provider="huggingface",
+        resolved=True,
+        license="apache-2.0",
+        source_evidence=[_ev()],
+    )
     assert not tdr_005_license(_inv(ok))
 
 
 def test_tdr006_low_downloads() -> None:
-    m = Model(name="a/b", provider="huggingface", resolved=True, downloads=3,
-              source_evidence=[_ev()])
+    m = Model(
+        name="a/b", provider="huggingface", resolved=True, downloads=3, source_evidence=[_ev()]
+    )
     assert tdr_006_unverified_author(_inv(m))
-    popular = Model(name="a/c", provider="huggingface", resolved=True, downloads=999_999,
-                    source_evidence=[_ev()])
+    popular = Model(
+        name="a/c",
+        provider="huggingface",
+        resolved=True,
+        downloads=999_999,
+        source_evidence=[_ev()],
+    )
     assert not tdr_006_unverified_author(_inv(popular))
 
 
@@ -124,8 +149,9 @@ def test_tdr007_secret_elsewhere_is_high() -> None:
 
 
 def test_tdr008_provenance_suppressed_when_present() -> None:
-    resolved = Dataset(name="a/b", source="huggingface", provenance="hf author: acme",
-                       source_evidence=[_ev()])
+    resolved = Dataset(
+        name="a/b", source="huggingface", provenance="hf author: acme", source_evidence=[_ev()]
+    )
     assert not _rule_ids(evaluate(_inv(resolved))) & {"TDR-008"}
 
 
@@ -139,12 +165,14 @@ def test_secret_signal_detected_by_collector(tmp_path: Any) -> None:
     from aibom.collectors.repo import RepoCollector
 
     src = tmp_path / "svc.py"
-    src.write_text(
-        'import openai\napi_key = "sk-abcdef0123456789ABCDEF0123"\n', encoding="utf-8"
-    )
+    src.write_text('import openai\napi_key = "sk-abcdef0123456789ABCDEF0123"\n', encoding="utf-8")
     inv = Inventory(metadata=ScanMetadata(tool_version=__version__, target=str(tmp_path)))
     RepoCollector(tmp_path).collect(inv)
-    assert inv.signals_of("hardcoded_secret")
+    signals = inv.signals_of("hardcoded_secret")
+    assert signals
+    dumped = signals[0].model_dump_json()
+    assert "sk-abcdef0123456789ABCDEF0123" not in dumped
+    assert "<redacted>" in dumped
     assert {"TDR-007"} <= _rule_ids(evaluate(inv))
 
 
@@ -152,9 +180,7 @@ def test_env_lookup_is_not_a_secret(tmp_path: Any) -> None:
     from aibom.collectors.repo import RepoCollector
 
     src = tmp_path / "svc.py"
-    src.write_text(
-        'import os\napi_key = os.environ["OPENAI_API_KEY"]\n', encoding="utf-8"
-    )
+    src.write_text('import os\napi_key = os.environ["OPENAI_API_KEY"]\n', encoding="utf-8")
     inv = Inventory(metadata=ScanMetadata(tool_version=__version__, target=str(tmp_path)))
     RepoCollector(tmp_path).collect(inv)
     assert not inv.signals_of("hardcoded_secret")
