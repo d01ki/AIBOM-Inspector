@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 from aibom.models.entities import Entity, EntityType, Relationship
+from aibom.models.signals import RiskSignal
 
 
 class ScanMetadata(BaseModel):
@@ -23,12 +24,33 @@ class ScanMetadata(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class ScanStats(BaseModel):
+    """What the scan actually did — proof of work for the UI and reports.
+
+    A static scan is fast (it reads text, nothing more), which users can
+    mistake for "it did nothing". These counters make the work inspectable.
+    """
+
+    files_scanned: int = Field(default=0, description="Files read line-by-line.")
+    bytes_scanned: int = Field(default=0, description="Total size of the files read.")
+    manifests_parsed: list[str] = Field(
+        default_factory=list, description="Dependency manifests parsed (repo-relative)."
+    )
+    duration_ms: int | None = Field(default=None, description="Scan wall time (excl. clone).")
+    clone_ms: int | None = Field(default=None, description="Clone wall time (API scans only).")
+
+
 class Inventory(BaseModel):
     """A normalized collection of AI supply-chain entities + relationships."""
 
     metadata: ScanMetadata
-    entities: list[Entity] = Field(default_factory=list)
+    # SerializeAsAny: dump each entity with its *runtime* class (Model, Package…),
+    # not the base Entity schema — otherwise subclass fields (provider, ai, purl,
+    # ecosystem, …) silently vanish from JSON output and the API payload.
+    entities: list[SerializeAsAny[Entity]] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
+    signals: list[RiskSignal] = Field(default_factory=list)
+    stats: ScanStats = Field(default_factory=ScanStats)
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.
@@ -55,9 +77,32 @@ class Inventory(BaseModel):
                 return
         self.relationships.append(relationship)
 
+    def add_signal(self, signal: RiskSignal) -> None:
+        """Add a risk signal, deduplicating on (kind, file, line)."""
+        key = signal.location_key()
+        if any(s.location_key() == key for s in self.signals):
+            return
+        self.signals.append(signal)
+
+    def signals_of(self, kind: str) -> list[RiskSignal]:
+        """Return all risk signals of a given kind."""
+        return [s for s in self.signals if s.kind == kind]
+
     def by_type(self, entity_type: EntityType) -> list[Entity]:
         """Return all entities of a given type."""
         return [e for e in self.entities if e.type == entity_type]
+
+    def has_ai_components(self) -> bool:
+        """True if anything AI-related was found.
+
+        Non-AI packages are part of the complete BOM but do not count as AI
+        usage — a repo whose only hits are ordinary dependencies should read
+        as "no AI components detected", not be scored.
+        """
+        return any(
+            e.type != EntityType.PACKAGE or bool(getattr(e, "ai", False))
+            for e in self.entities
+        )
 
     def counts(self) -> dict[str, int]:
         """Return a {type: count} summary."""

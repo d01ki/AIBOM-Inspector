@@ -23,6 +23,7 @@ class EntityType(str, Enum):
     PROMPT = "prompt"
     AGENT = "agent"
     SERVICE = "service"
+    PACKAGE = "package"
     LICENSE = "license"
 
 
@@ -79,6 +80,13 @@ class Model(Entity):
     license: str | None = None
     author: str | None = None
     has_model_card: bool | None = None
+    # -- resolution (populated by a resolver, e.g. Hugging Face) ---------------
+    downloads: int | None = Field(default=None, description="Downloads reported by the hub.")
+    gated: bool | None = Field(default=None, description="Whether the hub gates access.")
+    last_modified: str | None = Field(default=None, description="ISO timestamp of last change.")
+    resolved: bool = Field(
+        default=False, description="True once a resolver has enriched this entity."
+    )
 
 
 class Dataset(Entity):
@@ -88,6 +96,13 @@ class Dataset(Entity):
     source: str | None = Field(default=None, description="e.g. 'huggingface', local path, URL.")
     license: str | None = None
     provenance: str | None = None
+    author: str | None = None
+    downloads: int | None = Field(default=None, description="Downloads reported by the hub.")
+    gated: bool | None = Field(default=None, description="Whether the hub gates access.")
+    last_modified: str | None = Field(default=None, description="ISO timestamp of last change.")
+    resolved: bool = Field(
+        default=False, description="True once a resolver has enriched this entity."
+    )
 
 
 class Prompt(Entity):
@@ -113,6 +128,37 @@ class Service(Entity):
     type: EntityType = EntityType.SERVICE
     endpoint: str | None = None
     kind: str = Field(default="api", description="'api' | 'mcp' | 'other'.")
+
+
+class Package(Entity):
+    """A software dependency declared in a manifest.
+
+    *All* dependencies are inventoried (a complete BOM); ``ai`` marks the ones
+    that belong to the AI/ML ecosystem — the layer this tool adds on top of a
+    conventional SBOM.
+    """
+
+    type: EntityType = EntityType.PACKAGE
+    ecosystem: str | None = Field(default=None, description="'PyPI' | 'npm' | 'conda'.")
+    version: str | None = Field(default=None, description="Declared version, if any.")
+    version_pinned: bool = Field(default=False, description="True for an exact (==) pin.")
+    ai: bool = Field(default=False, description="True if this is an AI/ML-ecosystem package.")
+
+    def natural_key(self) -> tuple[str, str]:
+        """Packages dedupe per ecosystem — 'openai' on PyPI and npm are distinct."""
+        eco = (self.ecosystem or "").lower()
+        return (self.type.value, f"{eco}:{self.name.strip().lower()}")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def purl(self) -> str | None:
+        """Package URL (purl), e.g. ``pkg:pypi/transformers@4.40`` — enables
+        ecosystem vulnerability correlation (OSV, Dependency-Track)."""
+        eco = {"pypi": "pypi", "npm": "npm", "conda": "conda"}.get((self.ecosystem or "").lower())
+        if not eco:
+            return None
+        base = f"pkg:{eco}/{self.name}"
+        return f"{base}@{self.version}" if self.version else base
 
 
 class License(Entity):

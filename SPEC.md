@@ -99,6 +99,11 @@ Rule-based, deterministic, YAML-defined. Each finding: `rule_id`, severity (info
 | TDR-009 | `trust_remote_code=True` usage | High |
 | TDR-010 | Deprecated/yanked model referenced | Medium |
 
+**Package vulnerabilities:** the dependency collector extracts AI/ML libraries
+(with versions + purls) from `requirements*.txt` / `pyproject.toml` / `Pipfile` /
+`package.json`, and (with `--resolve`) pinned versions are mapped to known
+CVE/GHSA advisories via OSV.dev — each match becoming an evidence-backed finding.
+
 **Security score** = weighted aggregate (0–100) over categories {integrity, provenance, licensing, configuration}, formula documented in the report itself. **LLM assistance is opt-in and limited to natural-language explanation of deterministic findings** — never the source of a score (reproducibility requirement).
 
 ## 7. Engineering Rules
@@ -124,10 +129,10 @@ Python 3.12+, FastAPI, React+TypeScript, Pydantic v2 everywhere, strict typing (
 
 ## 10. Milestones
 
-| M | Deliverable |
-|---|---|
-| M1 | Schema + repo collector + evidence engine |
-| M2 | HF resolver + AIBOM (CycloneDX) export |
-| M3 | Risk rules TDR-001..010 + scoring + HTML report |
-| M4 | Graph engine + FastAPI + React dashboard |
-| M5 | Demo fixture repo, docs, packaging (PyPI), Arsenal submission |
+| M | Deliverable | Status |
+|---|---|---|
+| M1 | Schema + repo collector + evidence engine | ✅ done |
+| M2 | HF resolver + AIBOM (CycloneDX) export | ✅ done |
+| M3 | Risk rules TDR-001..010 + scoring + HTML report | ✅ done |
+| M4 | FastAPI backend + web UI + interactive dependency graph | ✅ done |
+| M5 | Demo fixture repo, docs, packaging (PyPI), Arsenal submission | planned |

@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIBOM Inspector</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --fg: #1c2330; --muted: #5a6472;
+    --border: #e6e8ec; --accent: #2f5bd7; --shadow: 0 1px 3px rgba(0,0,0,.08);
+    --chip-crit: #b3123b; --chip-high: #d64500; --chip-med: #b8860b;
+    --chip-low: #3a7d3a; --chip-info: #5a6472;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --fg: #e6e9ef; --muted: #9aa4b2;
+      --border: #2a313d; --accent: #6f8fe6; --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 72px; }
+  header h1 { font-size: 26px; margin: 0 0 4px; }
+  header p { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 18px 20px; }
+  .controls { display: grid; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text], input[type=url] { width: 100%; padding: 10px 12px; font-size: 14px;
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; }
+  .grow { flex: 1 1 320px; }
+  .small { flex: 0 0 240px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--fg); }
+  .check input { width: 16px; height: 16px; }
+  #status { margin: 18px 0 0; font-size: 14px; color: var(--muted); min-height: 20px; }
+  #status.err { color: var(--chip-crit); }
+  .results { margin-top: 24px; display: none; }
+  .cards { display: flex; flex-wrap: wrap; gap: 16px; }
+  .score { flex: 0 0 170px; text-align: center; }
+  .score .num { font-size: 52px; font-weight: 700; line-height: 1; }
+  .score .grade { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .cats { flex: 1 1 300px; }
+  .cat { margin: 10px 0; }
+  .cat .r { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 4px; }
+  .chips { margin: 16px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 12px; font-weight: 600; color: #fff; padding: 3px 10px; border-radius: 999px; }
+  h2 { font-size: 18px; margin: 32px 0 12px; }
+  .tablewrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; vertical-align: top;
+    border-bottom: 1px solid var(--border); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .sev { font-weight: 700; color: #fff; padding: 2px 8px; border-radius: 6px; font-size: 11px;
+    white-space: nowrap; text-transform: capitalize; }
+  code { background: var(--border); padding: 1px 5px; border-radius: 4px; font-size: 12px;
+    word-break: break-all; }
+  .rem { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .empty { color: var(--chip-low); }
+  footer { margin-top: 44px; color: var(--muted); font-size: 12px; }
+  a { color: var(--accent); }
+
+  /* dependency graph */
+  .graphgrid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 760px) { .graphgrid { grid-template-columns: 1fr 260px; } }
+  #graph { width: 100%; }
+  #graph svg { width: 100%; height: auto; display: block; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; touch-action: none; }
+  #graph .node { cursor: pointer; }
+  #graph .node text { font-size: 9px; fill: var(--fg); pointer-events: none; }
+  #graph .edge { stroke: var(--muted); stroke-opacity: .4; stroke-width: 1.2; }
+  #graph circle { stroke: var(--card); stroke-width: 1.5; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 2px 0; font-size: 12px;
+    color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #graphDetail { align-self: start; font-size: 13px; }
+  #graphDetail .dt-type { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); }
+  #graphDetail h3 { margin: 2px 0 8px; font-size: 15px; word-break: break-all; }
+  #graphDetail .dt-find { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+  #graphDetail .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AIBOM Inspector</h1>
+    <p>Discover, inventory, and risk-analyze the AI supply chain of a public repository.
+       Static &amp; evidence-backed — the scanner never runs the code it scans.</p>
+  </header>
+
+  <div class="card controls">
+    <div>
+      <label for="repo">Repository URL</label>
+      <div class="row">
+        <input class="grow" type="url" id="repo" placeholder="https://github.com/owner/repo"
+               value="https://github.com/d01ki/AIBOM-Inspector" autocomplete="off">
+        <button id="scan">Scan</button>
+      </div>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="resolve" checked>
+        Resolve Hugging Face metadata (license &amp; model-card checks)</label>
+      <span class="check" style="color:var(--muted)">Known-vulnerability mapping (OSV) always runs.</span>
+    </div>
+    <div class="row">
+      <button class="ghost" id="download" disabled>Download HTML report</button>
+    </div>
+  </div>
+
+  <p id="status"></p>
+
+  <div class="results" id="results">
+    <div class="cards">
+      <div class="card score">
+        <div class="num" id="scoreNum">–</div>
+        <div class="grade" id="scoreGrade">/ 100</div>
+      </div>
+      <div class="card cats" id="cats"></div>
+    </div>
+    <div class="chips" id="chips"></div>
+
+    <details class="card" style="margin-top:14px">
+      <summary style="cursor:pointer;font-weight:600">What does this score mean?</summary>
+      <div style="font-size:13px;line-height:1.6;margin-top:10px">
+        <p style="margin:0 0 8px">The score measures the <strong>supply-chain hygiene of the
+        AI components detected in this repository</strong> — models, datasets, prompts,
+        agents, AI services, and AI packages. It is <em>not</em> a general security audit
+        of the codebase; a repository with no AI components shows "no AI components
+        detected" instead of a score.</p>
+        <p style="margin:0 0 8px"><strong>Categories.</strong>
+        <em>integrity</em>: can what you load be silently swapped or execute code
+        (pickle weights, unpinned models/packages, known CVEs)?
+        <em>provenance</em>: do you know where components come from (typosquats,
+        missing model cards, undocumented datasets)?
+        <em>licensing</em>: are licenses known and usable?
+        <em>configuration</em>: risky settings and exposure
+        (trust_remote_code, hardcoded secrets, MCP tool surfaces).</p>
+        <p style="margin:0 0 8px"><strong>Formula.</strong> Each category starts at 100 and
+        loses points per finding — critical −40, high −20, medium −10, low −3 — floored
+        at 0, counting at most 3 findings per rule. Overall =
+        0.55 × mean + 0.45 × worst category, so one bad category is not averaged away.</p>
+        <p style="margin:0"><strong>Grades.</strong> A ≥ 90 (good hygiene) · B ≥ 75 (minor
+        issues) · C ≥ 60 (needs attention) · D ≥ 40 (poor hygiene) · F &lt; 40 (serious
+        issues). Every point lost is traceable to a finding with a
+        <code>file:line</code> evidence trail below.</p>
+      </div>
+    </details>
+
+    <h2>Dependency graph</h2>
+    <div class="graphgrid">
+      <div>
+        <div id="graph"></div>
+        <div class="legend">
+          <span><i style="background:#b3123b"></i>critical</span>
+          <span><i style="background:#d64500"></i>high</span>
+          <span><i style="background:#b8860b"></i>medium</span>
+          <span><i style="background:#3a7d3a"></i>low</span>
+          <span><i style="background:#6b7280"></i>no finding</span>
+          <span class="muted">· click a node for evidence</span>
+        </div>
+      </div>
+      <div class="card" id="graphDetail">
+        <span class="muted">Click a node to see the component and its evidence-backed findings.</span>
+      </div>
+    </div>
+
+    <h2>Findings <span class="grade" id="findingCount"></span></h2>
+    <div class="tablewrap"><table id="findings">
+      <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Where</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+    <h2>Inventory <span class="grade" id="invSummary"></span></h2>
+    <div class="tablewrap"><table id="inventory">
+      <thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th><th>Evidence</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <footer>
+    Findings are deterministic and rule-based (no LLM). Score: each category
+    {integrity, provenance, licensing, configuration} starts at 100 and loses points per
+    finding (critical 40 / high 20 / medium 10 / low 3, max 3 findings per rule), floored
+    at 0; overall = 0.55 × mean + 0.45 × worst category, so one wrecked category can't be
+    averaged away. Run the API with <code>aibom serve</code>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+const SEV_COLOR = { critical: "#b3123b", high: "#d64500", medium: "#b8860b", low: "#3a7d3a", info: "#5a6472" };
+const $ = (id) => document.getElementById(id);
+
+// The backend serves this page, so the API lives at this page's origin.
+// Static hosting (e.g. GitHub Pages) can point elsewhere via ?api=https://host.
+function apiBase() {
+  const override = new URLSearchParams(location.search).get("api");
+  if (override) return override.replace(/\/$/, "");
+  return /^https?:$/.test(location.protocol) && location.host
+    ? location.origin : "http://localhost:8000";
+}
+
+let lastRequest = null;
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s == null ? "" : String(s);
+  return d.innerHTML;
+}
+function evLoc(ev) {
+  if (!ev) return "";
+  return ev.line_start === ev.line_end ? `${ev.file}:${ev.line_start}`
+    : `${ev.file}:${ev.line_start}-${ev.line_end}`;
+}
+function setStatus(msg, isErr) {
+  const s = $("status"); s.textContent = msg; s.className = isErr ? "err" : "";
+}
+
+// Proof-of-work line: what the scan actually read, and how long each step took.
+function statsLine(repo, st) {
+  if (!st) return "Scanned " + repo + ".";
+  const kb = st.bytes_scanned >= 1048576
+    ? (st.bytes_scanned / 1048576).toFixed(1) + " MB"
+    : Math.max(1, Math.round(st.bytes_scanned / 1024)) + " KB";
+  let msg = `Read ${st.files_scanned} files (${kb})`;
+  if (st.manifests_parsed && st.manifests_parsed.length) {
+    msg += ` · manifests: ${st.manifests_parsed.slice(0, 4).join(", ")}`
+      + (st.manifests_parsed.length > 4 ? ` +${st.manifests_parsed.length - 4}` : "");
+  }
+  const parts = [];
+  if (st.clone_ms != null) parts.push(`clone ${(st.clone_ms / 1000).toFixed(1)}s`);
+  if (st.duration_ms != null) parts.push(`scan ${(st.duration_ms / 1000).toFixed(1)}s`);
+  if (parts.length) msg += ` · ${parts.join(" + ")}`;
+  return msg;
+}
+
+async function scan() {
+  const repo = $("repo").value.trim();
+  const api = apiBase();
+  if (!repo) { setStatus("Enter a repository URL.", true); return; }
+  lastRequest = { repo_url: repo, resolve: $("resolve").checked, api };
+
+  $("scan").disabled = true; $("download").disabled = true;
+  $("results").style.display = "none";
+  setStatus("Cloning and scanning " + repo + " …", false);
+  try {
+    const resp = await fetch(api + "/api/scan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_url: repo, resolve: lastRequest.resolve }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    render(data);
+    setStatus(statsLine(repo, data.stats), false);
+    $("download").disabled = false;
+  } catch (e) {
+    setStatus("Scan failed: " + e.message +
+      "  (Is the API reachable at " + api + "? Start it with `aibom serve`.)", true);
+  } finally {
+    $("scan").disabled = false;
+  }
+}
+
+function render(d) {
+  const sc = d.score;
+  const allEnts = (d.inventory && d.inventory.entities) || [];
+  // Non-AI packages complete the BOM but don't count as AI usage.
+  const totalEntities = allEnts.filter(e => e.type !== "package" || e.ai).length;
+  const plainDeps = allEnts.length - totalEntities;
+  if (!totalEntities) {
+    // "Nothing AI found" means exactly that, not "perfectly safe" —
+    // don't present a triumphant 100/A over zero evidence.
+    $("scoreNum").textContent = "—";
+    $("scoreNum").style.color = "";
+    $("scoreGrade").textContent = "no AI components detected";
+    $("cats").innerHTML = "<span class='muted'>Nothing to score: the scanner found no "
+      + "models, datasets, prompts, agents, AI services, or AI packages in this "
+      + "repository." + (plainDeps ? ` (${plainDeps} ordinary dependencies were still `
+      + "catalogued below and in the CycloneDX BOM.)" : "") + "</span>";
+  } else {
+  $("scoreNum").textContent = sc.overall;
+  const gradeColor = { A:"#2e8b57", B:"#6a9c3a", C:"#b8860b", D:"#d64500", F:"#b3123b" }[sc.grade] || "";
+  const gradeWord = { A:"good hygiene", B:"minor issues", C:"needs attention",
+                      D:"poor hygiene", F:"serious issues" }[sc.grade] || "";
+  $("scoreNum").style.color = gradeColor;
+  $("scoreGrade").textContent = `/ 100 · grade ${sc.grade} — ${gradeWord}`;
+
+  $("cats").innerHTML = sc.categories.map(c => {
+    const col = c.score >= 75 ? "#2e8b57" : c.score >= 50 ? "#b8860b" : "#b3123b";
+    return `<div class="cat"><div class="r"><span>${esc(c.category)}</span>`
+      + `<span>${c.score} · ${c.finding_count} finding(s)</span></div>`
+      + `<div class="bar"><span style="width:${c.score}%;background:${col}"></span></div></div>`;
+  }).join("");
+
+  $("chips").innerHTML = ["critical","high","medium","low","info"].map(s => {
+    const n = sc.severity_counts[s] || 0;
+    return n ? `<span class="chip" style="background:${SEV_COLOR[s]}">${n} ${s}</span>` : "";
+  }).join("");
+  }
+  if (!totalEntities) $("chips").innerHTML = "";
+
+  const fb = $("findings").querySelector("tbody");
+  $("findingCount").textContent = d.findings.length ? "(" + d.findings.length + ")" : "";
+  if (!d.findings.length) {
+    fb.innerHTML = `<tr><td colspan="4" class="empty">No risk findings. 🎉</td></tr>`;
+  } else {
+    fb.innerHTML = d.findings.map(f => {
+      const locs = (f.source_evidence || []).slice(0, 4).map(evLoc).join(", ") || "—";
+      return `<tr><td><span class="sev" style="background:${SEV_COLOR[f.severity]}">${esc(f.severity)}</span></td>`
+        + `<td><code>${esc(f.rule_id)}</code></td>`
+        + `<td><strong>${esc(f.title)}</strong><br>${esc(f.description)}`
+        + `<div class="rem">Fix: ${esc(f.remediation)}</div></td>`
+        + `<td>${esc(f.entity_name || "—")}<br><code>${esc(locs)}</code></td></tr>`;
+    }).join("");
+  }
+
+  renderGraph(d.graph || { nodes: [], edges: [] }, d.findings || []);
+
+  const ib = $("inventory").querySelector("tbody");
+  const ents = allEnts.slice().sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    const aiDiff = (b.ai ? 1 : 0) - (a.ai ? 1 : 0);  // AI packages first
+    return aiDiff !== 0 ? aiDiff : a.name.localeCompare(b.name);
+  });
+  $("invSummary").textContent = "(" +
+    Object.entries(d.counts).map(([k, v]) => v + " " + k).join(" · ") + ")";
+  ib.innerHTML = ents.length ? ents.map(e => {
+    const prov = e.provider || e.source || e.ecosystem || "—";
+    const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
+    const typeCell = e.type === "package" && e.ai
+      ? "package <strong style='color:var(--accent)'>· AI</strong>"
+      : esc(e.type);
+    return `<tr><td>${typeCell}</td><td>${esc(e.name)}</td>`
+      + `<td>${esc(prov)}</td><td><code>${esc(loc)}</code></td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="empty">No components discovered.</td></tr>`;
+
+  $("results").style.display = "block";
+}
+
+async function download() {
+  if (!lastRequest) return;
+  setStatus("Building HTML report …", false);
+  try {
+    const resp = await fetch(lastRequest.api + "/api/report", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_url: lastRequest.repo_url, resolve: lastRequest.resolve }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "aibom-report.html";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Report downloaded.", false);
+  } catch (e) {
+    setStatus("Report failed: " + e.message, true);
+  }
+}
+
+// ── dependency graph (dependency-free SVG force layout) ──────────────────────
+const SVGNS = "http://www.w3.org/2000/svg";
+const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
+  agent:"#2e7d5b", service:"#556", package:"#8a6d3b", license:"#667" };
+let graphFindings = [];
+
+function nodeColor(n) {
+  return n.severity ? SEV_COLOR[n.severity] : (TYPE_COLOR[n.type] || "#6b7280");
+}
+function svgEl(name, attrs) {
+  const el = document.createElementNS(SVGNS, name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderGraph(graph, findings) {
+  graphFindings = findings;
+  const host = $("graph");
+  host.innerHTML = "";
+  detailReset();
+  if (!graph.nodes.length) { host.innerHTML = "<p class='muted'>No components to graph.</p>"; return; }
+
+  const W = 800, H = 520, PAD = 46;
+  const nodes = graph.nodes.map((n, i) => {
+    const a = (i / graph.nodes.length) * Math.PI * 2;
+    return { ...n, x: W/2 + Math.cos(a)*150, y: H/2 + Math.sin(a)*150, vx:0, vy:0 };
+  });
+  const byId = {}; nodes.forEach(n => byId[n.id] = n);
+  const links = graph.edges.map(e => ({ s: byId[e.source], t: byId[e.target], type: e.type }))
+    .filter(l => l.s && l.t);
+  const adj = {}; nodes.forEach(n => adj[n.id] = new Set());
+  links.forEach(l => { adj[l.s.id].add(l.t.id); adj[l.t.id].add(l.s.id); });
+
+  simulate(nodes, links, W, H);
+  fit(nodes, W, H, PAD);
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "AI dependency graph" });
+  const gEdges = svgEl("g", {}), gNodes = svgEl("g", {});
+  svg.appendChild(gEdges); svg.appendChild(gNodes);
+
+  const lineEls = links.map(l => {
+    const ln = svgEl("line", { class: "edge", x1: l.s.x, y1: l.s.y, x2: l.t.x, y2: l.t.y });
+    gEdges.appendChild(ln); l.el = ln; return ln;
+  });
+
+  nodes.forEach(n => {
+    const g = svgEl("g", { class: "node" });
+    const r = n.type === "agent" ? 11 : 8.5;
+    const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
+    const label = n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label;
+    const t = svgEl("text", { x: n.x, y: n.y + r + 9, "text-anchor": "middle" });
+    t.textContent = label;
+    g.appendChild(c); g.appendChild(t);
+    gNodes.appendChild(g);
+    n.circle = c; n.text = t; n.radius = r;
+    g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj); });
+    enableDrag(g, n, svg, W, H, links);
+  });
+
+  svg.addEventListener("click", () => clearSelection(nodes, lineEls));
+  host.appendChild(svg);
+  host._nodes = nodes; host._lines = lineEls;
+}
+
+function simulate(nodes, links, W, H) {
+  const REP = 2400, SPRING = 0.045, LEN = 92, GRAV = 0.008, DAMP = 0.86;
+  for (let it = 0; it < 340; it++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx*dx + dy*dy || 0.01;
+        const f = REP / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      }
+    }
+    for (const l of links) {
+      let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+      const f = SPRING * (d - LEN);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      l.s.vx += fx; l.s.vy += fy; l.t.vx -= fx; l.t.vy -= fy;
+    }
+    for (const n of nodes) {
+      n.vx += (W/2 - n.x) * GRAV; n.vy += (H/2 - n.y) * GRAV;
+      n.vx *= DAMP; n.vy *= DAMP;
+      n.x += Math.max(-14, Math.min(14, n.vx));
+      n.y += Math.max(-14, Math.min(14, n.vy));
+    }
+  }
+}
+
+function fit(nodes, W, H, pad) {
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const sx = (W - 2*pad) / Math.max(1, maxX - minX);
+  const sy = (H - 2*pad) / Math.max(1, maxY - minY);
+  const s = Math.min(sx, sy, 2.2);
+  nodes.forEach(n => {
+    n.x = pad + (n.x - minX) * s + (W - 2*pad - (maxX - minX)*s)/2;
+    n.y = pad + (n.y - minY) * s + (H - 2*pad - (maxY - minY)*s)/2;
+  });
+}
+
+function selectNode(node, nodes, links, adj) {
+  const keep = adj[node.id];
+  nodes.forEach(n => {
+    const on = n.id === node.id || keep.has(n.id);
+    n.circle.setAttribute("opacity", on ? 1 : 0.16);
+    n.text.setAttribute("opacity", on ? 1 : 0.16);
+  });
+  links.forEach(l => {
+    const on = l.s.id === node.id || l.t.id === node.id;
+    l.el.setAttribute("stroke-opacity", on ? 0.85 : 0.06);
+  });
+  detailShow(node);
+}
+
+function clearSelection(nodes, lineEls) {
+  nodes.forEach(n => { n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1); });
+  lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.4));
+  detailReset();
+}
+
+function enableDrag(g, n, svg, W, H, links) {
+  let dragging = false;
+  const toSvg = (ev) => {
+    const r = svg.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H };
+  };
+  g.addEventListener("pointerdown", (ev) => {
+    dragging = true; g.setPointerCapture(ev.pointerId); ev.stopPropagation();
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const p = toSvg(ev); n.x = p.x; n.y = p.y;
+    n.circle.setAttribute("cx", n.x); n.circle.setAttribute("cy", n.y);
+    n.text.setAttribute("x", n.x); n.text.setAttribute("y", n.y + n.radius + 9);
+    links.forEach(l => {
+      if (l.s === n) { l.el.setAttribute("x1", n.x); l.el.setAttribute("y1", n.y); }
+      if (l.t === n) { l.el.setAttribute("x2", n.x); l.el.setAttribute("y2", n.y); }
+    });
+  });
+  g.addEventListener("pointerup", (ev) => { dragging = false; g.releasePointerCapture(ev.pointerId); });
+}
+
+function detailReset() {
+  $("graphDetail").innerHTML =
+    "<span class='muted'>Click a node to see the component and its evidence-backed findings.</span>";
+}
+
+function detailShow(node) {
+  const mine = graphFindings.filter(f => f.entity_id === node.id);
+  let html = `<span class="dt-type">${esc(node.type)}</span><h3>${esc(node.label)}</h3>`;
+  if (node.provider) html += `<div class="muted">provider: ${esc(node.provider)}</div>`;
+  if (node.location) html += `<div class="muted">at <code>${esc(node.location)}</code></div>`;
+  if (!mine.length) {
+    html += `<div class="dt-find muted">No findings on this component.</div>`;
+  } else {
+    for (const f of mine) {
+      const loc = (f.source_evidence || []).slice(0, 3).map(evLoc).join(", ");
+      html += `<div class="dt-find"><span class="sev" style="background:${SEV_COLOR[f.severity]}">`
+        + `${esc(f.severity)}</span> <code>${esc(f.rule_id)}</code><br>`
+        + `<strong>${esc(f.title)}</strong><div class="muted">${esc(loc)}</div></div>`;
+    }
+  }
+  $("graphDetail").innerHTML = html;
+}
+
+$("scan").addEventListener("click", scan);
+$("download").addEventListener("click", download);
+$("repo").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
+</script>
+</body>
+</html>

@@ -25,6 +25,7 @@ from aibom.models.entities import (
     Service,
 )
 from aibom.models.evidence import Evidence
+from aibom.models.signals import RiskSignal
 
 # Directories that never contain first-party AI supply-chain signal worth scanning.
 _IGNORE_DIRS = {
@@ -37,6 +38,7 @@ _IGNORE_DIRS = {
 _TEXT_SUFFIXES = {
     ".py", ".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".cfg",
     ".ini", ".jinja", ".jinja2", ".j2", ".prompt", ".sh", ".env",
+    ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".ipynb",
 }
 _TEXT_NAMES = {"dockerfile", "requirements.txt", "pipfile", ".env"}
 
@@ -61,16 +63,64 @@ _RE_LOAD_DATASET = re.compile(r"""load_dataset\(\s*['"]([^'"]+)['"]""")
 _RE_LLM_MODEL = re.compile(
     r"""['"]((?:gpt-|o1|o3|o4|chatgpt-|claude-)[A-Za-z0-9._\-]+)['"]"""
 )
+# A SYSTEM-ish variable assigned a *string literal* — the hardcoded-prompt shape.
+# Requiring the string RHS avoids matching expressions like ``= re.compile(...)``.
 _RE_SYSTEM_PROMPT_VAR = re.compile(
-    r"""^\s*(?:[A-Z_]*SYSTEM[A-Z_]*(?:PROMPT|MESSAGE)?|system_prompt|system_message)\s*="""
+    r"""^\s*(?:[A-Z_]*SYSTEM[A-Z_]*(?:PROMPT|MESSAGE)?|system_prompt|system_message)"""
+    r"""\s*=\s*[rbfRBF]{0,2}['"]"""
 )
 _RE_ROLE_SYSTEM = re.compile(r"""["']role["']\s*:\s*["']system["']""")
 _RE_BASE_URL = re.compile(r"""base_url\s*=\s*['"](https?://[^'"]+)['"]""")
+# Require a call ``ctor(`` — matches real agent construction, not bare mentions of
+# the name in prose, imports, or regex/string literals (precision over recall).
 _RE_AGENT_CTOR = re.compile(
     r"""\b(initialize_agent|create_react_agent|create_tool_calling_agent"""
-    r"""|create_openai_functions_agent|create_openai_tools_agent|AgentExecutor)\b"""
+    r"""|create_openai_functions_agent|create_openai_tools_agent|AgentExecutor)\s*\("""
 )
 _RE_TRUST_REMOTE = re.compile(r"""trust_remote_code\s*=\s*True""")
+
+# An mcpServers entry used as a JSON/dict key — an actual MCP config, not a mention.
+_RE_MCP = re.compile(r"""['"]mcpServers['"]\s*:""")
+
+# MCP *server* implementations (the supply-chain surface an AI client consumes):
+# Python mcp / fastmcp usage, or the TS server SDK.
+_RE_MCP_SERVER_PY = re.compile(
+    r"""(?:^\s*from\s+(?:mcp|fastmcp)(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+(?:mcp|fastmcp)\b"""
+    r"""|\bFastMCP\s*\()"""
+)
+_RE_MCP_SERVER_JS = re.compile(
+    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:sdk|server)[^'"]*['"]"""
+)
+
+# JS/TS provider SDK imports (ESM import-from or CJS require of an AI SDK).
+_JS_PROVIDER_IMPORTS: dict[str, tuple[str, str | None]] = {
+    "openai": ("openai", "https://api.openai.com"),
+    "@anthropic-ai/sdk": ("anthropic", "https://api.anthropic.com"),
+    "@google/generative-ai": ("google", "https://generativelanguage.googleapis.com"),
+    "@google/genai": ("google", "https://generativelanguage.googleapis.com"),
+    "cohere-ai": ("cohere", "https://api.cohere.ai"),
+    "@mistralai/mistralai": ("mistral", "https://api.mistral.ai"),
+    "groq-sdk": ("groq", "https://api.groq.com"),
+    "ollama": ("ollama", "http://localhost:11434"),
+}
+_RE_JS_IMPORT = re.compile(
+    r"""(?:import\s[^;]*?from\s*|import\s*|require\s*\(\s*)['"]("""
+    + "|".join(re.escape(k) for k in _JS_PROVIDER_IMPORTS)
+    + r""")['"]"""
+)
+
+# Hardcoded-secret heuristics. A provider key with a recognizable prefix, or an
+# assignment of a secret-ish name to a literal string that is *not* an env
+# lookup / obvious placeholder.
+_RE_PROVIDER_KEY = re.compile(r"""\b(sk-ant-[A-Za-z0-9\-_]{16,}|sk-[A-Za-z0-9]{20,})\b""")
+_RE_SECRET_ASSIGN = re.compile(
+    r"""(?i)\b(?:api[_-]?key|secret|token|password|access[_-]?key)\s*[:=]\s*"""
+    r"""['"]([^'"]{8,})['"]"""
+)
+_RE_ENV_OR_PLACEHOLDER = re.compile(
+    r"""(?i)(os\.environ|getenv|your[_-]|<[^>]+>|\{\{|\$\{|xxx+|changeme|example|placeholder|\.\.\.)"""
+)
 
 # import <-> provider service mapping
 _PROVIDER_IMPORTS = {
@@ -194,11 +244,19 @@ class RepoCollector(Collector):
 
     def _scan_text_file(self, inventory: Inventory, path: Path, rel: str) -> None:
         try:
-            if path.stat().st_size > _MAX_FILE_BYTES:
+            size = path.stat().st_size
+            if size > _MAX_FILE_BYTES:
                 return
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return
+        inventory.stats.files_scanned += 1
+        inventory.stats.bytes_scanned += size
+
+        # Notebooks are JSON with the code escaped; unescape quotes so the
+        # detectors see the code as written (line numbers are unaffected).
+        if path.suffix.lower() == ".ipynb":
+            text = text.replace('\\"', '"')
 
         lines = text.splitlines()
         # per-file buckets used to draw intra-file relationship edges
@@ -218,8 +276,36 @@ class RepoCollector(Collector):
             for entity in self._scan_line(line, lineno, rel):
                 canonical = inventory.add_entity(entity)
                 buckets[type(canonical)].append(canonical.id)
+            self._scan_signals(inventory, line, lineno, rel)
 
         self._link_intra_file(inventory, buckets)
+
+    def _scan_signals(self, inventory: Inventory, line: str, lineno: int, rel: str) -> None:
+        """Detect non-entity risk signals (trust_remote_code, hardcoded secrets)."""
+
+        def signal(kind: str, pattern: str, conf: float, detail: str | None = None) -> None:
+            inventory.add_signal(
+                RiskSignal(
+                    kind=kind,
+                    detail=detail,
+                    source_evidence=[
+                        Evidence(
+                            file=rel, line_start=lineno, line_end=lineno,
+                            snippet=line.strip()[:200], matched_pattern=pattern, confidence=conf,
+                        )
+                    ],
+                )
+            )
+
+        if _RE_TRUST_REMOTE.search(line):
+            signal("trust_remote_code", "trust_remote_code=True", 0.95)
+
+        if _RE_ENV_OR_PLACEHOLDER.search(line):
+            return  # env lookup / placeholder — not a hardcoded secret
+        if _RE_PROVIDER_KEY.search(line):
+            signal("hardcoded_secret", "provider-key-literal", 0.9, "provider API key literal")
+        elif _RE_SECRET_ASSIGN.search(line):
+            signal("hardcoded_secret", "secret-assignment", 0.6, "secret assigned a string literal")
 
     def _scan_line(self, line: str, lineno: int, rel: str) -> list[Entity]:
         found: list[Entity] = []
@@ -288,10 +374,21 @@ class RepoCollector(Collector):
                 Service(name=m.group(1), kind="api", endpoint=m.group(1),
                         source_evidence=[ev("base-url", line, 0.7)])
             )
-        if '"mcpServers"' in line or "'mcpServers'" in line:
+        if _RE_MCP.search(line):
             found.append(
                 Service(name=f"mcp-config@{rel}", kind="mcp",
                         source_evidence=[ev("mcp-config", line, 0.8)])
+            )
+        if _RE_MCP_SERVER_PY.search(line) or _RE_MCP_SERVER_JS.search(line):
+            found.append(
+                Service(name=f"mcp-server@{rel}", kind="mcp",
+                        source_evidence=[ev("mcp-server", line, 0.85)])
+            )
+        for m in _RE_JS_IMPORT.finditer(line):
+            js_svc, js_endpoint = _JS_PROVIDER_IMPORTS[m.group(1)]
+            found.append(
+                Service(name=js_svc, kind="api", endpoint=js_endpoint,
+                        source_evidence=[ev("provider-import-js", line, 0.6)])
             )
 
         # agents (ignore import statements — those are dependencies, not constructions)
