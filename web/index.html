@@ -104,13 +104,11 @@
       <label for="repo">Repository URL</label>
       <div class="row">
         <input class="grow" type="url" id="repo" placeholder="https://github.com/owner/repo"
-               value="https://github.com/d01ki/AIBOM-Inspector" autocomplete="off">
+               autocomplete="off">
         <button id="scan">Scan</button>
       </div>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="resolve" checked>
-        Resolve Hugging Face metadata (license &amp; model-card checks)</label>
       <span class="check" style="color:var(--muted)">Known-vulnerability mapping (OSV) always runs.</span>
     </div>
     <div class="row">
@@ -258,7 +256,7 @@ async function scan() {
   const repo = $("repo").value.trim();
   const api = apiBase();
   if (!repo) { setStatus("Enter a repository URL.", true); return; }
-  lastRequest = { repo_url: repo, resolve: $("resolve").checked, api };
+  lastRequest = { repo_url: repo, resolve: true, api };
 
   $("scan").disabled = true; $("download").disabled = true;
   $("results").style.display = "none";
