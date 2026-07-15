@@ -51,6 +51,8 @@ inventory JSON and is exported as `aibom:*` CycloneDX properties.
 - `python.anthropic.ast`: Anthropic SDK/Bedrock clients, LangChain Anthropic.
 - `python.huggingface.ast`: Transformers, Diffusers, Datasets,
   SentenceTransformers, Hugging Face Hub, LangChain Hugging Face.
+- `python.prompt-flow.ast`: OpenAI/Anthropic prompt sinks, sanitized prompt
+  metadata, and bounded same-file source-to-sink paths.
 - `legacy.regex`: compatibility and non-Python textual patterns.
 - `manifest.dependencies`: Python/npm dependency declarations.
 - `generic.weight-file`: serialized local model files.
@@ -69,8 +71,8 @@ inventory JSON and is exported as `aibom:*` CycloneDX properties.
 
 ## Next migration slices
 
-1. Extract remaining prompt, agent, and MCP rules from the compatibility
-   detector into independently tested detectors.
+1. Extract remaining agent and MCP rules from the compatibility detector into
+   independently tested detectors.
 2. Add cross-file symbol/configuration resolution for YAML, JSON, and TOML.
 3. Expand the call graph across imports before treating reachability as a CI gate.
-4. Add prompt source-to-sink and MCP capability nodes to the graph.
+4. Add MCP capability nodes and cross-file prompt paths to the graph.

@@ -43,6 +43,7 @@ class RelationshipType(str, Enum):
     SERVED_BY = "served_by"
     INVOKES = "invokes"
     USES_PROMPT = "uses_prompt"
+    FLOWS_TO = "flows_to"
     LICENSED_UNDER = "licensed_under"
 
 
@@ -134,6 +135,30 @@ class Prompt(Entity):
     type: EntityType = EntityType.PROMPT
     kind: str = Field(default="template", description="'system' | 'template' | 'user'.")
     content_hash: str | None = Field(default=None, description="Hash of the prompt text.")
+    source_kind: str | None = Field(
+        default=None,
+        description="Statically identified origin, e.g. http_request or environment.",
+    )
+    sink_kind: str | None = Field(
+        default=None,
+        description="Provider API argument that consumes the prompt.",
+    )
+    trust_boundary: str | None = Field(
+        default=None,
+        description="Boundary crossed by the prompt input, when identifiable.",
+    )
+    user_controlled: bool | None = Field(
+        default=None,
+        description="True only when a bounded static path reaches an untrusted source.",
+    )
+    model_refs: list[str] = Field(
+        default_factory=list,
+        description="Model names resolved from the consuming API call.",
+    )
+    data_flow_path: list[ResolutionStep] = Field(
+        default_factory=list,
+        description="Sanitized source-to-sink steps; prompt content is never retained.",
+    )
 
 
 class Agent(Entity):

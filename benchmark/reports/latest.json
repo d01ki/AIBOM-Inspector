@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repository_count": 1,
   "overall": {
-    "true_positives": 19,
+    "true_positives": 20,
     "false_positives": 0,
     "false_negatives": 0,
     "precision": 1.0,
@@ -27,7 +27,7 @@
       "f1": 1.0
     },
     "prompts": {
-      "true_positives": 3,
+      "true_positives": 4,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -88,7 +88,7 @@
       "repository": "local/vulnerable-ai-app",
       "commit": "fixture-v1",
       "overall": {
-        "true_positives": 19,
+        "true_positives": 20,
         "false_positives": 0,
         "false_negatives": 0,
         "precision": 1.0,
@@ -113,7 +113,7 @@
           "f1": 1.0
         },
         "prompts": {
-          "true_positives": 3,
+          "true_positives": 4,
           "false_positives": 0,
           "false_negatives": 0,
           "precision": 1.0,

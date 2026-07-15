@@ -674,7 +674,36 @@ class RepoCollector(Collector):
 
     @staticmethod
     def _link_intra_file(inventory: Inventory, buckets: dict[type[Entity], list[str]]) -> None:
-        """Link agents to co-located models, prompts, and services (file scope)."""
+        """Link co-located entities using detector metadata and file scope."""
+        entities = {entity.id: entity for entity in inventory.entities}
+        for prompt_id in dict.fromkeys(buckets.get(Prompt, [])):
+            prompt = entities.get(prompt_id)
+            if not isinstance(prompt, Prompt) or not prompt.model_refs:
+                continue
+            for model_id in dict.fromkeys(buckets.get(Model, [])):
+                model = entities.get(model_id)
+                if not isinstance(model, Model) or model.name not in prompt.model_refs:
+                    continue
+                inventory.add_relationship(
+                    Relationship(
+                        source_id=prompt.id,
+                        target_id=model.id,
+                        relationship=RelationshipType.FLOWS_TO,
+                        source_evidence=[
+                            Evidence(
+                                file=prompt.source_evidence[0].file,
+                                line_start=prompt.source_evidence[0].line_start,
+                                line_end=prompt.source_evidence[0].line_end,
+                                snippet="prompt flows to resolved model argument",
+                                matched_pattern="prompt-model-data-flow",
+                                confidence=0.9,
+                                detector_id="python.prompt-flow.ast",
+                                kind="data-flow",
+                            )
+                        ],
+                    )
+                )
+
         agents = buckets.get(Agent, [])
         if not agents:
             return

@@ -72,7 +72,7 @@ def test_checked_in_fixture_matches_ground_truth() -> None:
     )
     result = evaluate_case(document, root / document["local_path"])
     assert result["overall"] == {
-        "true_positives": 19,
+        "true_positives": 20,
         "false_positives": 0,
         "false_negatives": 0,
         "precision": 1.0,

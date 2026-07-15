@@ -13,8 +13,8 @@ from typing import TypeVar
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
-from aibom.models.analysis import Reachability
-from aibom.models.entities import Agent, Entity, EntityType, Model, Relationship, Service
+from aibom.models.analysis import Reachability, ResolutionStep
+from aibom.models.entities import Agent, Entity, EntityType, Model, Prompt, Relationship, Service
 from aibom.models.signals import RiskSignal
 
 T = TypeVar("T")
@@ -179,6 +179,16 @@ def _merge_entity(into: Entity, other: Entity) -> None:
         into.framework = into.framework or other.framework
         _extend_unique(into.tools, other.tools)
         _extend_unique(into.model_refs, other.model_refs)
+    elif isinstance(into, Prompt) and isinstance(other, Prompt):
+        into.content_hash = into.content_hash or other.content_hash
+        into.source_kind = into.source_kind or other.source_kind
+        into.sink_kind = into.sink_kind or other.sink_kind
+        into.trust_boundary = into.trust_boundary or other.trust_boundary
+        into.user_controlled = _merge_user_controlled(
+            into.user_controlled, other.user_controlled
+        )
+        _extend_unique(into.model_refs, other.model_refs)
+        _merge_steps(into.data_flow_path, other.data_flow_path)
 
 
 def _merge_reachability(left: Reachability, right: Reachability) -> Reachability:
@@ -187,6 +197,23 @@ def _merge_reachability(left: Reachability, right: Reachability) -> Reachability
     if Reachability.UNKNOWN in {left, right}:
         return Reachability.UNKNOWN
     return Reachability.FALSE
+
+
+def _merge_user_controlled(left: bool | None, right: bool | None) -> bool | None:
+    if True in {left, right}:
+        return True
+    if False in {left, right}:
+        return False
+    return None
+
+
+def _merge_steps(target: list[ResolutionStep], values: Iterable[ResolutionStep]) -> None:
+    seen = {(s.file, s.line, s.column, s.symbol, s.value, s.operation) for s in target}
+    for step in values:
+        key = (step.file, step.line, step.column, step.symbol, step.value, step.operation)
+        if key not in seen:
+            target.append(step)
+            seen.add(key)
 
 
 def _extend_unique(target: list[T], values: Iterable[T]) -> None:

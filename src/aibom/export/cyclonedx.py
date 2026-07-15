@@ -182,6 +182,17 @@ def _prompt_component(prompt: Prompt) -> dict[str, Any]:
     props.append(_prop("aibom:kind", "prompt"))
     _append_prop(props, "aibom:prompt_kind", prompt.kind)
     _append_prop(props, "aibom:content_hash", prompt.content_hash)
+    _append_prop(props, "aibom:prompt_source_kind", prompt.source_kind)
+    _append_prop(props, "aibom:prompt_sink_kind", prompt.sink_kind)
+    _append_prop(props, "aibom:prompt_trust_boundary", prompt.trust_boundary)
+    if prompt.user_controlled is not None:
+        props.append(_prop("aibom:prompt_user_controlled", _b(prompt.user_controlled)))
+    if prompt.model_refs:
+        _append_prop(props, "aibom:prompt_model_refs", ",".join(prompt.model_refs))
+    for step in prompt.data_flow_path:
+        location = f"{step.file}:{step.line}" if step.line is not None else step.file
+        symbol = f" {step.symbol}" if step.symbol else ""
+        props.append(_prop("aibom:prompt_flow_step", f"{location} [{step.operation}]{symbol}"))
     _dedupe_or_drop_props(comp)
     return comp
 

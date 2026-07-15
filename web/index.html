@@ -324,9 +324,13 @@ function render(d) {
   } else {
     fb.innerHTML = d.findings.map(f => {
       const locs = (f.source_evidence || []).slice(0, 4).map(evLoc).join(", ") || "—";
+      const flow = f.source_kind || f.sink_kind
+        ? `<div class="rem">Flow: ${esc(f.source_kind || "unknown")} &rarr; ${esc(f.sink_kind || "unknown")}</div>`
+        : "";
       return `<tr><td><span class="sev" style="background:${SEV_COLOR[f.severity]}">${esc(f.severity)}</span></td>`
         + `<td><code>${esc(f.rule_id)}</code></td>`
         + `<td><strong>${esc(f.title)}</strong><br>${esc(f.description)}`
+        + flow
         + `<div class="rem">Fix: ${esc(f.remediation)}</div></td>`
         + `<td>${esc(f.entity_name || "—")}<br><code>${esc(locs)}</code></td></tr>`;
     }).join("");
@@ -343,7 +347,7 @@ function render(d) {
   $("invSummary").textContent = "(" +
     Object.entries(d.counts).map(([k, v]) => v + " " + k).join(" · ") + ")";
   ib.innerHTML = ents.length ? ents.map(e => {
-    const prov = e.provider || e.source || e.ecosystem || "—";
+    const prov = e.provider || e.source || e.source_kind || e.ecosystem || "—";
     const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
     const contexts = (e.source_contexts || []).join(", ") || "—";
     const detectors = (e.detector_ids || []).join(", ") || "—";

@@ -134,13 +134,16 @@ def model_entity(
             step.model_copy(update={"value": "<redacted>" if step.value else None})
             for step in resolved.steps
         ]
+    model_evidence = evidence(context, call, detector_id, pattern, confidence)
+    if sensitive and isinstance(resolved.value, str):
+        model_evidence.snippet = model_evidence.snippet.replace(resolved.value, "<redacted>")
     return Model(
         name=name,
         provider=provider,
         revision=revision,
         revision_pinned=revision is not None,
         environment_variable=resolved.environment_variable,
-        source_evidence=[evidence(context, call, detector_id, pattern, confidence)],
+        source_evidence=[model_evidence],
         detector_ids=[detector_id],
         usage=UsageState(
             declared=True,

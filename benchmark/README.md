@@ -39,5 +39,6 @@ The public cases are not part of the default command because the evaluator is
 offline-first and does not clone repositories implicitly.
 
 The checked-in `reports/external-latest.md` is the result for the two pinned
-public cases. It intentionally retains known false negatives rather than
-presenting the synthetic fixture score as external accuracy.
+public cases. It currently has no mismatches, including the three Assistants
+instruction prompts missed by the previous detector. The small repository set
+is regression evidence and must not be presented as broad external accuracy.

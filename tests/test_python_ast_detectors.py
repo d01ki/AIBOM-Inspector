@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from aibom.models.analysis import Reachability, SourceContext, ValueResolution
-from aibom.models.entities import EntityType, Model, Service
+from aibom.models.entities import EntityType, Model, Prompt, Service
 from aibom.service import run_scan
 
 
@@ -109,6 +109,24 @@ def test_secret_shaped_model_argument_is_redacted(tmp_path: Path) -> None:
     model = next(model for model in _models(inventory) if model.name.startswith("redacted:"))
     assert secret not in model.model_dump_json()
     assert model.value_resolution is ValueResolution.UNRESOLVED
+
+
+def test_opaque_secret_in_model_argument_is_removed_from_evidence(tmp_path: Path) -> None:
+    secret = "A" * 64
+    inventory = _scan(
+        tmp_path,
+        "from openai import OpenAI\n"
+        f'MODEL = "{secret}"\n'
+        "client = OpenAI()\n"
+        "client.responses.create(model=MODEL, instructions='help')\n",
+    )
+    assert secret not in inventory.model_dump_json()
+    prompt = next(
+        entity
+        for entity in inventory.by_type(EntityType.PROMPT)
+        if isinstance(entity, Prompt)
+    )
+    assert prompt.model_refs == []
 
 
 def test_comments_docstrings_and_unused_values_are_not_models(tmp_path: Path) -> None:

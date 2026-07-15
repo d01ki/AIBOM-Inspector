@@ -16,6 +16,7 @@
     {"type": "agent", "name": "agent@agent.py:9", "file": "agent.py", "line": 9, "status": "instantiated"},
     {"type": "prompt", "name": "system-prompt@app.py:27", "file": "app.py", "line": 27, "status": "declared"},
     {"type": "prompt", "name": "system-prompt@app.py:36", "file": "app.py", "line": 36, "status": "declared"},
+    {"type": "prompt", "name": "user-prompt@app.py:37:1", "file": "app.py", "line": 33, "status": "invoked"},
     {"type": "prompt", "name": "prompts/agent_system.prompt", "file": "prompts/agent_system.prompt", "line": 1, "status": "declared"},
     {"type": "ai_package", "name": "transformers", "file": "requirements.txt", "line": 1, "status": "declared"},
     {"type": "ai_package", "name": "datasets", "file": "requirements.txt", "line": 2, "status": "declared"},

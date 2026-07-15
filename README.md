@@ -51,6 +51,9 @@ resolves it, and adds graph + risk analysis on top.
 - ✅ **Usage and reachability evidence** — declared/imported/instantiated/invoked
   states, same-file entrypoint paths, confidence factors, detector IDs, and
   production/test/example/docs source contexts
+- ✅ **Prompt source-to-sink analysis** — OpenAI/Anthropic prompt arguments,
+  Assistants instructions, bounded HTTP/CLI/environment data-flow paths, trust
+  boundaries, and secret-safe prompt hashes
 - ✅ **Reproducible benchmark harness** — category Precision/Recall/F1 plus
   explicit false-positive and false-negative reports
 - ✅ **Dependency-manifest collector** — finds AI/ML libraries in `requirements*.txt`,
@@ -72,8 +75,9 @@ resolves it, and adds graph + risk analysis on top.
 - ✅ **CycloneDX 1.6 (ML-BOM) export** — `machine-learning-model` / `data` components,
   services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace;
   **validated against the official CycloneDX 1.6 JSON schema** in the test suite
-- ✅ **Deterministic risk rules (TDR-001…010)** + a reproducible 0–100 security score
-  over integrity / provenance / licensing / configuration
+- ✅ **Deterministic risk rules (TDR-001…012 and AIBOM-PROMPT-004)** + a
+  reproducible 0–100 security score over integrity / provenance / licensing /
+  configuration
 - ✅ **Self-contained HTML report** (score, evidence-backed findings, inventory)
 - ✅ CLI (`aibom scan`) with JSON inventory, CycloneDX, HTML report, and severity exit codes
 - ✅ Golden-fixture test suite
@@ -132,7 +136,8 @@ python benchmark/evaluate.py
 
 The reproducible reports include a deterministic local fixture and a
 [two-repository public evaluation](benchmark/reports/external-latest.md). The
-public report is regression evidence, not a claim of broad ecosystem coverage.
+current pinned set records precision/recall/F1 of 1.0000 with no mismatches. It
+is regression evidence, not a claim of broad ecosystem coverage.
 
 ## Risk rules & scoring
 
@@ -153,6 +158,7 @@ severity, a `file:line` evidence trail, and a remediation.
 | TDR-010 | Deprecated / superseded model referenced | Medium | — |
 | TDR-011 | MCP server exposes an LLM-invokable tool surface | Low | — |
 | TDR-012 | AI package declared without a pinned version | Low | — |
+| AIBOM-PROMPT-004 | Untrusted input flows into system/developer instructions | High | — |
 | OSV-* | Known vulnerability in a pinned AI package (OSV.dev) | per advisory | ✔ (network) |
 
 **Security score (0–100):** each of the four categories {integrity, provenance,
@@ -196,8 +202,13 @@ to see the component and its evidence trail.
 
 ## Deploy
 
-The backend is a small container that serves the UI too, so one free service
-runs the whole app from a single URL.
+The backend is a small container that serves the UI too, so one service runs
+the whole app from a single URL.
+
+**AWS Lightsail (production).** Pushes to `main` run
+[`deploy.yml`](.github/workflows/deploy.yml), connect to the configured
+Lightsail instance, and execute `/usr/local/bin/deploy-aibom`. The production
+UI and API are served together at [aibom-inspector.com](https://aibom-inspector.com/).
 
 **Render (free, no credit card, recommended).** The scanner needs server-side
 compute (it clones and analyzes repos), so it must run on a compute host — not a
@@ -219,8 +230,9 @@ docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
 `?api=https://your-backend` so it talks to a compute backend (e.g. your Render
 URL), and set `AIBOM_CORS_ORIGINS` on the backend to the UI's origin. Served by
 the backend itself, the UI needs no configuration at all.
-[`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes `web/` to
-Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*).
+The optional [`.github/workflows/pages.yml`](.github/workflows/pages.yml) is
+manual-only so it does not conflict with the Lightsail deployment. Before
+running it, enable *Settings → Pages → Source = GitHub Actions*.
 
 > **Note:** Hugging Face **Docker** Spaces now require a paid (PRO) plan; only
 > **Static** Spaces are free. The Space frontmatter at the top of this README is
@@ -239,7 +251,7 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 |---|---|
 | **Models** | Python AST-confirmed OpenAI/Anthropic calls, `from_pretrained(...)`, `pipeline(model=...)`, variables/dictionaries/f-strings/environment defaults, `repo_id=`, HF URLs, and weight files (`.safetensors`, `.gguf`, `.pkl`, `.bin`, …) |
 | **Datasets** | `load_dataset(...)` |
-| **Prompts** | template files (`prompts/`, `*.prompt`, `*.jinja`), hardcoded system prompts |
+| **Prompts** | template files, hardcoded system prompts, OpenAI Responses/Chat/Completions/Assistants and Anthropic Messages/Completions sinks, with bounded source-to-sink paths for HTTP, CLI, environment, file, retrieval, and database inputs |
 | **Agents** | LangChain/LangGraph constructors (`create_react_agent`, `AgentExecutor`, …) |
 | **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
 | **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl — a complete BOM. AI/ML-ecosystem packages (incl. `mcp`/`fastmcp`/`@modelcontextprotocol/*`) are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |

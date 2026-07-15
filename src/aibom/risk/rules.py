@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from aibom.inventory import Inventory
-from aibom.models.entities import Dataset, EntityType, Model, Package, Service
+from aibom.models.entities import Dataset, EntityType, Model, Package, Prompt, Service
 from aibom.models.evidence import Evidence
 from aibom.models.findings import Finding, RiskCategory, Severity
 from aibom.spdx import is_known_license, is_spdx
@@ -54,6 +54,10 @@ def _models(inv: Inventory) -> list[Model]:
 
 def _datasets(inv: Inventory) -> list[Dataset]:
     return [e for e in inv.by_type(EntityType.DATASET) if isinstance(e, Dataset)]
+
+
+def _prompts(inv: Inventory) -> list[Prompt]:
+    return [e for e in inv.by_type(EntityType.PROMPT) if isinstance(e, Prompt)]
 
 
 # ── TDR-001 — pickle/.bin weights ────────────────────────────────────────────
@@ -409,6 +413,42 @@ def tdr_012_unpinned_package(inv: Inventory) -> list[Finding]:
     return out
 
 
+# AIBOM-PROMPT-004 - untrusted data in privileged instructions
+
+
+def aibom_prompt_004_untrusted_instruction(inv: Inventory) -> list[Finding]:
+    """Flag a proven untrusted source-to-system/developer prompt path."""
+    out: list[Finding] = []
+    for prompt in _prompts(inv):
+        if prompt.user_controlled is not True or prompt.kind not in {"system", "developer"}:
+            continue
+        out.append(
+            Finding(
+                rule_id="AIBOM-PROMPT-004",
+                title="Untrusted input flows into privileged prompt instructions",
+                severity=Severity.HIGH,
+                category=RiskCategory.CONFIGURATION,
+                description=(
+                    f"'{prompt.name}' carries {prompt.source_kind or 'external input'} into "
+                    f"{prompt.sink_kind or 'a privileged prompt sink'} without a statically "
+                    "visible trust-boundary control."
+                ),
+                remediation=(
+                    "Keep untrusted content in a user message; do not concatenate it into "
+                    "system or developer instructions. Validate and delimit any required context."
+                ),
+                entity_id=prompt.id,
+                entity_name=prompt.name,
+                source_evidence=_copy_evidence(prompt.source_evidence),
+                source_kind=prompt.source_kind,
+                sink_kind=prompt.sink_kind,
+                trust_boundary=prompt.trust_boundary,
+                data_flow_path=[step.model_copy() for step in prompt.data_flow_path],
+            )
+        )
+    return out
+
+
 #: Registry of all rules, evaluated in order.
 ALL_RULES: list[Rule] = [
     tdr_001_pickle_weights,
@@ -423,4 +463,5 @@ ALL_RULES: list[Rule] = [
     tdr_010_deprecated_model,
     tdr_011_mcp_server_surface,
     tdr_012_unpinned_package,
+    aibom_prompt_004_untrusted_instruction,
 ]

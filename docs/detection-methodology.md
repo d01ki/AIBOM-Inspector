@@ -25,6 +25,25 @@ Unknown expressions remain `unresolved`; they are never converted into guessed
 model names. Resolution steps are serialized so users can audit how a value was
 derived.
 
+## Prompt source-to-sink analysis
+
+The `python.prompt-flow.ast` detector recognizes privileged and user prompt
+arguments in OpenAI Responses, Chat Completions, Completions, and Assistants,
+plus Anthropic Messages and Completions. Direct message lists are split by role
+so untrusted user content does not taint an independent static system message.
+
+The bounded tracer follows same-file assignments, concatenation, f-strings,
+containers, subscripts, and wrapper-call arguments. Recognized sources include
+HTTP request/route parameters, CLI input, environment variables, WebSocket
+messages, files, retrieved documents, and database results. Each prompt records
+the source kind, sink kind, trust boundary, model reference, and sanitized flow
+steps. Prompt text is never written to evidence or flow paths; statically
+resolved content is represented only by a SHA-256-derived hash.
+
+`AIBOM-PROMPT-004` fires only when a proven untrusted path reaches a system or
+developer instruction. Unknown paths remain explicit and do not become a
+security claim.
+
 ## Usage classification
 
 The states are intentionally independent:

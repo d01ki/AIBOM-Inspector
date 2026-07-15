@@ -40,7 +40,11 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
                 "id": e.id,
                 "label": e.name,
                 "type": e.type.value,
-                "provider": getattr(e, "provider", None) or getattr(e, "source", None),
+                "provider": (
+                    getattr(e, "provider", None)
+                    or getattr(e, "source", None)
+                    or getattr(e, "source_kind", None)
+                ),
                 "severity": sev.value if sev else None,
                 "finding_count": counts.get(e.id, 0),
                 "location": location,

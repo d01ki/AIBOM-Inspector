@@ -13,6 +13,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from aibom.models.analysis import ResolutionStep
 from aibom.models.evidence import Evidence
 
 
@@ -68,6 +69,10 @@ class Finding(BaseModel):
     )
     entity_name: str | None = None
     source_evidence: list[Evidence] = Field(default_factory=list)
+    source_kind: str | None = None
+    sink_kind: str | None = None
+    trust_boundary: str | None = None
+    data_flow_path: list[ResolutionStep] = Field(default_factory=list)
 
 
 class CategoryScore(BaseModel):

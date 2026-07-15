@@ -141,12 +141,20 @@ def _findings_section(findings: list[Finding]) -> str:
     rows: list[str] = []
     for f in findings:
         locations = ", ".join(ev.location() for ev in f.source_evidence[:4]) or "—"
+        flow = ""
+        if f.source_kind or f.sink_kind:
+            flow = (
+                "<div class='rem'>Flow: "
+                f"{escape(f.source_kind or 'unknown')} &rarr; "
+                f"{escape(f.sink_kind or 'unknown')}</div>"
+            )
         rows.append(
             "<tr>"
             f"<td><span class='sev' style='background:{_SEVERITY_COLOR[f.severity]}'>"
             f"{escape(f.severity.value)}</span></td>"
             f"<td><code>{escape(f.rule_id)}</code></td>"
             f"<td><strong>{escape(f.title)}</strong><br>{escape(f.description)}"
+            f"{flow}"
             f"<div class='rem'>Fix: {escape(f.remediation)}</div></td>"
             f"<td>{escape(f.entity_name or '—')}<br><code>{escape(locations)}</code></td>"
             "</tr>"
@@ -164,6 +172,7 @@ def _inventory_section(inventory: Inventory) -> str:
         provider = (
             getattr(entity, "provider", None)
             or getattr(entity, "source", None)
+            or getattr(entity, "source_kind", None)
             or getattr(entity, "ecosystem", None)
             or "—"
         )

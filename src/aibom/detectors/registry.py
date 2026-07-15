@@ -45,8 +45,14 @@ def default_registry(*, disabled: set[str] | None = None) -> DetectorRegistry:
     from aibom.detectors.python.anthropic import AnthropicPythonDetector
     from aibom.detectors.python.huggingface import HuggingFacePythonDetector
     from aibom.detectors.python.openai import OpenAIPythonDetector
+    from aibom.detectors.python.prompt_flow import PromptFlowPythonDetector
 
     return DetectorRegistry(
-        [OpenAIPythonDetector(), AnthropicPythonDetector(), HuggingFacePythonDetector()],
+        [
+            OpenAIPythonDetector(),
+            AnthropicPythonDetector(),
+            HuggingFacePythonDetector(),
+            PromptFlowPythonDetector(),
+        ],
         disabled=disabled,
     )

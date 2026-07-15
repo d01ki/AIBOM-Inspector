@@ -25,9 +25,10 @@ with no expected components and no predictions show `N/A`, not a perfect score.
   external-repository accuracy.
 
 The checked-in external report currently covers two manually reviewed,
-commit-pinned repositories. It records precision 1.0000, recall 0.7273, and F1
-0.8421; the three false negatives are OpenAI Assistants `instructions=` prompt
-arguments. These are retained in the report as an explicit detector backlog.
+commit-pinned repositories. It records precision 1.0000, recall 1.0000, and F1
+1.0000 with 11 true positives, no false positives, and no false negatives. The
+previous three OpenAI Assistants `instructions=` misses are now covered by the
+prompt-flow AST detector.
 
 Do not claim broad external-repository support until at least 20 pinned public
 repositories, including negative cases, are present and reviewed.
