@@ -1,0 +1,11 @@
+{
+  "name": "notebook",
+  "local_path": "repos/notebook",
+  "repository": "example/notebook",
+  "components": [
+    {"category": "models", "name": "distilbert/distilbert-base-uncased"},
+    {"category": "datasets", "name": "imdb"},
+    {"category": "ai_packages", "name": "transformers"},
+    {"category": "ai_packages", "name": "datasets"}
+  ]
+}

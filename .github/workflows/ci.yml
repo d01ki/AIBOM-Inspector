@@ -31,3 +31,6 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest --cov=aibom --cov-report=term-missing
+
+      - name: Benchmark (detection precision/recall gate)
+        run: uv run python benchmark/evaluate.py --min-f1 1.0 --max-fp 0

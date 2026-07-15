@@ -1,0 +1,35 @@
+# Public repositories for networked benchmark runs.
+#
+# The default `python benchmark/evaluate.py` run uses the checked-in, labeled
+# mini-repos under benchmark/repos/ (offline, deterministic, CI-safe). This file
+# lists real public repositories to expand the evaluation set: pin each to a
+# commit, add a matching benchmark/ground_truth/<name>.json (with `repository`
+# and `commit` but no `local_path`), and run with network access.
+#
+# Labeling real repos is manual work — start small and grow the set. Aim for a
+# mix of frameworks plus negatives (plan §5.3).
+
+positives:
+  - name: langchain
+    repository: langchain-ai/langchain
+    note: large Python AI monorepo
+  - name: llama_index
+    repository: run-llama/llama_index
+  - name: autogen
+    repository: microsoft/autogen
+  - name: crewai
+    repository: crewaiinc/crewai
+  - name: open_webui
+    repository: open-webui/open-webui
+    note: Python + Svelte, model routing via config
+  - name: vercel_ai
+    repository: vercel/ai
+    note: TypeScript AI SDK
+
+negatives:
+  - name: flask
+    repository: pallets/flask
+    note: web framework, no AI usage
+  - name: express
+    repository: expressjs/express
+    note: Node web framework, no AI usage

@@ -1,0 +1,10 @@
+{
+  "name": "mcp-server",
+  "local_path": "repos/mcp-server",
+  "repository": "example/mcp-server",
+  "components": [
+    {"category": "mcp", "file": "server.py"},
+    {"category": "ai_packages", "name": "mcp"},
+    {"category": "ai_packages", "name": "fastmcp"}
+  ]
+}

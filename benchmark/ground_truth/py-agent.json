@@ -1,0 +1,13 @@
+{
+  "name": "py-agent",
+  "local_path": "repos/py-agent",
+  "repository": "example/py-agent",
+  "components": [
+    {"category": "models", "name": "gpt-4o-mini"},
+    {"category": "services", "name": "openai"},
+    {"category": "agents", "file": "app.py"},
+    {"category": "prompts", "file": "app.py"},
+    {"category": "ai_packages", "name": "openai"},
+    {"category": "ai_packages", "name": "langchain"}
+  ]
+}

@@ -67,6 +67,8 @@ packages = ["src/aibom"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Labeled scan targets are fixtures, not tool code — deliberately "imperfect".
+extend-exclude = ["benchmark/repos", "tests/fixtures"]
 src = ["src", "tests"]
 
 [tool.ruff.lint]

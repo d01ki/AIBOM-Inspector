@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AIBOM Inspector benchmark ground truth",
+  "type": "object",
+  "required": ["name", "components"],
+  "properties": {
+    "name": {"type": "string"},
+    "local_path": {"type": "string", "description": "Path to a labeled repo, relative to benchmark/."},
+    "repository": {"type": "string", "description": "owner/repo (informational, or for networked runs)."},
+    "commit": {"type": "string", "description": "Pinned commit SHA for reproducible networked runs."},
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["category"],
+        "properties": {
+          "category": {
+            "enum": ["models", "datasets", "prompts", "agents", "services", "mcp", "ai_packages"]
+          },
+          "name": {"type": "string", "description": "Required for name-based categories (models, datasets, services, ai_packages)."},
+          "file": {"type": "string", "description": "Required for location-based categories (prompts, agents, mcp)."},
+          "status": {"enum": ["declared", "imported", "instantiated", "invoked", "reachable"], "description": "Optional usage status (reserved for reachability evaluation)."}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "ts-rag",
+  "local_path": "repos/ts-rag",
+  "repository": "example/ts-rag",
+  "components": [
+    {"category": "models", "name": "claude-sonnet-4-5"},
+    {"category": "services", "name": "anthropic"},
+    {"category": "ai_packages", "name": "@anthropic-ai/sdk"},
+    {"category": "ai_packages", "name": "ai"}
+  ]
+}

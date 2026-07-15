@@ -1,0 +1,97 @@
+{
+  "evaluated": 5,
+  "skipped": [],
+  "overall": {
+    "tp": 17,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "categories": {
+    "models": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "datasets": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "prompts": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "agents": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "services": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "mcp": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "ai_packages": {
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    }
+  },
+  "repositories": [
+    {
+      "name": "mcp-server",
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "name": "negative-web",
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "name": "notebook",
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "name": "py-agent",
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "name": "ts-rag",
+      "false_positives": [],
+      "false_negatives": []
+    }
+  ]
+}

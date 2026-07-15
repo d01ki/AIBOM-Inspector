@@ -227,6 +227,18 @@ Pages on push to `main` (enable *Settings → Pages → Source = GitHub Actions*
 | **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
 | **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl — a complete BOM. AI/ML-ecosystem packages (incl. `mcp`/`fastmcp`/`@modelcontextprotocol/*`) are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |
 
+## Benchmark
+
+Detection accuracy is measured, not asserted. [`benchmark/`](benchmark/) holds
+labeled repositories with ground truth; `python benchmark/evaluate.py` scans each
+and reports per-category **Precision / Recall / F1** plus the exact false
+positives and false negatives ([latest](benchmark/reports/latest.md)). The
+checked-in mini-repos deliberately exercise the hard cases — env-default model
+resolution (Python + JS), dict/const indirection, notebooks, MCP servers, and a
+negative (non-AI) repo that must score zero — and run in CI as a **regression
+gate** (`--min-f1 1.0 --max-fp 0`). Real public repos are listed in
+[`benchmark/repos.yaml`](benchmark/repos.yaml) for networked evaluation.
+
 ## Language support
 
 The scanner is polyglot, with the deepest analysis for the two dominant AI-app
