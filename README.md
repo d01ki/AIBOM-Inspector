@@ -1,14 +1,3 @@
----
-title: AIBOM Inspector
-emoji: 🧬
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 8000
-pinned: false
-license: apache-2.0
----
-
 # AIBOM Inspector
 
 > **Discover, inventory, and analyze AI supply chains — the "Dependency-Track for AI."**
