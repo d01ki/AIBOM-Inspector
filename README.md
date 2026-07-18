@@ -74,12 +74,24 @@ cd AIBOM-Inspector
 docker compose up          # web UI + API at http://localhost:8000
 ```
 
-Run the CLI from the same image (mount the repo you want to scan):
+- **Port 8000 already in use?** `AIBOM_PORT=8080 docker compose up`
+- **Server on another machine / VM?** Browse to `http://<that-machine's-IP>:8000`
+  (the app listens on all interfaces). Check from the server itself with
+  `curl http://localhost:8000/api/health`.
+- Run in the background with `docker compose up -d`; stop with `docker compose down`.
+
+Run the CLI from the same image — mount the repository you want to scan.
+This exact command works from the clone (it scans the bundled vulnerable demo):
 
 ```bash
 docker build -t aibom-inspector .
-docker run --rm -v "/path/to/repo:/scan:ro" aibom-inspector aibom scan /scan
+docker run --rm -v "$PWD/tests/fixtures/vulnerable-ai-app:/scan:ro" \
+  aibom-inspector aibom scan /scan
 ```
+
+Swap the left side of `-v` for the **absolute path of your own repo**. If the
+scan reports `Read 0 files`, the mounted path was wrong or empty — Docker
+silently creates an empty directory for a host path that does not exist.
 
 ## Install without Docker
 
