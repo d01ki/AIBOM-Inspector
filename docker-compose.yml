@@ -1,0 +1,8 @@
+# One-command startup: `docker compose up` -> UI + API at http://localhost:8000
+services:
+  aibom:
+    build: .
+    image: aibom-inspector
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
