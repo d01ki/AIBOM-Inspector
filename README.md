@@ -64,20 +64,36 @@ resolves it, and adds graph + risk analysis on top.
 
 Design & roadmap → [SPEC.md](SPEC.md).
 
-## Install
+## Quick start (Docker — recommended)
+
+Clone and start; no Python environment needed, identical everywhere:
 
 ```bash
-# from PyPI
-pip install aibom              # CLI only
-pip install "aibom[server]"    # + the web API/UI (aibom serve)
-```
-
-```bash
-# from source (uv recommended)
 git clone https://github.com/d01ki/AIBOM-Inspector
 cd AIBOM-Inspector
-uv venv && uv pip install -e ".[dev]"
+docker compose up          # web UI + API at http://localhost:8000
 ```
+
+Run the CLI from the same image (mount the repo you want to scan):
+
+```bash
+docker build -t aibom-inspector .
+docker run --rm -v "/path/to/repo:/scan:ro" aibom-inspector aibom scan /scan
+```
+
+## Install without Docker
+
+Not yet on PyPI — install from source into a virtual environment
+(Debian/Ubuntu's system Python rejects bare `pip install`, per PEP 668):
+
+```bash
+git clone https://github.com/d01ki/AIBOM-Inspector
+cd AIBOM-Inspector
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"    # or, with uv: uv venv && uv pip install -e ".[dev]"
+```
+
+Or without cloning, via pipx: `pipx install "git+https://github.com/d01ki/AIBOM-Inspector"`.
 
 ## Usage
 
@@ -142,7 +158,9 @@ a third-party repo can't silence its own findings.
 ### GitHub Code Scanning
 
 ```yaml
-- run: pip install aibom && aibom scan . --sarif findings.sarif
+- run: |
+    pip install "git+https://github.com/d01ki/AIBOM-Inspector"
+    aibom scan . --sarif findings.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with: { sarif_file: findings.sarif }
 ```
@@ -185,10 +203,11 @@ aibom scan tests/fixtures/vulnerable-ai-app
 
 ## Web app
 
-Run the HTTP API + browser UI locally (paste a repo URL, get the AIBOM + score):
+Paste a repo URL in the browser, get the AIBOM + score. `docker compose up`
+(Quick start above) is the easiest way to run it; without Docker:
 
 ```bash
-uv pip install -e ".[server]"     # or: pip install 'aibom[server]'
+pip install -e ".[server]"         # in the venv from "Install without Docker"
 aibom serve                        # http://127.0.0.1:8000
 ```
 
