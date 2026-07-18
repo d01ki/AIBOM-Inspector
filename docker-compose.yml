@@ -6,6 +6,9 @@ services:
     image: aibom-inspector
     ports:
       - "${AIBOM_PORT:-8000}:8000"
+    environment:
+      # Host-side port, so the startup banner prints a URL that works.
+      AIBOM_PORT: "${AIBOM_PORT:-8000}"
     restart: unless-stopped
     healthcheck:
       test:

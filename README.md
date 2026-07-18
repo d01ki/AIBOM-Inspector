@@ -15,6 +15,17 @@ supply-chain risk analysis.
 Every entity it reports is pinned to a concrete `file:line` with the pattern that
 matched. **No evidence, no claim** — that is the trust contract of the tool.
 
+## Demo
+
+`docker compose up`, open <http://localhost:8000>, paste a repository URL, press
+**Scan** — security score, interactive dependency graph, and evidence-backed
+findings (here: `openai/openai-quickstart-python`):
+
+![AIBOM Inspector web UI scanning openai/openai-quickstart-python: 41/100 security score, risk-colored dependency graph, and OSV-backed findings with file:line evidence](docs/assets/ui-scan-result.png)
+
+Shareable scan links work too: `http://localhost:8000/?repo=https://github.com/owner/repo`
+pre-fills the form and starts the scan on load.
+
 ---
 
 ## Why

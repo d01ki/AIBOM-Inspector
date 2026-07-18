@@ -566,6 +566,10 @@ function detailShow(node) {
 $("scan").addEventListener("click", scan);
 $("download").addEventListener("click", download);
 $("repo").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
+
+// Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
+const preset = new URLSearchParams(location.search).get("repo");
+if (preset) { $("repo").value = preset; scan(); }
 </script>
 </body>
 </html>

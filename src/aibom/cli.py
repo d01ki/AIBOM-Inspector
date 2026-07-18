@@ -339,7 +339,10 @@ def serve(
         )
         raise typer.Exit(code=2) from None
 
-    console.print(f"AIBOM Inspector API on [bold]http://{host}:{port}[/bold]  (Ctrl-C to stop)")
+    console.print(
+        f"AIBOM Inspector web UI + API -- open [bold]http://{host}:{port}[/bold] "
+        "in your browser  (Ctrl-C to stop)"
+    )
     uvicorn.run("aibom.server.app:app", host=host, port=port, log_level="info")
 
 
