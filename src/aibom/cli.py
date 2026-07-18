@@ -22,7 +22,7 @@ from aibom.inventory import Inventory
 from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
 from aibom.report.html import render_html
-from aibom.service import run_scan
+from aibom.service import ScanResult, run_scan
 
 
 def _make_output_encode_safe() -> None:
@@ -91,7 +91,13 @@ def main(
 
 @app.command()
 def scan(
-    target: Annotated[Path, typer.Argument(help="Repository or directory to scan.")],
+    target: Annotated[
+        str | None,
+        typer.Argument(
+            help="Local path or public repo URL (https://github.com/owner/repo). "
+            "Omit it to be prompted interactively.",
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="Write the full inventory as JSON to this path."),
@@ -172,15 +178,27 @@ def scan(
 ) -> None:
     """Statically scan TARGET for AI supply-chain components and build an inventory.
 
+    TARGET is a local path or a public repository URL (shallow-cloned into a
+    temp dir and cleaned up afterwards). With no TARGET on an interactive
+    terminal, you are prompted for one.
+
     Defaults for --fail-on, --min-confidence, --disable-detector, and
-    --ignore-rule are read from the target's aibom.toml (or [tool.aibom] in its
-    pyproject.toml); explicit flags override the config.
+    --ignore-rule are read from a local target's aibom.toml (or [tool.aibom] in
+    its pyproject.toml); explicit flags override the config. URL targets never
+    contribute config — a scanned third-party repo can't set your policy.
     """
-    if not target.exists():
+    if target is None:
+        target = _prompt_for_target()
+
+    is_url = target.lower().startswith(("http://", "https://"))
+    local_path = Path(target)
+    if not is_url and not local_path.exists():
         console.print(f"[red]error:[/red] target does not exist: {target}")
         raise typer.Exit(code=2)
 
-    config = ScanConfig() if no_config else _load_config_or_exit(target)
+    config = (
+        ScanConfig() if (no_config or is_url) else _load_config_or_exit(local_path)
+    )
 
     fail_threshold = _parse_severity(fail_on) if fail_on is not None else config.fail_on
     effective_min_confidence = (
@@ -191,15 +209,32 @@ def scan(
         r for r in (ignore_rule or []) if r not in config.ignore_rules
     ]
 
-    result = run_scan(
-        target,
-        resolve=resolve,
-        vulns=vulns,
-        hf_cache=hf_cache,
-        min_confidence=effective_min_confidence,
-        disabled_detectors=disabled,
-        ignore_rules=ignore_rules,
-    )
+    def _scan(path: Path, display: str | None = None) -> ScanResult:
+        return run_scan(
+            path,
+            resolve=resolve,
+            vulns=vulns,
+            hf_cache=hf_cache,
+            min_confidence=effective_min_confidence,
+            disabled_detectors=disabled,
+            ignore_rules=ignore_rules,
+            display_target=display,
+        )
+
+    if is_url:
+        from aibom.server.clone import CloneError, clone_repo
+
+        try:
+            with (
+                console.status(f"cloning (shallow) and scanning {target} ..."),
+                clone_repo(target) as cloned,
+            ):
+                result = _scan(cloned, display=target)
+        except CloneError as exc:
+            console.print(f"[red]error:[/red] {exc}")
+            raise typer.Exit(code=2) from None
+    else:
+        result = _scan(local_path)
     inventory, findings, score = result.inventory, result.findings, result.score
 
     if not quiet:
@@ -231,6 +266,33 @@ def scan(
 
     if fail_threshold is not None and any(f.severity.rank >= fail_threshold.rank for f in findings):
         raise typer.Exit(code=1)
+
+
+def _stdin_is_tty() -> bool:
+    """Split out so tests can force the interactive path."""
+    return sys.stdin.isatty()
+
+
+def _prompt_for_target() -> str:
+    """Guided entry: ask what to scan when no TARGET argument was given."""
+    if not _stdin_is_tty():
+        console.print(
+            "[red]error:[/red] no scan target given. "
+            "Pass a local path or a public repo URL, e.g.:\n"
+            "  aibom scan .\n"
+            "  aibom scan https://github.com/owner/repo"
+        )
+        raise typer.Exit(code=2)
+    console.print("[bold]What should I scan?[/bold]")
+    console.print(
+        "[dim]A local directory (e.g. '.') or a public repository URL "
+        "(e.g. https://github.com/owner/repo)[/dim]"
+    )
+    value = str(typer.prompt("Scan target")).strip()
+    if not value:
+        console.print("[red]error:[/red] empty target")
+        raise typer.Exit(code=2)
+    return value
 
 
 def _parse_severity(value: str | None) -> Severity | None:

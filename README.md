@@ -80,18 +80,30 @@ docker compose up          # web UI + API at http://localhost:8000
   `curl http://localhost:8000/api/health`.
 - Run in the background with `docker compose up -d`; stop with `docker compose down`.
 
-Run the CLI from the same image — mount the repository you want to scan.
-This exact command works from the clone (it scans the bundled vulnerable demo):
+### CLI via Docker
 
 ```bash
 docker build -t aibom-inspector .
+
+# guided: prompts you for a path or URL to scan
+docker run --rm -it aibom-inspector aibom scan
+
+# scan a public repo by URL — no mounts needed (shallow-cloned in the container)
+docker run --rm aibom-inspector aibom scan https://github.com/openai/openai-quickstart-python
+
+# scan a local repo: mount it read-only (this example scans the bundled demo)
 docker run --rm -v "$PWD/tests/fixtures/vulnerable-ai-app:/scan:ro" \
   aibom-inspector aibom scan /scan
+
+# keep the HTML report / SARIF: mount an output directory too
+docker run --rm -v "$PWD/out:/out" aibom-inspector \
+  aibom scan https://github.com/owner/repo --report /out/report.html --sarif /out/findings.sarif
 ```
 
-Swap the left side of `-v` for the **absolute path of your own repo**. If the
-scan reports `Read 0 files`, the mounted path was wrong or empty — Docker
-silently creates an empty directory for a host path that does not exist.
+For local scans, swap the left side of `-v` for the **absolute path of your own
+repo**. If the scan reports `Read 0 files`, the mounted path was wrong or
+empty — Docker silently creates an empty directory for a host path that does
+not exist.
 
 ## Install without Docker
 
@@ -112,6 +124,12 @@ Or without cloning, via pipx: `pipx install "git+https://github.com/d01ki/AIBOM-
 ```bash
 # scan a repo and print the inventory
 aibom scan ./path/to/repo
+
+# scan a public repository by URL (shallow clone into a temp dir, cleaned up)
+aibom scan https://github.com/owner/repo
+
+# no target? you get a guided prompt for a path or URL
+aibom scan
 
 # write the full inventory (entities + relationships + evidence) as JSON
 aibom scan ./path/to/repo --output inventory.json
