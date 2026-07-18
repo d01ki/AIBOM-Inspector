@@ -15,7 +15,9 @@ from rich.console import Console
 from rich.table import Table
 
 from aibom import __version__
+from aibom.config import ConfigError, ScanConfig, load_config
 from aibom.export.cyclonedx import to_cyclonedx_json
+from aibom.export.sarif import to_sarif_json
 from aibom.inventory import Inventory
 from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
@@ -123,6 +125,13 @@ def scan(
         Path | None,
         typer.Option("--report", "-r", help="Write a self-contained HTML report to this path."),
     ] = None,
+    sarif: Annotated[
+        Path | None,
+        typer.Option(
+            "--sarif",
+            help="Write findings as SARIF 2.1.0 (GitHub Code Scanning) to this path.",
+        ),
+    ] = None,
     fail_on: Annotated[
         str | None,
         typer.Option(
@@ -132,9 +141,9 @@ def scan(
         ),
     ] = None,
     min_confidence: Annotated[
-        float,
+        float | None,
         typer.Option("--min-confidence", help="Drop entities whose best evidence is below this."),
-    ] = 0.0,
+    ] = None,
     disable_detector: Annotated[
         list[str] | None,
         typer.Option(
@@ -142,24 +151,54 @@ def scan(
             help="Disable a detector by stable ID; repeat the option to disable several.",
         ),
     ] = None,
+    ignore_rule: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--ignore-rule",
+            help="Suppress findings by rule ID ('TDR-004', or a family like 'OSV-*'); "
+            "repeatable. Suppressed findings are excluded from the score and --fail-on.",
+        ),
+    ] = None,
+    no_config: Annotated[
+        bool,
+        typer.Option(
+            "--no-config",
+            help="Ignore aibom.toml / [tool.aibom] in the target; use flags only.",
+        ),
+    ] = False,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
 ) -> None:
-    """Statically scan TARGET for AI supply-chain components and build an inventory."""
+    """Statically scan TARGET for AI supply-chain components and build an inventory.
+
+    Defaults for --fail-on, --min-confidence, --disable-detector, and
+    --ignore-rule are read from the target's aibom.toml (or [tool.aibom] in its
+    pyproject.toml); explicit flags override the config.
+    """
     if not target.exists():
         console.print(f"[red]error:[/red] target does not exist: {target}")
         raise typer.Exit(code=2)
 
-    fail_threshold = _parse_severity(fail_on)
+    config = ScanConfig() if no_config else _load_config_or_exit(target)
+
+    fail_threshold = _parse_severity(fail_on) if fail_on is not None else config.fail_on
+    effective_min_confidence = (
+        min_confidence if min_confidence is not None else config.min_confidence
+    )
+    disabled = set(config.disable_detectors) | set(disable_detector or [])
+    ignore_rules = config.ignore_rules + [
+        r for r in (ignore_rule or []) if r not in config.ignore_rules
+    ]
 
     result = run_scan(
         target,
         resolve=resolve,
         vulns=vulns,
         hf_cache=hf_cache,
-        min_confidence=min_confidence,
-        disabled_detectors=set(disable_detector or []),
+        min_confidence=effective_min_confidence,
+        disabled_detectors=disabled,
+        ignore_rules=ignore_rules,
     )
     inventory, findings, score = result.inventory, result.findings, result.score
 
@@ -179,16 +218,16 @@ def scan(
         )
 
     if output is not None:
-        output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")
-        console.print(f"[green]written[/green] inventory to [bold]{output}[/bold]")
+        _write_or_exit(output, inventory.model_dump_json(indent=2), "inventory")
 
     if cyclonedx is not None:
-        cyclonedx.write_text(to_cyclonedx_json(inventory), encoding="utf-8")
-        console.print(f"[green]written[/green] CycloneDX AIBOM to [bold]{cyclonedx}[/bold]")
+        _write_or_exit(cyclonedx, to_cyclonedx_json(inventory), "CycloneDX AIBOM")
 
     if report is not None:
-        report.write_text(render_html(inventory, findings, score), encoding="utf-8")
-        console.print(f"[green]written[/green] HTML report to [bold]{report}[/bold]")
+        _write_or_exit(report, render_html(inventory, findings, score), "HTML report")
+
+    if sarif is not None:
+        _write_or_exit(sarif, to_sarif_json(findings), "SARIF log")
 
     if fail_threshold is not None and any(f.severity.rank >= fail_threshold.rank for f in findings):
         raise typer.Exit(code=1)
@@ -202,6 +241,24 @@ def _parse_severity(value: str | None) -> Severity | None:
     except ValueError:
         valid = ", ".join(s.value for s in Severity)
         console.print(f"[red]error:[/red] invalid --fail-on '{value}'. Choose one of: {valid}")
+        raise typer.Exit(code=2) from None
+
+
+def _write_or_exit(path: Path, content: str, label: str) -> None:
+    """Write an artifact, turning OS errors into a clean exit instead of a traceback."""
+    try:
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        console.print(f"[red]error:[/red] cannot write {label} to '{path}': {exc.strerror or exc}")
+        raise typer.Exit(code=2) from None
+    console.print(f"[green]written[/green] {label} to [bold]{path}[/bold]")
+
+
+def _load_config_or_exit(target: Path) -> ScanConfig:
+    try:
+        return load_config(target)
+    except ConfigError as exc:
+        console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=2) from None
 
 
