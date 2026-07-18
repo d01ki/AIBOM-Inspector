@@ -147,11 +147,6 @@ a third-party repo can't silence its own findings.
   with: { sarif_file: findings.sarif }
 ```
 
-The reproducible reports include a deterministic local fixture and a
-[two-repository public evaluation](benchmark/reports/external-latest.md). The
-current pinned set records precision/recall/F1 of 1.0000 with no mismatches. It
-is regression evidence, not a claim of broad ecosystem coverage.
-
 ## Risk rules & scoring
 
 Findings are **deterministic and rule-based** (no LLM in the loop). Each carries a
@@ -213,47 +208,6 @@ The UI renders an interactive dependency graph from `/api/scan`'s `graph`
 (`{nodes, edges}`): nodes are colored by their worst finding severity; click one
 to see the component and its evidence trail.
 
-## Deploy
-
-The backend is a small container that serves the UI too, so one service runs
-the whole app from a single URL.
-
-**AWS Lightsail (production).** Pushes to `main` run
-[`deploy.yml`](.github/workflows/deploy.yml), connect to the configured
-Lightsail instance, and execute `/usr/local/bin/deploy-aibom`. The production
-UI and API are served together at [aibom-inspector.com](https://aibom-inspector.com/).
-
-**Render (free, no credit card, recommended).** The scanner needs server-side
-compute (it clones and analyzes repos), so it must run on a compute host — not a
-static-only one. [`render.yaml`](render.yaml) is a blueprint: on
-[render.com](https://render.com) → **New → Blueprint** → pick this repo → **Apply**.
-A few minutes later the whole app (UI at `/`, API at `/api/*`) is live at
-`https://aibom-inspector-api.onrender.com`. Free instances sleep after ~15 min
-idle and cold-start on the next request.
-
-**Run the image anywhere with Docker:**
-
-```bash
-docker build -t aibom .
-docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
-```
-
-**Static-only hosts (GitHub Pages / HF *Static* Spaces).** These can host the
-[`web/`](web/) UI for free, but **not** the scanner — open the page with
-`?api=https://your-backend` so it talks to a compute backend (e.g. your Render
-URL), and set `AIBOM_CORS_ORIGINS` on the backend to the UI's origin. Served by
-the backend itself, the UI needs no configuration at all.
-The optional [`.github/workflows/pages.yml`](.github/workflows/pages.yml) is
-manual-only so it does not conflict with the Lightsail deployment. Before
-running it, enable *Settings → Pages → Source = GitHub Actions*.
-
-Environment variables:
-
-- `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
-  defaults to `*` for local demos). Not needed if the backend also serves the UI.
-- `AIBOM_WEB_DIR` — where the backend finds the UI to also serve at `/` (set in
-  the image). Enables an **all-in-one single-origin deploy with no CORS**.
-
 ## What it detects
 
 | Component | Signals |
@@ -280,6 +234,10 @@ uv run ruff check .      # lint
 uv run mypy              # types
 python benchmark/evaluate.py  # precision/recall benchmark
 ```
+
+The benchmark covers a deterministic local fixture plus a
+[pinned public evaluation](benchmark/reports/external-latest.md) — regression
+evidence, not a claim of broad ecosystem coverage.
 
 Implementation details: [architecture](docs/architecture.md),
 [detection methodology](docs/detection-methodology.md),
