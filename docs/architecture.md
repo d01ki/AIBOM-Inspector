@@ -14,7 +14,7 @@ CLI / HTTP API
      -> Inventory normalization and deduplication
      -> optional metadata/vulnerability resolvers
      -> deterministic risk rules and score
-  -> JSON / CycloneDX / graph / self-contained HTML
+  -> JSON / CycloneDX / SARIF / graph / self-contained HTML
 ```
 
 ## Detector boundary

@@ -14,6 +14,7 @@ from pathlib import Path
 from aibom import __version__
 from aibom.collectors.dependencies import DependencyCollector
 from aibom.collectors.repo import RepoCollector
+from aibom.config import ignored
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.findings import Finding, SecurityScore
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
@@ -41,6 +42,7 @@ def run_scan(
     min_confidence: float = 0.0,
     display_target: str | None = None,
     disabled_detectors: set[str] | None = None,
+    ignore_rules: list[str] | None = None,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
@@ -49,6 +51,10 @@ def run_scan(
     (network); it defaults to ``resolve`` so callers with network get both.
     ``display_target`` overrides the target string recorded in the metadata
     (used by the API so reports show the repo URL, not a temp path).
+    ``ignore_rules`` suppresses findings by rule ID (exact, or ``PREFIX-*``);
+    suppressed findings are excluded from the score as well. The caller decides
+    the policy — this function never reads config from the scanned repo, so a
+    scanned third-party repository cannot silence its own findings.
     """
     if vulns is None:
         vulns = resolve
@@ -72,6 +78,8 @@ def run_scan(
     if vulns:
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
         findings = order_findings(findings + OSVMapper().map(inventory))
+    if ignore_rules:
+        findings = [f for f in findings if not ignored(f.rule_id, ignore_rules)]
     score = score_findings(findings)
     inventory.stats.duration_ms = int((time.monotonic() - started) * 1000)
     return ScanResult(inventory=inventory, findings=findings, score=score)

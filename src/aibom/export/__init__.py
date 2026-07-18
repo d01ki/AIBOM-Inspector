@@ -9,5 +9,6 @@ proprietary-only format.
 from __future__ import annotations
 
 from aibom.export.cyclonedx import to_cyclonedx, to_cyclonedx_json
+from aibom.export.sarif import to_sarif, to_sarif_json
 
-__all__ = ["to_cyclonedx", "to_cyclonedx_json"]
+__all__ = ["to_cyclonedx", "to_cyclonedx_json", "to_sarif", "to_sarif_json"]

@@ -31,47 +31,38 @@ resolves it, and adds graph + risk analysis on top.
 | Dependency-Track | Consumes SBOMs; no AI-specific discovery or risk rules. |
 | `modelscan` / `picklescan` | Scan a *given* model file for unsafe pickles. AIBOM Inspector *finds which models a repo uses in the first place*, then flags the pickle risk in context. |
 
-## Status
+## Features
 
-**Early alpha (v0.1, M1–M4).** Implemented today:
-
-- ✅ **Python AST detectors** for OpenAI, Anthropic, and Hugging Face usage,
-  including import aliases, actual API invocations, and auditable value resolution
-- ✅ **Usage and reachability evidence** — declared/imported/instantiated/invoked
-  states, same-file entrypoint paths, confidence factors, detector IDs, and
+- **Discovery** — Python AST detectors for OpenAI, Anthropic, and Hugging Face
+  usage (import aliases, real API invocations, auditable value resolution),
+  plus JS/TS AI usage, MCP clients/servers, notebooks, prompts, datasets, and
+  LangChain/LangGraph agents
+- **Evidence & reachability** — declared/imported/instantiated/invoked states,
+  same-file entrypoint paths, confidence factors, stable detector IDs, and
   production/test/example/docs source contexts
-- ✅ **Prompt source-to-sink analysis** — OpenAI/Anthropic prompt arguments,
-  Assistants instructions, bounded HTTP/CLI/environment data-flow paths, trust
-  boundaries, and secret-safe prompt hashes
-- ✅ **Reproducible benchmark harness** — category Precision/Recall/F1 plus
+- **Prompt source-to-sink analysis** — bounded data-flow paths from HTTP / CLI
+  / environment / file / retrieval / database inputs into OpenAI & Anthropic
+  prompt sinks, with trust boundaries and secret-safe prompt hashes
+- **Complete dependency BOM** — every package in `requirements*.txt`,
+  `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm) with versions and
+  purls; the AI/ML layer is flagged and drives the risk analysis
+- **Hugging Face resolver** — license, model card, serialization formats,
+  author, downloads, gated status (network-optional, cache-backed,
+  offline-friendly; **never downloads or loads weights**)
+- **Vulnerability mapping** — with `--resolve`, pinned packages are checked
+  against [OSV.dev](https://osv.dev); matching CVE/GHSA advisories become
+  evidence-backed findings
+- **Deterministic risk rules** (TDR-001…012, AIBOM-PROMPT-004) + a reproducible
+  0–100 security score over integrity / provenance / licensing / configuration
+- **Standard outputs** — CycloneDX 1.6 ML-BOM (validated against the official
+  schema), SARIF 2.1.0 for GitHub Code Scanning, JSON inventory, self-contained
+  HTML report, severity-gated exit codes for CI
+- **Web app** — FastAPI backend (`aibom serve`) + single-page UI with an
+  interactive risk-colored dependency graph
+- **Reproducible benchmark harness** — category precision/recall/F1 with
   explicit false-positive and false-negative reports
-- ✅ **Dependency-manifest collector** — finds AI/ML libraries in `requirements*.txt`,
-  `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm) with versions and purls, so
-  the AIBOM is useful on real repos, not just ones with inline `from_pretrained`
-- ✅ **Vulnerability mapping** — with `--resolve`, pinned packages are checked against
-  [OSV.dev](https://osv.dev) and matching CVE/GHSA advisories become evidence-backed findings
-- ✅ **Web app** — a FastAPI backend (`aibom serve`) + a static single-page UI:
-  paste a public repo URL, get the AIBOM, findings, and score in the browser
-- ✅ **Interactive dependency graph** — app → agents → models / prompts / services,
-  nodes colored by risk; click a node for its evidence-backed findings (no JS deps)
 
-- ✅ Unified Pydantic schema with mandatory evidence
-- ✅ Static repository collector (models, datasets, prompts, agents, services)
-- ✅ Deduplicating inventory + typed relationship graph
-- ✅ **Hugging Face resolver** — enriches HF models/datasets with license, model-card
-  presence, serialization formats, author, downloads, gated status (network-optional,
-  cache-backed, offline-friendly; **never downloads or loads weights**)
-- ✅ **CycloneDX 1.6 (ML-BOM) export** — `machine-learning-model` / `data` components,
-  services, dependency graph, and AIBOM-specific data in the `aibom:*` property namespace;
-  **validated against the official CycloneDX 1.6 JSON schema** in the test suite
-- ✅ **Deterministic risk rules (TDR-001…012 and AIBOM-PROMPT-004)** + a
-  reproducible 0–100 security score over integrity / provenance / licensing /
-  configuration
-- ✅ **Self-contained HTML report** (score, evidence-backed findings, inventory)
-- ✅ CLI (`aibom scan`) with JSON inventory, CycloneDX, HTML report, and severity exit codes
-- ✅ Golden-fixture test suite
-
-Roadmap → [SPEC.md](SPEC.md): dependency-graph visualization, plugin collectors.
+Design & roadmap → [SPEC.md](SPEC.md).
 
 ## Install
 
@@ -113,20 +104,48 @@ aibom scan ./path/to/repo --report report.html
 # CI gate: exit non-zero if any finding is at/above a severity
 aibom scan ./path/to/repo --fail-on high
 
+# SARIF 2.1.0 for GitHub Code Scanning / any SARIF viewer
+aibom scan ./path/to/repo --sarif findings.sarif
+
 # drop low-confidence detections
 aibom scan ./path/to/repo --min-confidence 0.8
 
 # disable one detector while debugging or enforcing an organization profile
 aibom scan ./path/to/repo --disable-detector python.openai.ast
 
+# suppress a rule (exact ID or a family) — excluded from the score and --fail-on
+aibom scan ./path/to/repo --ignore-rule TDR-004 --ignore-rule "OSV-*"
+
 # evaluate checked-out repositories against reviewed ground truth
 python benchmark/evaluate.py
 ```
 
-The reproducible reports include a deterministic local fixture and a
-[two-repository public evaluation](benchmark/reports/external-latest.md). The
-current pinned set records precision/recall/F1 of 1.0000 with no mismatches. It
-is regression evidence, not a claim of broad ecosystem coverage.
+### Configuration (organization policy as code)
+
+Scan defaults are read from `aibom.toml` at the target root, or from
+`[tool.aibom]` in the target's `pyproject.toml`. Explicit CLI flags always
+override the config; `--no-config` ignores it entirely. Unknown keys are
+rejected loudly so a typo can't silently weaken the policy.
+
+```toml
+# aibom.toml — committed next to the code, one policy for every pipeline
+fail_on = "high"
+min_confidence = 0.6
+disable_detectors = ["python.openai.ast"]
+ignore_rules = ["TDR-004", "OSV-*"]     # exact IDs or 'PREFIX-*' families
+```
+
+Suppressed rules are excluded from the findings, the security score, and the
+`--fail-on` gate. The web API never applies a scanned repository's own config —
+a third-party repo can't silence its own findings.
+
+### GitHub Code Scanning
+
+```yaml
+- run: pip install aibom && aibom scan . --sarif findings.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with: { sarif_file: findings.sarif }
+```
 
 ## Risk rules & scoring
 
@@ -189,51 +208,6 @@ The UI renders an interactive dependency graph from `/api/scan`'s `graph`
 (`{nodes, edges}`): nodes are colored by their worst finding severity; click one
 to see the component and its evidence trail.
 
-## Deploy
-
-The backend is a small container that serves the UI too, so one service runs
-the whole app from a single URL.
-
-**AWS Lightsail (production).** Pushes to `main` run
-[`deploy.yml`](.github/workflows/deploy.yml), connect to the configured
-Lightsail instance, and execute `/usr/local/bin/deploy-aibom`. The production
-UI and API are served together at [aibom-inspector.com](https://aibom-inspector.com/).
-
-**Render (free, no credit card, recommended).** The scanner needs server-side
-compute (it clones and analyzes repos), so it must run on a compute host — not a
-static-only one. [`render.yaml`](render.yaml) is a blueprint: on
-[render.com](https://render.com) → **New → Blueprint** → pick this repo → **Apply**.
-A few minutes later the whole app (UI at `/`, API at `/api/*`) is live at
-`https://aibom-inspector-api.onrender.com`. Free instances sleep after ~15 min
-idle and cold-start on the next request.
-
-**Run the image anywhere with Docker:**
-
-```bash
-docker build -t aibom .
-docker run -p 8000:8000 aibom          # UI + API at http://localhost:8000
-```
-
-**Static-only hosts (GitHub Pages / HF *Static* Spaces).** These can host the
-[`web/`](web/) UI for free, but **not** the scanner — open the page with
-`?api=https://your-backend` so it talks to a compute backend (e.g. your Render
-URL), and set `AIBOM_CORS_ORIGINS` on the backend to the UI's origin. Served by
-the backend itself, the UI needs no configuration at all.
-The optional [`.github/workflows/pages.yml`](.github/workflows/pages.yml) is
-manual-only so it does not conflict with the Lightsail deployment. Before
-running it, enable *Settings → Pages → Source = GitHub Actions*.
-
-> **Note:** Hugging Face **Docker** Spaces now require a paid (PRO) plan; only
-> **Static** Spaces are free. The Space frontmatter at the top of this README is
-> kept for anyone on PRO — `git push` this repo to a Docker Space and it runs
-> as-is. For a free deploy, use Render above.
-
-- `AIBOM_CORS_ORIGINS` — comma-separated allowed origins (your Pages origin;
-  defaults to `*` for local demos). Not needed if the backend also serves the UI.
-- `AIBOM_WEB_DIR` — where the backend finds the UI to also serve at `/` (set in
-  the image). Handy for an **all-in-one single-origin deploy with no CORS** —
-  e.g. a Hugging Face Space serves both the UI and the API from one URL.
-
 ## What it detects
 
 | Component | Signals |
@@ -260,6 +234,10 @@ uv run ruff check .      # lint
 uv run mypy              # types
 python benchmark/evaluate.py  # precision/recall benchmark
 ```
+
+The benchmark covers a deterministic local fixture plus a
+[pinned public evaluation](benchmark/reports/external-latest.md) — regression
+evidence, not a claim of broad ecosystem coverage.
 
 Implementation details: [architecture](docs/architecture.md),
 [detection methodology](docs/detection-methodology.md),
