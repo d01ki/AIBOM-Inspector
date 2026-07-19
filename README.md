@@ -82,33 +82,34 @@ Clone and start; no Python environment needed, identical everywhere:
 ```bash
 git clone https://github.com/d01ki/AIBOM-Inspector
 cd AIBOM-Inspector
-docker compose up          # web UI + API at http://localhost:8000
+docker compose up
 ```
 
-- **Port 8000 already in use?** `AIBOM_PORT=8080 docker compose up`
-- **Server on another machine / VM?** Browse to `http://<that-machine's-IP>:8000`
-  (the app listens on all interfaces). Check from the server itself with
-  `curl http://localhost:8000/api/health`.
+Then open **<http://localhost:8000>** in your browser — that's the whole UI + API.
+
 - Run in the background with `docker compose up -d`; stop with `docker compose down`.
+- **Port 8000 already in use?** Start on another port, e.g.
+  `AIBOM_PORT=8765 docker compose up`, then open `http://localhost:8765`.
+- **Running on a remote server / VM?** It listens on all interfaces — reach it at
+  `http://<server-ip>:8000` (verify locally with `curl http://localhost:8000/api/health`).
 
 ### CLI via Docker
 
 ```bash
 docker build -t aibom-inspector .
 
-# guided: prompts you for a path or URL to scan
-docker run --rm -it aibom-inspector aibom scan
+# guided menu: 1) scan a URL  2) scan a directory  3) demo  4) web UI
+docker run --rm -it aibom-inspector aibom
+
+# demo scan — zero setup, offline, shows every rule firing
+docker run --rm aibom-inspector aibom scan --demo
 
 # scan a public repo by URL — no mounts needed (shallow-cloned in the container)
 docker run --rm aibom-inspector aibom scan https://github.com/openai/openai-quickstart-python
 
-# scan a local repo: mount it read-only (this example scans the bundled demo)
-docker run --rm -v "$PWD/tests/fixtures/vulnerable-ai-app:/scan:ro" \
-  aibom-inspector aibom scan /scan
-
-# keep the HTML report / SARIF: mount an output directory too
-docker run --rm -v "$PWD/out:/out" aibom-inspector \
-  aibom scan https://github.com/owner/repo --report /out/report.html --sarif /out/findings.sarif
+# scan a local repo (mount it read-only); keep outputs via a second mount
+docker run --rm -v "/abs/path/to/repo:/scan:ro" -v "$PWD/out:/out" \
+  aibom-inspector aibom scan /scan --report /out/report.html --sarif /out/findings.sarif
 ```
 
 For local scans, swap the left side of `-v` for the **absolute path of your own
@@ -132,49 +133,32 @@ Or without cloning, via pipx: `pipx install "git+https://github.com/d01ki/AIBOM-
 
 ## Usage
 
+New here? Just run `aibom` — a guided menu walks you through everything:
+
+```text
+AIBOM Inspector - AI supply-chain scanner (static, evidence-backed)
+
+  1) Scan a public repository URL
+  2) Scan a local directory
+  3) Demo - scan the bundled vulnerable AI app (offline)
+  4) Start the web UI in your browser
+  q) Quit
+```
+
+Direct commands for scripts and CI:
+
 ```bash
-# scan a repo and print the inventory
-aibom scan ./path/to/repo
+aibom scan .                                # local directory
+aibom scan https://github.com/owner/repo    # public repo (shallow clone, cleaned up)
+aibom scan --demo                           # bundled deliberately-vulnerable demo
 
-# scan a public repository by URL (shallow clone into a temp dir, cleaned up)
-aibom scan https://github.com/owner/repo
+# outputs: JSON inventory / CycloneDX 1.6 ML-BOM / SARIF / self-contained HTML
+aibom scan . -o inv.json -c aibom.cdx.json --sarif findings.sarif -r report.html
 
-# no target? you get a guided prompt for a path or URL
-aibom scan
+# online enrichment (HF metadata + OSV vulnerabilities) and a CI severity gate
+aibom scan . --resolve --fail-on high
 
-# write the full inventory (entities + relationships + evidence) as JSON
-aibom scan ./path/to/repo --output inventory.json
-
-# generate a CycloneDX 1.6 (ML-BOM) AIBOM — import it into Dependency-Track
-aibom scan ./path/to/repo --cyclonedx aibom.cdx.json
-
-# online enrichment: Hugging Face metadata (license, formats, …) AND OSV
-# vulnerability mapping for pinned AI packages
-aibom scan ./path/to/repo --resolve --cyclonedx aibom.cdx.json
-
-# cache HF metadata for offline / air-gapped re-scans
-aibom scan ./path/to/repo --resolve --hf-cache ~/.cache/aibom
-
-# risk analysis: write a self-contained HTML report (score + findings + inventory)
-aibom scan ./path/to/repo --report report.html
-
-# CI gate: exit non-zero if any finding is at/above a severity
-aibom scan ./path/to/repo --fail-on high
-
-# SARIF 2.1.0 for GitHub Code Scanning / any SARIF viewer
-aibom scan ./path/to/repo --sarif findings.sarif
-
-# drop low-confidence detections
-aibom scan ./path/to/repo --min-confidence 0.8
-
-# disable one detector while debugging or enforcing an organization profile
-aibom scan ./path/to/repo --disable-detector python.openai.ast
-
-# suppress a rule (exact ID or a family) — excluded from the score and --fail-on
-aibom scan ./path/to/repo --ignore-rule TDR-004 --ignore-rule "OSV-*"
-
-# evaluate checked-out repositories against reviewed ground truth
-python benchmark/evaluate.py
+aibom scan --help   # everything else: confidence filter, detector/rule control, HF cache
 ```
 
 ### Configuration (organization policy as code)
@@ -249,7 +233,7 @@ Paste a repo URL in the browser, get the AIBOM + score. `docker compose up`
 
 ```bash
 pip install -e ".[server]"         # in the venv from "Install without Docker"
-aibom serve                        # http://127.0.0.1:8000
+aibom serve                        # then open http://localhost:8000
 ```
 
 The backend shallow-clones the URL into a throwaway temp dir, runs the same
