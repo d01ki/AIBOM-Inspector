@@ -268,7 +268,12 @@ class RepoCollector(Collector):
         for path in self.root.rglob("*"):
             if path.is_dir():
                 continue
-            if any(part in _IGNORE_DIRS for part in path.parts):
+            # Ignore-dirs apply to the path *inside* the scan root only. The
+            # root's own ancestors must not count, or a target that happens to
+            # live under e.g. .../venv/... or site-packages (the bundled demo
+            # app does) silently scans as empty.
+            rel_parts = path.relative_to(self.root).parts
+            if any(part in _IGNORE_DIRS for part in rel_parts):
                 continue
             files.append(path)
         return sorted(files)

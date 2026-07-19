@@ -204,7 +204,9 @@ class DependencyCollector(Collector):
             return [self.root]
         out: list[Path] = []
         for path in self.root.rglob("*"):
-            if path.is_dir() or any(p in _IGNORE_DIRS for p in path.parts):
+            # Relative parts only: the scan root's own ancestors (e.g. a venv's
+            # site-packages holding the bundled demo app) must not exclude it.
+            if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
                 continue
             n = path.name.lower()
             if (n.startswith("requirements") and n.endswith(".txt")) or n in {

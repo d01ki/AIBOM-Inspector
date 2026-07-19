@@ -6,6 +6,7 @@ Static analysis only — running ``aibom scan`` never executes the target code.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -43,8 +44,9 @@ _make_output_encode_safe()
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
-    help="AIBOM Inspector - discover & inventory AI supply chains (static, evidence-backed).",
+    no_args_is_help=False,
+    help="AIBOM Inspector - discover & inventory AI supply chains (static, evidence-backed). "
+    "Run with no arguments on a terminal for a guided menu.",
 )
 console = Console()
 
@@ -73,8 +75,9 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     _version: Annotated[
         bool | None,
         typer.Option(
@@ -86,7 +89,13 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """AIBOM Inspector CLI."""
+    """AIBOM Inspector CLI. Run with no arguments for a guided menu."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if _stdin_is_tty():
+        _menu()
+    else:
+        console.print(ctx.get_help())
 
 
 @app.command()
@@ -172,6 +181,13 @@ def scan(
             help="Ignore aibom.toml / [tool.aibom] in the target; use flags only.",
         ),
     ] = False,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo",
+            help="Scan the bundled deliberately-vulnerable demo app (offline, no setup).",
+        ),
+    ] = False,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
@@ -187,6 +203,13 @@ def scan(
     its pyproject.toml); explicit flags override the config. URL targets never
     contribute config — a scanned third-party repo can't set your policy.
     """
+    if demo:
+        demo_dir = _demo_path()
+        if demo_dir is None:
+            console.print("[red]error:[/red] the demo app is not bundled in this installation")
+            raise typer.Exit(code=2)
+        console.print(f"[dim]demo: scanning the bundled vulnerable AI app at {demo_dir}[/dim]")
+        target = str(demo_dir)
     if target is None:
         target = _prompt_for_target()
 
@@ -273,6 +296,58 @@ def _stdin_is_tty() -> bool:
     return sys.stdin.isatty()
 
 
+def _demo_path() -> Path | None:
+    """Locate the bundled deliberately-vulnerable demo app, if shipped."""
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent / "demo_app",  # installed wheel / Docker image
+        here.parents[2] / "tests" / "fixtures" / "vulnerable-ai-app",  # source checkout
+    ]
+    for candidate in candidates:
+        if (candidate / "requirements.txt").is_file():
+            return candidate
+    return None
+
+
+def _menu() -> None:
+    """Numbered top-level menu shown when `aibom` runs with no arguments."""
+    console.print()
+    console.print(
+        "[bold]AIBOM Inspector[/bold] - AI supply-chain scanner (static, evidence-backed)"
+    )
+    console.print()
+    console.print("  [bold]1[/bold]) Scan a public repository URL")
+    console.print("  [bold]2[/bold]) Scan a local directory")
+    console.print("  [bold]3[/bold]) Demo - scan the bundled vulnerable AI app (offline)")
+    console.print("  [bold]4[/bold]) Start the web UI in your browser")
+    console.print("  [bold]q[/bold]) Quit")
+    console.print()
+    while True:
+        choice = str(typer.prompt("Choose", default="3")).strip().lower()
+        if choice in {"1", "2", "3", "4", "q", "quit", "exit"}:
+            break
+        console.print("[yellow]Please answer 1, 2, 3, 4, or q.[/yellow]")
+    if choice in {"q", "quit", "exit"}:
+        raise typer.Exit()
+    if choice == "4":
+        serve()
+        return
+    if choice == "1":
+        target: str | None = str(
+            typer.prompt("Repository URL (e.g. https://github.com/owner/repo)")
+        ).strip()
+    elif choice == "2":
+        target = str(typer.prompt("Local directory to scan", default=".")).strip()
+    else:
+        target = None  # demo
+    report: Path | None = None
+    if typer.confirm("Save a self-contained HTML report (report.html)?", default=False):
+        report = Path("report.html")
+    scan(target=target, demo=choice == "3", report=report)
+    if report is not None:
+        console.print(f"[dim]Open {report} in your browser to view the report.[/dim]")
+
+
 def _prompt_for_target() -> str:
     """Guided entry: ask what to scan when no TARGET argument was given."""
     if not _stdin_is_tty():
@@ -326,7 +401,10 @@ def _load_config_or_exit(target: Path) -> ScanConfig:
 
 @app.command()
 def serve(
-    host: Annotated[str, typer.Option("--host", help="Bind address.")] = "127.0.0.1",
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="Bind address (default: AIBOM_HOST env or 127.0.0.1)."),
+    ] = None,
     port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8000,
 ) -> None:
     """Run the HTTP API + web UI (requires the 'server' extra)."""
@@ -339,11 +417,15 @@ def serve(
         )
         raise typer.Exit(code=2) from None
 
+    # The Docker image sets AIBOM_HOST=0.0.0.0 so menu option 4 / bare `serve`
+    # is reachable through the published port, not just inside the container.
+    bind = host or os.environ.get("AIBOM_HOST") or "127.0.0.1"
+    shown = "localhost" if bind in {"0.0.0.0", "127.0.0.1"} else bind
     console.print(
-        f"AIBOM Inspector web UI + API -- open [bold]http://{host}:{port}[/bold] "
+        f"AIBOM Inspector web UI + API -- open [bold]http://{shown}:{port}[/bold] "
         "in your browser  (Ctrl-C to stop)"
     )
-    uvicorn.run("aibom.server.app:app", host=host, port=port, log_level="info")
+    uvicorn.run("aibom.server.app:app", host=bind, port=port, log_level="info")
 
 
 def _render(inventory: Inventory) -> None:
