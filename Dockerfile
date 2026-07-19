@@ -16,6 +16,8 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY web ./web
+# The demo app ships inside the wheel (aibom/demo_app) for `aibom scan --demo`.
+COPY tests/fixtures/vulnerable-ai-app ./tests/fixtures/vulnerable-ai-app
 RUN pip install --no-cache-dir ".[server]"
 
 # Run as a non-root user.
@@ -23,6 +25,8 @@ RUN useradd --create-home --uid 10001 aibom
 USER aibom
 
 ENV AIBOM_CORS_ORIGINS="*"
+# So `aibom serve` (e.g. from the interactive menu) binds reachably in Docker.
+ENV AIBOM_HOST="0.0.0.0"
 # Serve the bundled UI at / (the package install doesn't keep web/ beside the code).
 ENV AIBOM_WEB_DIR="/app/web"
 EXPOSE 8000
