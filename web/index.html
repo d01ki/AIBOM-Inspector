@@ -872,7 +872,6 @@
           <span class="panel-index">01</span>
           <h2 id="scan-panel-title">Repository scan</h2>
         </div>
-        <span class="scope-badge">PUBLIC REPOSITORY</span>
       </header>
 
       <ol class="scan-steps" aria-label="Scan workflow">
@@ -898,7 +897,7 @@
           <button id="scan" type="button">Start analysis</button>
         </div>
         <div class="field-help">
-          <button class="text-action" id="loadExample" type="button">Use AIBOM Inspector as an example</button>
+          <button class="text-action" id="loadExample" type="button">Use OpenAI Python Quickstart as an example</button>
           <span>Only publicly cloneable repositories are supported.</span>
         </div>
         <div class="status-block">
@@ -1111,7 +1110,7 @@
 <script>
 "use strict";
 const SEV_COLOR = { critical: "#a7333f", high: "#b9582f", medium: "#9b701c", low: "#39745b", info: "#64716a" };
-const EXAMPLE_REPO = "https://github.com/d01ki/AIBOM-Inspector";
+const EXAMPLE_REPO = "https://github.com/openai/openai-quickstart-python";
 const $ = (id) => document.getElementById(id);
 
 // The backend serves this page, so the API lives at this page's origin.
