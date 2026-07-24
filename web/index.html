@@ -1678,6 +1678,10 @@ $("findingSearch").addEventListener("input", filterFindings);
 $("severityFilter").addEventListener("change", filterFindings);
 $("inventorySearch").addEventListener("input", filterInventory);
 $("typeFilter").addEventListener("change", filterInventory);
+
+// Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
+const preset = new URLSearchParams(location.search).get("repo");
+if (preset) { $("repo").value = preset; scan(); }
 </script>
 </body>
 </html>

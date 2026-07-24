@@ -130,3 +130,124 @@ def test_disable_detector_option_is_repeatable(tmp_path: Path) -> None:
     assert result.exit_code == 0
     data = json.loads(out.read_text(encoding="utf-8"))
     assert not [entity for entity in data["entities"] if entity["type"] == "model"]
+
+
+# --- URL targets and guided entry ------------------------------------------
+
+
+def test_no_target_non_interactive_exits_2() -> None:
+    result = runner.invoke(app, ["scan"])
+    assert result.exit_code == 2
+    assert "no scan target given" in result.stdout
+
+
+def test_no_target_interactive_prompts_and_scans(monkeypatch: Any) -> None:
+    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
+    result = runner.invoke(app, ["scan"], input=f"{FIXTURE}\n")
+    assert result.exit_code == 0
+    assert "What should I scan?" in result.stdout
+    assert "Security score" in result.stdout
+
+
+def test_url_target_disallowed_host_exits_2() -> None:
+    result = runner.invoke(app, ["scan", "https://evil.example/owner/repo"])
+    assert result.exit_code == 2
+    assert "not allowed" in result.stdout
+
+
+def test_url_target_clones_and_scans(monkeypatch: Any) -> None:
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_clone(url: str, **kwargs: Any):  # noqa: ANN202
+        yield FIXTURE
+
+    monkeypatch.setattr("aibom.server.clone.clone_repo", fake_clone)
+    url = "https://github.com/owner/repo"
+    out_result = runner.invoke(app, ["scan", url])
+    assert out_result.exit_code == 0
+    assert "Security score" in out_result.stdout
+
+
+def test_url_target_records_url_as_metadata_target(monkeypatch: Any, tmp_path: Path) -> None:
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_clone(url: str, **kwargs: Any):  # noqa: ANN202
+        yield FIXTURE
+
+    monkeypatch.setattr("aibom.server.clone.clone_repo", fake_clone)
+    out = tmp_path / "inv.json"
+    url = "https://github.com/owner/repo"
+    result = runner.invoke(app, ["scan", url, "-q", "--output", str(out)])
+    assert result.exit_code == 0
+    assert json.loads(out.read_text())["metadata"]["target"] == url
+
+
+# --- guided menu and demo ---------------------------------------------------
+
+
+def test_bare_invocation_non_tty_prints_help() -> None:
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "guided menu" in result.stdout
+
+
+def test_menu_demo_scan(monkeypatch: Any) -> None:
+    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
+    # choice 3 (demo), decline the HTML report
+    result = runner.invoke(app, [], input="3\nn\n")
+    assert result.exit_code == 0
+    assert "Demo - scan the bundled vulnerable AI app" in result.stdout
+    assert "Security score" in result.stdout
+    assert "TDR-001" in result.stdout
+
+
+def test_menu_quit(monkeypatch: Any) -> None:
+    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
+    result = runner.invoke(app, [], input="q\n")
+    assert result.exit_code == 0
+    assert "Security score" not in result.stdout
+
+
+def test_menu_invalid_choice_reprompts(monkeypatch: Any) -> None:
+    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
+    result = runner.invoke(app, [], input="7\nq\n")
+    assert result.exit_code == 0
+    assert "Please answer" in result.stdout
+
+
+def test_scan_demo_flag() -> None:
+    result = runner.invoke(app, ["scan", "--demo"])
+    assert result.exit_code == 0
+    assert "TDR-001" in result.stdout
+
+
+def test_menu_demo_writes_report(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, [], input="3\ny\n")
+    assert result.exit_code == 0
+    assert (tmp_path / "report.html").exists()
+
+
+def test_scan_target_under_ignored_dir_name_still_scans(tmp_path: Path) -> None:
+    # A target living *inside* a directory named like an ignored dir (venv,
+    # site-packages, ...) must still be scanned; only subdirs inside the target
+    # are subject to ignore rules. This is how the wheel-bundled demo app ships.
+    nested = tmp_path / "site-packages" / "aibom" / "demo_app"
+    nested.mkdir(parents=True)
+    (nested / "app.py").write_text(
+        "from openai import OpenAI\n"
+        "client = OpenAI()\n"
+        'client.responses.create(model="gpt-4o-mini")\n',
+        encoding="utf-8",
+    )
+    (nested / "requirements.txt").write_text("openai==1.0.0\n", encoding="utf-8")
+    out = tmp_path / "inv.json"
+    result = runner.invoke(app, ["scan", str(nested), "-q", "--output", str(out)])
+    assert result.exit_code == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["stats"]["files_scanned"] == 2
+    names = {e["name"] for e in data["entities"]}
+    assert "gpt-4o-mini" in names

@@ -60,9 +60,11 @@ build-backend = "hatchling.build"
 packages = ["src/aibom"]
 
 # Ship the web UI inside the wheel (as aibom/web) so `pip install aibom[server]`
-# + `aibom serve` serves the UI, not just the API.
+# + `aibom serve` serves the UI, not just the API. The demo app rides along so
+# `aibom scan --demo` (and menu option 3) works offline in any installation.
 [tool.hatch.build.targets.wheel.force-include]
 "web" = "aibom/web"
+"tests/fixtures/vulnerable-ai-app" = "aibom/demo_app"
 
 [tool.ruff]
 line-length = 100

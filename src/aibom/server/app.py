@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -53,11 +53,29 @@ def _cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()] or ["*"]
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Tell the human where to point their browser once the app is up.
+
+    ``AIBOM_PORT`` (set by docker-compose to the *host*-side port) wins over
+    ``PORT`` (the in-container bind port) so the printed URL is the one that
+    actually works from the user's machine.
+    """
+    port = os.environ.get("AIBOM_PORT") or os.environ.get("PORT") or "8000"
+    print(
+        f"\n  AIBOM Inspector is ready -- open  http://localhost:{port}  in your browser\n"
+        f"  (from another machine: http://<this-host's-IP>:{port})\n",
+        flush=True,
+    )
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="AIBOM Inspector API",
         version=__version__,
         summary="Discover, inventory, and risk-analyze AI supply chains from a repo URL.",
+        lifespan=_lifespan,
     )
     app.add_middleware(
         CORSMiddleware,

@@ -6,6 +6,7 @@ Static analysis only — running ``aibom scan`` never executes the target code.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -15,12 +16,14 @@ from rich.console import Console
 from rich.table import Table
 
 from aibom import __version__
+from aibom.config import ConfigError, ScanConfig, load_config
 from aibom.export.cyclonedx import to_cyclonedx_json
+from aibom.export.sarif import to_sarif_json
 from aibom.inventory import Inventory
 from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
 from aibom.report.html import render_html
-from aibom.service import run_scan
+from aibom.service import ScanResult, run_scan
 
 
 def _make_output_encode_safe() -> None:
@@ -41,8 +44,9 @@ _make_output_encode_safe()
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
-    help="AIBOM Inspector - discover & inventory AI supply chains (static, evidence-backed).",
+    no_args_is_help=False,
+    help="AIBOM Inspector - discover & inventory AI supply chains (static, evidence-backed). "
+    "Run with no arguments on a terminal for a guided menu.",
 )
 console = Console()
 
@@ -71,8 +75,9 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     _version: Annotated[
         bool | None,
         typer.Option(
@@ -84,12 +89,24 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """AIBOM Inspector CLI."""
+    """AIBOM Inspector CLI. Run with no arguments for a guided menu."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if _stdin_is_tty():
+        _menu()
+    else:
+        console.print(ctx.get_help())
 
 
 @app.command()
 def scan(
-    target: Annotated[Path, typer.Argument(help="Repository or directory to scan.")],
+    target: Annotated[
+        str | None,
+        typer.Argument(
+            help="Local path or public repo URL (https://github.com/owner/repo). "
+            "Omit it to be prompted interactively.",
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="Write the full inventory as JSON to this path."),
@@ -123,6 +140,13 @@ def scan(
         Path | None,
         typer.Option("--report", "-r", help="Write a self-contained HTML report to this path."),
     ] = None,
+    sarif: Annotated[
+        Path | None,
+        typer.Option(
+            "--sarif",
+            help="Write findings as SARIF 2.1.0 (GitHub Code Scanning) to this path.",
+        ),
+    ] = None,
     fail_on: Annotated[
         str | None,
         typer.Option(
@@ -132,9 +156,9 @@ def scan(
         ),
     ] = None,
     min_confidence: Annotated[
-        float,
+        float | None,
         typer.Option("--min-confidence", help="Drop entities whose best evidence is below this."),
-    ] = 0.0,
+    ] = None,
     disable_detector: Annotated[
         list[str] | None,
         typer.Option(
@@ -142,25 +166,98 @@ def scan(
             help="Disable a detector by stable ID; repeat the option to disable several.",
         ),
     ] = None,
+    ignore_rule: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--ignore-rule",
+            help="Suppress findings by rule ID ('TDR-004', or a family like 'OSV-*'); "
+            "repeatable. Suppressed findings are excluded from the score and --fail-on.",
+        ),
+    ] = None,
+    no_config: Annotated[
+        bool,
+        typer.Option(
+            "--no-config",
+            help="Ignore aibom.toml / [tool.aibom] in the target; use flags only.",
+        ),
+    ] = False,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo",
+            help="Scan the bundled deliberately-vulnerable demo app (offline, no setup).",
+        ),
+    ] = False,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
 ) -> None:
-    """Statically scan TARGET for AI supply-chain components and build an inventory."""
-    if not target.exists():
+    """Statically scan TARGET for AI supply-chain components and build an inventory.
+
+    TARGET is a local path or a public repository URL (shallow-cloned into a
+    temp dir and cleaned up afterwards). With no TARGET on an interactive
+    terminal, you are prompted for one.
+
+    Defaults for --fail-on, --min-confidence, --disable-detector, and
+    --ignore-rule are read from a local target's aibom.toml (or [tool.aibom] in
+    its pyproject.toml); explicit flags override the config. URL targets never
+    contribute config — a scanned third-party repo can't set your policy.
+    """
+    if demo:
+        demo_dir = _demo_path()
+        if demo_dir is None:
+            console.print("[red]error:[/red] the demo app is not bundled in this installation")
+            raise typer.Exit(code=2)
+        console.print(f"[dim]demo: scanning the bundled vulnerable AI app at {demo_dir}[/dim]")
+        target = str(demo_dir)
+    if target is None:
+        target = _prompt_for_target()
+
+    is_url = target.lower().startswith(("http://", "https://"))
+    local_path = Path(target)
+    if not is_url and not local_path.exists():
         console.print(f"[red]error:[/red] target does not exist: {target}")
         raise typer.Exit(code=2)
 
-    fail_threshold = _parse_severity(fail_on)
-
-    result = run_scan(
-        target,
-        resolve=resolve,
-        vulns=vulns,
-        hf_cache=hf_cache,
-        min_confidence=min_confidence,
-        disabled_detectors=set(disable_detector or []),
+    config = (
+        ScanConfig() if (no_config or is_url) else _load_config_or_exit(local_path)
     )
+
+    fail_threshold = _parse_severity(fail_on) if fail_on is not None else config.fail_on
+    effective_min_confidence = (
+        min_confidence if min_confidence is not None else config.min_confidence
+    )
+    disabled = set(config.disable_detectors) | set(disable_detector or [])
+    ignore_rules = config.ignore_rules + [
+        r for r in (ignore_rule or []) if r not in config.ignore_rules
+    ]
+
+    def _scan(path: Path, display: str | None = None) -> ScanResult:
+        return run_scan(
+            path,
+            resolve=resolve,
+            vulns=vulns,
+            hf_cache=hf_cache,
+            min_confidence=effective_min_confidence,
+            disabled_detectors=disabled,
+            ignore_rules=ignore_rules,
+            display_target=display,
+        )
+
+    if is_url:
+        from aibom.server.clone import CloneError, clone_repo
+
+        try:
+            with (
+                console.status(f"cloning (shallow) and scanning {target} ..."),
+                clone_repo(target) as cloned,
+            ):
+                result = _scan(cloned, display=target)
+        except CloneError as exc:
+            console.print(f"[red]error:[/red] {exc}")
+            raise typer.Exit(code=2) from None
+    else:
+        result = _scan(local_path)
     inventory, findings, score = result.inventory, result.findings, result.score
 
     if not quiet:
@@ -179,19 +276,98 @@ def scan(
         )
 
     if output is not None:
-        output.write_text(inventory.model_dump_json(indent=2), encoding="utf-8")
-        console.print(f"[green]written[/green] inventory to [bold]{output}[/bold]")
+        _write_or_exit(output, inventory.model_dump_json(indent=2), "inventory")
 
     if cyclonedx is not None:
-        cyclonedx.write_text(to_cyclonedx_json(inventory), encoding="utf-8")
-        console.print(f"[green]written[/green] CycloneDX AIBOM to [bold]{cyclonedx}[/bold]")
+        _write_or_exit(cyclonedx, to_cyclonedx_json(inventory), "CycloneDX AIBOM")
 
     if report is not None:
-        report.write_text(render_html(inventory, findings, score), encoding="utf-8")
-        console.print(f"[green]written[/green] HTML report to [bold]{report}[/bold]")
+        _write_or_exit(report, render_html(inventory, findings, score), "HTML report")
+
+    if sarif is not None:
+        _write_or_exit(sarif, to_sarif_json(findings), "SARIF log")
 
     if fail_threshold is not None and any(f.severity.rank >= fail_threshold.rank for f in findings):
         raise typer.Exit(code=1)
+
+
+def _stdin_is_tty() -> bool:
+    """Split out so tests can force the interactive path."""
+    return sys.stdin.isatty()
+
+
+def _demo_path() -> Path | None:
+    """Locate the bundled deliberately-vulnerable demo app, if shipped."""
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent / "demo_app",  # installed wheel / Docker image
+        here.parents[2] / "tests" / "fixtures" / "vulnerable-ai-app",  # source checkout
+    ]
+    for candidate in candidates:
+        if (candidate / "requirements.txt").is_file():
+            return candidate
+    return None
+
+
+def _menu() -> None:
+    """Numbered top-level menu shown when `aibom` runs with no arguments."""
+    console.print()
+    console.print(
+        "[bold]AIBOM Inspector[/bold] - AI supply-chain scanner (static, evidence-backed)"
+    )
+    console.print()
+    console.print("  [bold]1[/bold]) Scan a public repository URL")
+    console.print("  [bold]2[/bold]) Scan a local directory")
+    console.print("  [bold]3[/bold]) Demo - scan the bundled vulnerable AI app (offline)")
+    console.print("  [bold]4[/bold]) Start the web UI in your browser")
+    console.print("  [bold]q[/bold]) Quit")
+    console.print()
+    while True:
+        choice = str(typer.prompt("Choose", default="3")).strip().lower()
+        if choice in {"1", "2", "3", "4", "q", "quit", "exit"}:
+            break
+        console.print("[yellow]Please answer 1, 2, 3, 4, or q.[/yellow]")
+    if choice in {"q", "quit", "exit"}:
+        raise typer.Exit()
+    if choice == "4":
+        serve()
+        return
+    if choice == "1":
+        target: str | None = str(
+            typer.prompt("Repository URL (e.g. https://github.com/owner/repo)")
+        ).strip()
+    elif choice == "2":
+        target = str(typer.prompt("Local directory to scan", default=".")).strip()
+    else:
+        target = None  # demo
+    report: Path | None = None
+    if typer.confirm("Save a self-contained HTML report (report.html)?", default=False):
+        report = Path("report.html")
+    scan(target=target, demo=choice == "3", report=report)
+    if report is not None:
+        console.print(f"[dim]Open {report} in your browser to view the report.[/dim]")
+
+
+def _prompt_for_target() -> str:
+    """Guided entry: ask what to scan when no TARGET argument was given."""
+    if not _stdin_is_tty():
+        console.print(
+            "[red]error:[/red] no scan target given. "
+            "Pass a local path or a public repo URL, e.g.:\n"
+            "  aibom scan .\n"
+            "  aibom scan https://github.com/owner/repo"
+        )
+        raise typer.Exit(code=2)
+    console.print("[bold]What should I scan?[/bold]")
+    console.print(
+        "[dim]A local directory (e.g. '.') or a public repository URL "
+        "(e.g. https://github.com/owner/repo)[/dim]"
+    )
+    value = str(typer.prompt("Scan target")).strip()
+    if not value:
+        console.print("[red]error:[/red] empty target")
+        raise typer.Exit(code=2)
+    return value
 
 
 def _parse_severity(value: str | None) -> Severity | None:
@@ -205,9 +381,30 @@ def _parse_severity(value: str | None) -> Severity | None:
         raise typer.Exit(code=2) from None
 
 
+def _write_or_exit(path: Path, content: str, label: str) -> None:
+    """Write an artifact, turning OS errors into a clean exit instead of a traceback."""
+    try:
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        console.print(f"[red]error:[/red] cannot write {label} to '{path}': {exc.strerror or exc}")
+        raise typer.Exit(code=2) from None
+    console.print(f"[green]written[/green] {label} to [bold]{path}[/bold]")
+
+
+def _load_config_or_exit(target: Path) -> ScanConfig:
+    try:
+        return load_config(target)
+    except ConfigError as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+
 @app.command()
 def serve(
-    host: Annotated[str, typer.Option("--host", help="Bind address.")] = "127.0.0.1",
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="Bind address (default: AIBOM_HOST env or 127.0.0.1)."),
+    ] = None,
     port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8000,
 ) -> None:
     """Run the HTTP API + web UI (requires the 'server' extra)."""
@@ -220,8 +417,15 @@ def serve(
         )
         raise typer.Exit(code=2) from None
 
-    console.print(f"AIBOM Inspector API on [bold]http://{host}:{port}[/bold]  (Ctrl-C to stop)")
-    uvicorn.run("aibom.server.app:app", host=host, port=port, log_level="info")
+    # The Docker image sets AIBOM_HOST=0.0.0.0 so menu option 4 / bare `serve`
+    # is reachable through the published port, not just inside the container.
+    bind = host or os.environ.get("AIBOM_HOST") or "127.0.0.1"
+    shown = "localhost" if bind in {"0.0.0.0", "127.0.0.1"} else bind
+    console.print(
+        f"AIBOM Inspector web UI + API -- open [bold]http://{shown}:{port}[/bold] "
+        "in your browser  (Ctrl-C to stop)"
+    )
+    uvicorn.run("aibom.server.app:app", host=bind, port=port, log_level="info")
 
 
 def _render(inventory: Inventory) -> None:
