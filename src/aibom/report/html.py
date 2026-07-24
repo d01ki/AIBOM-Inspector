@@ -7,7 +7,9 @@ entity-derived text is HTML-escaped — the report never trusts scanned content.
 from __future__ import annotations
 
 from html import escape
+from math import cos, pi, sin
 
+from aibom.graph import build_graph
 from aibom.inventory import Inventory
 from aibom.models.findings import Finding, SecurityScore, Severity
 
@@ -55,8 +57,28 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; font-size: 12p
 .rem { color: #3a4453; font-size: 12px; margin-top: 4px; }
 .empty { background: #fff; border-radius: 12px; padding: 24px; text-align: center; color: #2e8b57;
   box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.graph-card { margin: 0; padding: 18px; overflow-x: auto; background: #fff; border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.graph-card svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.graph-edge { stroke: #9aa3b2; stroke-width: 1.5; stroke-opacity: .55; }
+.graph-node circle { stroke: #fff; stroke-width: 2.5; }
+.graph-node text { fill: #263142; font-size: 12px; font-weight: 600; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0;
+  color: #5a6472; font-size: 12px; }
+.graph-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.graph-legend i { width: 10px; height: 10px; border-radius: 50%; }
 footer { margin-top: 40px; color: #8a929e; font-size: 12px; }
 """
+
+_TYPE_COLOR = {
+    "model": "#3a6ea5",
+    "dataset": "#7a5ea5",
+    "prompt": "#9c7a2e",
+    "agent": "#2e7d5b",
+    "service": "#556070",
+    "package": "#8a6d3b",
+    "license": "#667085",
+}
 
 
 def render_html(inventory: Inventory, findings: list[Finding], score: SecurityScore) -> str:
@@ -76,6 +98,7 @@ def render_html(inventory: Inventory, findings: list[Finding], score: SecuritySc
         else "<div class='empty'>No AI components detected — nothing to score.</div>",
         _severity_chips(score),
         _findings_section(findings),
+        _graph_section(inventory, findings),
         _inventory_section(inventory),
         "<footer>Static, evidence-backed analysis. Scores are computed from deterministic "
         "rules only (no LLM). Each category starts at 100 and loses points per finding "
@@ -163,6 +186,97 @@ def _findings_section(findings: list[Finding]) -> str:
         "<h2>Findings</h2><table><thead><tr>"
         "<th>Severity</th><th>Rule</th><th>Finding</th><th>Where</th>"
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
+    graph = build_graph(inventory, findings)
+    nodes = graph["nodes"]
+    if not nodes:
+        return "<h2>Dependency context</h2><div class='empty'>No components to graph.</div>"
+
+    width = 900
+    height = 460 if len(nodes) > 1 else 300
+    center_x, center_y = width / 2, height / 2
+    positions: dict[str, tuple[float, float]] = {}
+    if len(nodes) == 1:
+        positions[nodes[0]["id"]] = (center_x, center_y)
+    else:
+        radius = min(330, 130 + len(nodes) * 8)
+        for index, node in enumerate(nodes):
+            angle = -pi / 2 + 2 * pi * index / len(nodes)
+            positions[node["id"]] = (
+                center_x + radius * cos(angle),
+                center_y + min(radius, 170) * sin(angle),
+            )
+
+    edges: list[str] = []
+    for edge in graph["edges"]:
+        source = positions.get(edge["source"])
+        target = positions.get(edge["target"])
+        if source is None or target is None:
+            continue
+        edges.append(
+            "<line class='graph-edge' "
+            f"x1='{source[0]:.1f}' y1='{source[1]:.1f}' "
+            f"x2='{target[0]:.1f}' y2='{target[1]:.1f}'>"
+            f"<title>{escape(edge['type'])}</title></line>"
+        )
+
+    node_markup: list[str] = []
+    for node in nodes:
+        x, y = positions[node["id"]]
+        severity = node.get("severity")
+        color = (
+            _SEVERITY_COLOR[Severity(severity)]
+            if severity is not None
+            else _TYPE_COLOR.get(node["type"], "#6b7280")
+        )
+        full_label = str(node["label"])
+        label = full_label if len(full_label) <= 20 else f"{full_label[:19]}…"
+        detail = f"{full_label} · {node['type']}"
+        if severity:
+            detail += f" · {severity} severity"
+        if node.get("location"):
+            detail += f" · {node['location']}"
+        delta_x, delta_y = x - center_x, y - center_y
+        if abs(delta_x) > abs(delta_y) * 0.4:
+            label_x = x + (18 if delta_x > 0 else -18)
+            label_y = y + 4
+            anchor = "start" if delta_x > 0 else "end"
+        else:
+            label_x = x
+            label_y = y + (30 if delta_y >= 0 else -18)
+            anchor = "middle"
+        node_markup.append(
+            f"<g class='graph-node'><title>{escape(detail)}</title>"
+            f"<circle cx='{x:.1f}' cy='{y:.1f}' r='11' fill='{color}'></circle>"
+            f"<text x='{label_x:.1f}' y='{label_y:.1f}' text-anchor='{anchor}'>"
+            f"{escape(label)}</text></g>"
+        )
+
+    legend_items = [
+        ("#b3123b", "critical"),
+        ("#d64500", "high"),
+        ("#b8860b", "medium"),
+        ("#3a7d3a", "low"),
+        ("#6b7280", "no finding"),
+    ]
+    legend = "".join(
+        f"<span><i style='background:{color}'></i>{label}</span>"
+        for color, label in legend_items
+    )
+    return (
+        "<h2>Dependency context</h2>"
+        "<figure class='graph-card'>"
+        f"<svg viewBox='0 0 {width} {height}' role='img' "
+        "aria-labelledby='graph-title graph-description'>"
+        "<title id='graph-title'>AI dependency graph</title>"
+        "<desc id='graph-description'>Components and their detected relationships. "
+        "Node colors indicate the highest related finding severity.</desc>"
+        f"{''.join(edges)}{''.join(node_markup)}</svg>"
+        f"<figcaption class='graph-legend'>{legend}</figcaption>"
+        "</figure>"
     )
 
 

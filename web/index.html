@@ -788,6 +788,14 @@
   .metric span, .cat .r { font-size: 14px; }
   .chip { font-size: 13px; }
   .score-explainer summary, .score-explainer > div { font-size: 14px; }
+  .evidence-grid.is-sparse { display: grid;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
+  .evidence-grid.is-sparse > .section-block { min-width: 0; }
+  .evidence-grid.is-sparse .section-head { align-items: flex-start; flex-direction: column; }
+  .evidence-grid.is-sparse #findingsSection .toolbar { display: none; }
+  .evidence-grid.is-sparse .graphgrid { grid-template-columns: 1fr; }
+  .evidence-grid.is-sparse #graphDetail { min-height: 0; }
+  .graphgrid.is-empty .legend, .graphgrid.is-empty #graphDetail { display: none; }
   .section-block { padding-top: 42px; scroll-margin-top: 92px; }
   .section-head h2 { font-size: 22px; }
   .section-description { font-size: 14px; }
@@ -815,6 +823,7 @@
     .scan-steps li { min-height: 0; border-right: 0; border-bottom: 1px solid var(--border); }
     .scan-steps li:last-child { border-bottom: 0; }
     .configuration { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .evidence-grid.is-sparse { grid-template-columns: 1fr; gap: 0; }
     .help-grid { grid-template-columns: 1fr; gap: 24px; }
   }
   @media (max-width: 600px) {
@@ -1002,6 +1011,7 @@
         </details>
       </section>
 
+      <div class="evidence-grid" id="evidenceGrid">
       <section class="section-block" id="findingsSection" aria-labelledby="findings-title">
         <div class="section-head">
           <div>
@@ -1051,6 +1061,7 @@
           </div>
         </div>
       </section>
+      </div>
 
       <section class="section-block" id="inventorySection" aria-labelledby="inventory-title">
         <div class="section-head">
@@ -1331,6 +1342,7 @@ function render(d) {
 
   const fb = $("findings").querySelector("tbody");
   $("findingCount").textContent = d.findings.length ? "(" + d.findings.length + ")" : "";
+  $("evidenceGrid").classList.toggle("is-sparse", !d.findings.length);
   if (!d.findings.length) {
     fb.innerHTML = `<tr><td colspan="4" class="empty empty-state">No covered risk rules were triggered.</td></tr>`;
   } else {
@@ -1455,8 +1467,10 @@ function svgEl(name, attrs) {
 function renderGraph(graph, findings) {
   graphFindings = findings;
   const host = $("graph");
+  const grid = host.closest(".graphgrid");
   host.innerHTML = "";
   detailReset();
+  grid.classList.toggle("is-empty", !graph.nodes.length);
   if (!graph.nodes.length) { host.innerHTML = "<p class='muted'>No components to graph.</p>"; return; }
 
   const W = 800, H = 520, PAD = 46;
