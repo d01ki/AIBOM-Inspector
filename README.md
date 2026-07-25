@@ -21,7 +21,12 @@ matched. **No evidence, no claim** — that is the trust contract of the tool.
 **Scan** — security score, interactive dependency graph, and evidence-backed
 findings (here: `openai/openai-quickstart-python`):
 
-![AIBOM Inspector web UI scanning openai/openai-quickstart-python: 41/100 security score, risk-colored dependency graph, and OSV-backed findings with file:line evidence](docs/assets/ui-scan-result.png)
+click 
+[![Watch Demo](docs/demo.png)]([https://youtu.be/UxSTwKSwf0U](https://youtu.be/BPWNt6KgGvY))
+
+Or watch directly:
+https://youtu.be/UxSTwKSwf0U
+
 
 Shareable scan links work too: `http://localhost:8000/?repo=https://github.com/owner/repo`
 pre-fills the form and starts the scan on load.
