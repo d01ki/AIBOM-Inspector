@@ -18,10 +18,10 @@ matched. **No evidence, no claim** — that is the trust contract of the tool.
 ## Demo
 
 click 
-[![Watch Demo](docs/demo.png)]([https://youtu.be/UxSTwKSwf0U](https://youtu.be/BPWNt6KgGvY))
+[![Watch Demo](docs/demo.png)](https://youtu.be/BPWNt6KgGvY)
 
 Or watch directly:
-https://youtu.be/UxSTwKSwf0U
+https://youtu.be/BPWNt6KgGvY
 
 Tool Link https://aibom-inspector.com/
 
