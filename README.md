@@ -17,16 +17,17 @@ matched. **No evidence, no claim** — that is the trust contract of the tool.
 
 ## Demo
 
-`docker compose up`, open <http://localhost:8000>, paste a repository URL, press
-**Scan** — security score, interactive dependency graph, and evidence-backed
-findings (here: `openai/openai-quickstart-python`):
-
 click 
 [![Watch Demo](docs/demo.png)]([https://youtu.be/UxSTwKSwf0U](https://youtu.be/BPWNt6KgGvY))
 
 Or watch directly:
 https://youtu.be/UxSTwKSwf0U
 
+Tool Link https://aibom-inspector.com/
+
+`docker compose up`, open <http://localhost:8000>, paste a repository URL, press
+**Scan** — security score, interactive dependency graph, and evidence-backed
+findings (here: `openai/openai-quickstart-python`):
 
 Shareable scan links work too: `http://localhost:8000/?repo=https://github.com/owner/repo`
 pre-fills the form and starts the scan on load.
