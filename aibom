@@ -18,6 +18,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(pwd -P)"
 OUT="$WORK/aibom-out"
 
+# Git Bash / MSYS rewrites POSIX-looking arguments into Windows paths, which
+# turns `-w /work` into `C:/Program Files/Git/work`. Disable that translation
+# for the docker invocations; the variables are inert on Linux and macOS.
+MSYS_ENV="MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL=*"
+
 die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 2; }
 
 require_docker() {
@@ -55,14 +60,20 @@ map_arg() {
   esac
 }
 
+# Only ask docker for a TTY when we actually have one, so the launcher works
+# from CI, a pipe, or a background job as well as from a terminal.
+tty_flags() {
+  if [ -t 0 ] && [ -t 1 ]; then printf -- '-it'; fi
+}
+
 run_cli() {
   mkdir -p "$OUT"
   local mapped=()
   local arg
   for arg in "$@"; do mapped+=("$(map_arg "$arg")"); done
   local tty=()
-  [ -t 0 ] && [ -t 1 ] && tty=(-it)
-  exec docker run --rm "${tty[@]}" \
+  [ -n "$(tty_flags)" ] && tty=(-it)
+  exec env $MSYS_ENV docker run --rm "${tty[@]}" \
     -v "$WORK:/work:ro" \
     -v "$OUT:/out" \
     -w /work \
@@ -75,7 +86,10 @@ ensure_image
 case "${1-}" in
   ui|serve|web)
     printf 'AIBOM Inspector UI → http://localhost:%s   (Ctrl-C to stop)\n' "$PORT"
-    exec docker run --rm -it -p "$PORT:8000" -e "AIBOM_PORT=$PORT" "$IMAGE"
+    ui_tty=()
+    [ -n "$(tty_flags)" ] && ui_tty=(-t)
+    exec env $MSYS_ENV docker run --rm "${ui_tty[@]}" \
+      -p "$PORT:8000" -e "AIBOM_PORT=$PORT" "$IMAGE"
     ;;
   -h|--help|help)
     sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
