@@ -9,6 +9,15 @@
     "repository": {"type": "string", "minLength": 1},
     "commit": {"type": "string", "minLength": 1},
     "local_path": {"type": "string", "minLength": 1},
+    "language": {
+      "description": "Primary language of the case; metrics are reported per language.",
+      "enum": ["python", "typescript", "mixed"]
+    },
+    "notes": {
+      "description": "Curation notes recording how the expectations were decided.",
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "components": {
       "type": "array",
       "items": {

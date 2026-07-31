@@ -1,0 +1,14 @@
+{
+  "repository": "expressjs/express",
+  "commit": "a3714473feb3d2908add734d340e7755fd85e0a3",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/express",
+  "notes": [
+    "Negative case for the JavaScript/TypeScript front end: a large, widely used",
+    "JS codebase with no AI supply chain at all.",
+    "Its value is precision, not recall - any component reported here is a false",
+    "positive. 163 files are read and the expected component set is empty.",
+    "Pairs with pallets/flask, which plays the same role for the Python front end."
+  ],
+  "components": []
+}

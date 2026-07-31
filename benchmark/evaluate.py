@@ -102,6 +102,7 @@ def evaluate_case(ground_truth: dict[str, Any], checkout: str | Path) -> dict[st
     return {
         "repository": ground_truth["repository"],
         "commit": ground_truth["commit"],
+        "language": str(ground_truth.get("language", "python")),
         "overall": asdict(overall),
         "categories": categories,
         "false_positives": false_positives,
@@ -117,10 +118,19 @@ def evaluate_suite(cases: list[tuple[dict[str, Any], Path]]) -> dict[str, Any]:
         category: asdict(_sum_metrics([repo["categories"][category] for repo in repositories]))
         for category in _CATEGORIES
     }
+    # Reported separately: a single blended number would let strong Python
+    # results hide weak TypeScript ones (see docs/limitations.md).
+    languages: dict[str, dict[str, Any]] = {}
+    for language in sorted({repo["language"] for repo in repositories}):
+        matching = [repo for repo in repositories if repo["language"] == language]
+        languages[language] = asdict(
+            _sum_metrics([repo["overall"] for repo in matching])
+        ) | {"repository_count": len(matching)}
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "repository_count": len(repositories),
         "overall": asdict(overall),
+        "languages": languages,
         "categories": categories,
         "repositories": repositories,
     }
@@ -142,6 +152,25 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.append(
             _metric_row(category.replace("_", " ").title(), report["categories"][category])
         )
+
+    languages = report.get("languages") or {}
+    if languages:
+        lines.extend([
+            "",
+            "## By language",
+            "",
+            "| Language | Repos | Precision | Recall | F1 | TP | FP | FN |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for language, metrics in languages.items():
+            lines.append(
+                f"| {language} | {metrics['repository_count']} | "
+                f"{_format_metric(metrics['precision'])} | "
+                f"{_format_metric(metrics['recall'])} | {_format_metric(metrics['f1'])} | "
+                f"{metrics['true_positives']} | {metrics['false_positives']} | "
+                f"{metrics['false_negatives']} |"
+            )
+
     lines.extend(["", "## Errors", ""])
     any_errors = False
     for repository in report["repositories"]:

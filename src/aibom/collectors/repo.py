@@ -162,6 +162,17 @@ _JS_PROVIDER_IMPORTS: dict[str, tuple[str, str | None]] = {
     "@mistralai/mistralai": ("mistral", "https://api.mistral.ai"),
     "groq-sdk": ("groq", "https://api.groq.com"),
     "ollama": ("ollama", "http://localhost:11434"),
+    # Provider packages for the Vercel AI SDK and LangChain.js reach the same
+    # external services; importing one is what puts the API in the supply chain.
+    "@ai-sdk/openai": ("openai", "https://api.openai.com"),
+    "@ai-sdk/azure": ("openai", "https://api.openai.com"),
+    "@ai-sdk/anthropic": ("anthropic", "https://api.anthropic.com"),
+    "@ai-sdk/google": ("google", "https://generativelanguage.googleapis.com"),
+    "@ai-sdk/mistral": ("mistral", "https://api.mistral.ai"),
+    "@ai-sdk/cohere": ("cohere", "https://api.cohere.ai"),
+    "@ai-sdk/groq": ("groq", "https://api.groq.com"),
+    "@langchain/openai": ("openai", "https://api.openai.com"),
+    "@langchain/anthropic": ("anthropic", "https://api.anthropic.com"),
 }
 _RE_JS_IMPORT = re.compile(
     r"""(?:import\s[^;]*?from\s*|import\s*|require\s*\(\s*)['"]("""

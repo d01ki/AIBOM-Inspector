@@ -274,7 +274,10 @@ def _prompt_inputs(
 
     if provider == "vercel-ai":
         family = (module.qualified_name(call.callee) or "").rsplit(".", 1)[-1]
+        # The AI SDK renamed the privileged slot from `system` to `instructions`
+        # in v5; both still appear in the wild, and both are privileged.
         add(_prop(options, "system"), "system", f"ai.{family}.system")
+        add(_prop(options, "instructions"), "system", f"ai.{family}.instructions")
         add(_prop(options, "prompt"), "user", f"ai.{family}.prompt")
         found.extend(
             _split_messages(module, _prop(options, "messages"), f"ai.{family}.messages")
