@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from aibom.impact import build_impact_paths
 from aibom.inventory import Inventory
 from aibom.models.entities import Dataset, EntityType, Model, Package, Prompt, Service
 from aibom.models.evidence import Evidence
@@ -419,8 +420,14 @@ def tdr_012_unpinned_package(inv: Inventory) -> list[Finding]:
 def aibom_prompt_004_untrusted_instruction(inv: Inventory) -> list[Finding]:
     """Flag a proven untrusted source-to-system/developer prompt path."""
     out: list[Finding] = []
+    impact_prompt_ids = {path.prompt_id for path in build_impact_paths(inv)}
     for prompt in _prompts(inv):
         if prompt.user_controlled is not True or prompt.kind not in {"system", "developer"}:
+            continue
+        # AIBOM-IMPACT-001 is the more specific form of this same root path.
+        # Keep the generic exposure in the graph, but avoid duplicate findings
+        # and score deductions when a directly bound consequence is proven.
+        if prompt.id in impact_prompt_ids:
             continue
         out.append(
             Finding(
@@ -449,6 +456,53 @@ def aibom_prompt_004_untrusted_instruction(inv: Inventory) -> list[Finding]:
     return out
 
 
+# AIBOM-IMPACT-001 - untrusted privileged prompt can steer a bound capability
+
+
+def aibom_impact_001_bound_tool_blast_radius(inv: Inventory) -> list[Finding]:
+    """Flag a strongly linked input -> instructions -> agent tool impact path."""
+    out: list[Finding] = []
+    for path in build_impact_paths(inv):
+        tools = ", ".join(path.tool_names)
+        consequences = path.consequence
+        parameters = ", ".join(
+            sorted(
+                {
+                    parameter
+                    for capability in path.capabilities
+                    for parameter in capability.controlled_parameters
+                }
+            )
+        )
+        out.append(
+            Finding(
+                rule_id="AIBOM-IMPACT-001",
+                title="Untrusted instructions can steer a high-impact agent tool",
+                severity=path.severity,
+                category=RiskCategory.CONFIGURATION,
+                description=(
+                    f"Static analysis links {path.source_kind} to privileged agent "
+                    f"instructions and directly bound tool(s) {tools}; model-controlled tool "
+                    f"parameter(s) {parameters} reach recognized operations that could "
+                    f"{consequences}. This is a potential steering path, not proof that "
+                    "exploitation succeeds at runtime."
+                ),
+                remediation=(
+                    "Keep untrusted content out of agent instructions; expose only narrowly "
+                    "scoped tools, validate tool arguments, and require approval or sandboxing "
+                    "for high-impact operations."
+                ),
+                entity_id=path.prompt_id,
+                entity_name=path.prompt_name,
+                source_evidence=_copy_evidence(path.source_evidence),
+                source_kind=path.source_kind,
+                sink_kind=path.sink_kind,
+                trust_boundary=path.trust_boundary,
+            )
+        )
+    return out
+
+
 #: Registry of all rules, evaluated in order.
 ALL_RULES: list[Rule] = [
     tdr_001_pickle_weights,
@@ -464,4 +518,5 @@ ALL_RULES: list[Rule] = [
     tdr_011_mcp_server_surface,
     tdr_012_unpinned_package,
     aibom_prompt_004_untrusted_instruction,
+    aibom_impact_001_bound_tool_blast_radius,
 ]

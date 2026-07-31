@@ -17,11 +17,15 @@ from rich.table import Table
 
 from aibom import __version__
 from aibom.config import ConfigError, ScanConfig, load_config
+from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
+from aibom.drift import DriftReport, compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx_json
 from aibom.export.sarif import to_sarif_json
+from aibom.impact import ImpactPath, build_impact_paths
 from aibom.inventory import Inventory
 from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
+from aibom.policy import production_view
 from aibom.report.html import render_html
 from aibom.service import ScanResult, run_scan
 
@@ -262,18 +266,31 @@ def scan(
 
     if not quiet:
         _render(inventory)
-        if inventory.has_ai_components():
+        if production_view(inventory).has_ai_components():
+            # Same ordering as the web UI: blast radius first, then findings.
+            _render_impacts(build_impact_paths(inventory), empty_note=False)
             _render_risk(findings, score)
         else:
             n_deps = len(inventory.by_type(EntityType.PACKAGE))
             extra = f" ({n_deps} non-AI dependencies catalogued)" if n_deps else ""
-            console.print(f"[dim]Nothing to score: no AI components were detected{extra}.[/dim]")
+            console.print(
+                "[dim]Nothing to score: no production AI components were detected"
+                f"{extra}. Test/example/docs components remain in the inventory.[/dim]"
+            )
         st = inventory.stats
         manifests = f" · manifests: {', '.join(st.manifests_parsed)}" if st.manifests_parsed else ""
         console.print(
             f"[dim]Read {st.files_scanned} files ({st.bytes_scanned // 1024} KB) "
             f"in {st.duration_ms} ms{manifests}[/dim]"
         )
+        production_inventory = production_view(inventory)
+        excluded = len(inventory.entities) - len(production_inventory.entities)
+        if excluded:
+            console.print(
+                f"[dim]Risk scope: production · {excluded} test/example/docs "
+                "component(s) remain in inventory but are excluded from findings, "
+                "score, and graph.[/dim]"
+            )
 
     if output is not None:
         _write_or_exit(output, inventory.model_dump_json(indent=2), "inventory")
@@ -296,6 +313,21 @@ def _stdin_is_tty() -> bool:
     return sys.stdin.isatty()
 
 
+def _output_dir() -> Path:
+    """Where interactive runs drop artifacts.
+
+    In the container the source tree is mounted read-only at ``/work``, so
+    ``AIBOM_OUTPUT_DIR`` points at the writable ``/out`` bind mount. Outside
+    Docker this is just the current directory.
+    """
+    configured = os.environ.get("AIBOM_OUTPUT_DIR")
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_dir() and os.access(candidate, os.W_OK):
+            return candidate
+    return Path()
+
+
 def _demo_path() -> Path | None:
     """Locate the bundled deliberately-vulnerable demo app, if shipped."""
     here = Path(__file__).resolve()
@@ -316,36 +348,81 @@ def _menu() -> None:
         "[bold]AIBOM Inspector[/bold] - AI supply-chain scanner (static, evidence-backed)"
     )
     console.print()
-    console.print("  [bold]1[/bold]) Scan a public repository URL")
-    console.print("  [bold]2[/bold]) Scan a local directory")
-    console.print("  [bold]3[/bold]) Demo - scan the bundled vulnerable AI app (offline)")
-    console.print("  [bold]4[/bold]) Start the web UI in your browser")
+    console.print("  [bold]1[/bold]) Impact demo - input to agent tool blast radius (offline)")
+    console.print("  [bold]2[/bold]) Scan a public repository URL")
+    console.print("  [bold]3[/bold]) Scan a local directory")
+    console.print("  [bold]4[/bold]) Compare two revisions (behavioral drift)")
+    console.print("  [bold]5[/bold]) Start the web UI in your browser")
     console.print("  [bold]q[/bold]) Quit")
     console.print()
+    valid = {"1", "2", "3", "4", "5", "q", "quit", "exit"}
     while True:
-        choice = str(typer.prompt("Choose", default="3")).strip().lower()
-        if choice in {"1", "2", "3", "4", "q", "quit", "exit"}:
+        choice = str(typer.prompt("Choose", default="1")).strip().lower()
+        if choice in valid:
             break
-        console.print("[yellow]Please answer 1, 2, 3, 4, or q.[/yellow]")
+        console.print("[yellow]Please answer 1, 2, 3, 4, 5, or q.[/yellow]")
     if choice in {"q", "quit", "exit"}:
         raise typer.Exit()
-    if choice == "4":
+    if choice == "5":
         serve()
         return
     if choice == "1":
+        demo()
+        return
+    if choice == "4":
+        baseline = Path(str(typer.prompt("Baseline directory")).strip())
+        candidate = Path(str(typer.prompt("Candidate directory")).strip())
+        diff_scans(baseline=baseline, candidate=candidate)
+        return
+    if choice == "2":
         target: str | None = str(
             typer.prompt("Repository URL (e.g. https://github.com/owner/repo)")
         ).strip()
-    elif choice == "2":
-        target = str(typer.prompt("Local directory to scan", default=".")).strip()
     else:
-        target = None  # demo
+        target = str(typer.prompt("Local directory to scan", default=".")).strip()
+
     report: Path | None = None
-    if typer.confirm("Save a self-contained HTML report (report.html)?", default=False):
-        report = Path("report.html")
-    scan(target=target, demo=choice == "3", report=report)
+    if typer.confirm("Save a self-contained HTML report?", default=False):
+        report = _output_dir() / "report.html"
+    scan(target=target, report=report)
     if report is not None:
         console.print(f"[dim]Open {report} in your browser to view the report.[/dim]")
+
+
+@app.command()
+def demo() -> None:
+    """Run the offline impact + behavioral-drift talk demo."""
+    impact_dir = impact_demo_path()
+    if impact_dir is None:
+        console.print("[red]error:[/red] the impact demo is not bundled in this installation")
+        raise typer.Exit(code=2)
+
+    console.print(
+        "\n[bold]Impact demo[/bold] - code-proven input -> instructions -> bound tool -> operation"
+    )
+    console.print("[dim]Static analysis only; the fixture is never imported or executed.[/dim]")
+    result = run_scan(impact_dir, display_target="built-in://impact-demo")
+    paths = build_impact_paths(result.inventory)
+    _render_impacts(paths)
+    _render_risk(result.findings, result.score)
+
+    for language, revisions in (
+        ("Python", drift_demo_paths()),
+        ("TypeScript", ts_drift_demo_paths()),
+    ):
+        if revisions is None:
+            continue
+        baseline, candidate = revisions
+        console.print(
+            f"\n[bold]Behavioral drift demo ({language})[/bold] - same model and tool, "
+            "new command-execution blast radius"
+        )
+        slug = language.lower()
+        drift_report = compare_scan_results(
+            run_scan(baseline, display_target=f"built-in://drift/{slug}/baseline"),
+            run_scan(candidate, display_target=f"built-in://drift/{slug}/candidate"),
+        )
+        _render_drift(drift_report)
 
 
 def _prompt_for_target() -> str:
@@ -397,6 +474,70 @@ def _load_config_or_exit(target: Path) -> ScanConfig:
     except ConfigError as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=2) from None
+
+
+@app.command("diff")
+def diff_scans(
+    baseline: Annotated[
+        Path,
+        typer.Argument(help="Baseline repository or source directory."),
+    ],
+    candidate: Annotated[
+        Path,
+        typer.Argument(help="Candidate repository or source directory."),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write the full drift report as JSON."),
+    ] = None,
+    fail_on: Annotated[
+        str | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit non-zero for drift at/above this severity "
+            "(info|low|medium|high|critical).",
+        ),
+    ] = None,
+    min_confidence: Annotated[
+        float,
+        typer.Option(
+            "--min-confidence",
+            help="Apply the same evidence-confidence floor to both scans.",
+        ),
+    ] = 0.0,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Suppress the drift summary table."),
+    ] = False,
+) -> None:
+    """Compare two AIBOM scans, including trust-boundary and usage drift.
+
+    Unlike a component-only BOM diff, this detects a prompt becoming exposed to
+    untrusted input even when both revisions use exactly the same SDK and model.
+    Prompt bodies are never written to the report; static content is represented
+    only by hashes.
+    """
+    for label, path in (("baseline", baseline), ("candidate", candidate)):
+        if not path.exists():
+            console.print(f"[red]error:[/red] {label} target does not exist: {path}")
+            raise typer.Exit(code=2)
+    if not 0.0 <= min_confidence <= 1.0:
+        console.print("[red]error:[/red] --min-confidence must be between 0 and 1")
+        raise typer.Exit(code=2)
+
+    threshold = _parse_severity(fail_on)
+    baseline_result = run_scan(baseline, min_confidence=min_confidence)
+    candidate_result = run_scan(candidate, min_confidence=min_confidence)
+    report = compare_scan_results(baseline_result, candidate_result)
+
+    if not quiet:
+        _render_drift(report)
+    if output is not None:
+        _write_or_exit(output, report.model_dump_json(indent=2), "AIBOM drift report")
+    if threshold is not None and any(
+        change.severity.rank >= threshold.rank for change in report.changes
+    ):
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -470,10 +611,16 @@ def _render(inventory: Inventory) -> None:
 def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
     cats = "  ".join(f"{c.category.value} {c.score}" for c in score.categories)
     grade_style = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "bold red"}
+    highest = max(findings, key=lambda item: item.severity.rank).severity if findings else None
+    severity_note = (
+        f"; {highest.value} finding present"
+        if highest in {Severity.CRITICAL, Severity.HIGH}
+        else ""
+    )
     console.print(
         f"\n[bold]Security score:[/bold] "
         f"[{grade_style.get(score.grade, 'white')}]{score.overall}/100 "
-        f"(grade {score.grade})[/]   [dim]{cats}[/dim]"
+        f"(grade {score.grade}{severity_note})[/]   [dim]{cats}[/dim]"
     )
 
     if not findings:
@@ -495,6 +642,67 @@ def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
             where,
         )
     console.print(table)
+
+
+def _render_drift(report: DriftReport) -> None:
+    console.print(
+        f"\n[bold]AIBOM behavioral drift:[/bold] {len(report.changes)} change(s)\n"
+        f"[dim]{report.baseline_target} -> {report.candidate_target}[/dim]"
+    )
+    if not report.changes:
+        console.print("[green]No AI supply-chain or trust-boundary drift detected.[/green]")
+        return
+
+    table = Table(title="Security-significant changes", show_lines=False)
+    table.add_column("Sev", style="bold")
+    table.add_column("Kind")
+    table.add_column("Change")
+    table.add_column("Evidence", style="dim")
+    for change in report.changes:
+        evidence = change.after_evidence or change.before_evidence
+        location = evidence[0].location() if evidence else ""
+        table.add_row(
+            f"[{_SEVERITY_STYLE[change.severity]}] {change.severity.value} [/]",
+            change.kind.value,
+            f"{change.title}\n[dim]{change.description}[/dim]",
+            location,
+        )
+    console.print(table)
+
+
+def _render_impacts(paths: list[ImpactPath], *, empty_note: bool = True) -> None:
+    if not paths:
+        if empty_note:
+            console.print("[yellow]No strongly linked agent capability path detected.[/yellow]")
+        return
+    table = Table(title="Potential blast radius (direct bindings only)", show_lines=True)
+    table.add_column("Sev", style="bold")
+    table.add_column("Proven path")
+    table.add_column("Potential consequence")
+    table.add_column("Evidence", style="dim")
+    for path in paths:
+        models = ", ".join(path.model_names) or "unresolved model"
+        route = (
+            f"{path.source_kind} -> privileged instructions -> {models} -> "
+            f"{', '.join(path.tool_names)}"
+        )
+        capability_evidence = [
+            evidence
+            for capability in path.capabilities
+            for evidence in capability.source_evidence
+        ]
+        locations = ", ".join(item.location() for item in capability_evidence)
+        table.add_row(
+            f"[{_SEVERITY_STYLE[path.severity]}] {path.severity.value} [/]",
+            route,
+            path.consequence,
+            locations,
+        )
+    console.print(table)
+    console.print(
+        "[dim]Meaning: attacker steering is plausible from static code links; "
+        "runtime exploit success is not claimed.[/dim]"
+    )
 
 
 if __name__ == "__main__":

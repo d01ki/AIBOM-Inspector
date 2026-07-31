@@ -312,7 +312,14 @@ def classify_source_context(relative_path: str) -> SourceContext:
     path = PurePosixPath(relative_path.lower())
     parts = set(path.parts)
     name = path.name
-    if {"tests", "test", "testing", "fixtures"} & parts or name.startswith("test_"):
+    if {
+        "tests",
+        "test",
+        "testing",
+        "fixtures",
+        "benchmark",
+        "benchmarks",
+    } & parts or name.startswith("test_"):
         return SourceContext.TEST
     if {"examples", "example", "samples", "sample", "demo", "demos"} & parts:
         return SourceContext.EXAMPLE

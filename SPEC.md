@@ -1,6 +1,6 @@
 # AIBOM Inspector — Design Specification
 
-**Version:** 0.3 · **License:** Apache-2.0
+**Version:** 0.4 · **License:** Apache-2.0
 
 This document is the design contract for AIBOM Inspector: scope, architecture,
 data model, threat model, risk rules, and engineering rules. Feature status
@@ -20,7 +20,8 @@ understand attack surface, provenance, and governance risk — the
 ### 2.1 Core pipeline
 
 **One pipeline, done well:** GitHub/local repository scan + Hugging Face
-resolution → extended AIBOM → interactive graph + evidence-backed risk findings.
+resolution → behavioral AIBOM → trust-boundary/dependency graph +
+evidence-backed risk findings and revision drift.
 
 1. **Repository scanning (static only):** detect model references
    (`from_pretrained`, HF URLs, GGUF/safetensors/pickle files,
@@ -32,12 +33,18 @@ resolution → extended AIBOM → interactive graph + evidence-backed risk findi
 3. **Extended AIBOM generation:** CycloneDX 1.6 JSON (ML-BOM component types)
    as the base format; tool-specific fields via the CycloneDX `properties`
    namespace `aibom:*`. Never a proprietary-only format.
-4. **Dependency graph:** entities + relationships, exported as JSON;
-   interactive view in the web UI.
-5. **Risk findings:** rule-based checks (§6) with severity + evidence +
+4. **Exposure, impact, and dependency graph:** entities + relationships plus
+   confirmed, privacy-preserving untrusted-input paths through prompt sinks,
+   models, directly bound tools, and tool-parameter-controlled operations,
+   exported as JSON and rendered in the web UI.
+5. **Trust-Boundary / Blast-Radius Drift:** compare baseline and candidate
+   scans for new privileged prompt exposure, newly connected capability impact,
+   prompt content/target changes, usage escalation, component changes, and
+   finding changes. Prompt bodies and tool argument values are never serialized.
+6. **Risk findings:** rule-based checks (§6) with severity + evidence +
    remediation.
-6. **Outputs:** CLI → JSON / CycloneDX / SARIF / self-contained HTML report;
-   FastAPI + web UI on top.
+7. **Outputs:** CLI → JSON / CycloneDX / SARIF / drift JSON / self-contained
+   HTML report; FastAPI + web UI on top.
 
 ### 2.2 Non-goals
 
@@ -49,7 +56,7 @@ resolution → extended AIBOM → interactive graph + evidence-backed risk findi
 ## 3. Architecture
 
 ```
-CLI (aibom scan / serve)
+CLI (aibom scan / diff / serve)
         │
 Collectors (plugin interface)          repo, dependencies, huggingface
         ▼
@@ -57,6 +64,9 @@ Normalizer → unified schema (§4), Pydantic models
         ▼
 Inventory (deduplicating store + typed relationship graph)
         ├─ AIBOM Engine   → CycloneDX 1.6 + aibom:* properties
+        ├─ Exposure Engine → sanitized source → prompt sink → model paths
+        ├─ Impact Engine  → direct tool binding + parameter → operation paths
+        ├─ Drift Engine   → exposure/impact + component revision comparison
         ├─ Graph Engine   → JSON export for the interactive UI
         └─ Risk Engine    → deterministic rules + evidence
         ▼
@@ -75,17 +85,32 @@ Core entities (all Pydantic, all with `source_evidence: list[Evidence]`):
 |---|---|
 | `Model` | name, provider, revision (pinned?), formats, license, model_card, author |
 | `Dataset` | name, source, license, provenance |
-| `Prompt` | location, kind (system/template), hash |
+| `Prompt` | location, role/kind, hash, source/sink, trust boundary, model/tool refs, flow, bound capabilities |
 | `Agent` | framework, tools bound, model refs |
 | `Service` | MCP server, external API, endpoint |
 | `Package` | ecosystem, version, purl, AI flag |
 
 Relationships (typed edges): `depends_on`, `fine_tuned_from`, `trained_on`,
-`served_by`, `invokes`, `uses_prompt`, `licensed_under`.
+`served_by`, `invokes`, `uses_prompt`, `flows_to`, `licensed_under`.
+
+`ExposurePath` is a derived, non-component artifact: stable prompt anchor,
+source kind, sink kind, trust boundary, privilege flag, consuming model ids,
+reachability, sanitized flow steps, confidence, and source evidence. It exists
+only when the bounded analysis proves user-controlled input.
+
+`ImpactPath` is a derived, non-component artifact joining a privileged
+`ExposurePath` to an explicit agent tool binding and a proven flow from a tool
+parameter into a recognized high-impact operation. It records potential
+consequence and claim confidence, not runtime exploit success.
 
 `Evidence` = file path + line span + matched pattern + confidence. **Every
 entity and finding must carry evidence** — this is the trust contract of the
 tool.
+
+The exported inventory retains all source contexts. The default risk, graph,
+exposure, and impact policy view includes production evidence only; test,
+fixture, example, and docs entities remain auditable inventory entries but do
+not affect their host repository's findings or score.
 
 ## 5. Threat Model
 
@@ -98,7 +123,7 @@ license violations).
 
 Rule-based and deterministic. Each finding: `rule_id`, severity
 (info/low/medium/high/critical), evidence, remediation. The authoritative rule
-table (TDR-001…012, AIBOM-PROMPT-004, OSV-*) is in
+table (TDR-001–012, AIBOM-PROMPT-004, AIBOM-IMPACT-001, OSV-*) is in
 [README.md](README.md#risk-rules--scoring); rule logic lives in
 `src/aibom/risk/rules.py`.
 
@@ -145,9 +170,10 @@ how an organization pins one policy across many repositories.
 
 ## 10. Roadmap
 
-- Syntax-aware JavaScript/TypeScript detection (current JS/TS detectors are
-  textual).
 - Cross-file value resolution (YAML/JSON/TOML config linking).
+- Cross-file JS/TS flow tracing (tools and prompt constants defined in another
+  module); current JS/TS analysis is same-file, like Python.
+- TypeScript coverage in the external benchmark corpus.
 - MCP capability analysis (tool surface enumeration).
 - Plugin collectors: Ollama, Docker images, LangChain/LangGraph graphs,
   attack-path simulation, RAG dependency mapping, policy engine (OPA-style),

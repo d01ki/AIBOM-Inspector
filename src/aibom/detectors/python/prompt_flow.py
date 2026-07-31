@@ -26,7 +26,7 @@ from aibom.models.analysis import (
     UsageState,
     ValueResolution,
 )
-from aibom.models.entities import Prompt
+from aibom.models.entities import Prompt, ToolCapability
 from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
@@ -41,6 +41,7 @@ _ANTHROPIC_SUFFIXES = (
     ".messages.stream",
     ".completions.create",
 )
+_OPENAI_AGENT_CONSTRUCTORS = {"agents.Agent"}
 _UNTRUSTED_ENTRYPOINTS = {
     "http_route": ("http_parameter", "network_to_application"),
     "cli": ("cli_argument", "local_user_to_application"),
@@ -88,6 +89,13 @@ class PromptFlowPythonDetector:
             if provider is None:
                 continue
             model_refs = _model_refs(call, resolver)
+            tool_refs = _bound_tool_refs(module, call)
+            capabilities = _bound_tool_capabilities(
+                context,
+                module,
+                tool_refs,
+                self.detector_id,
+            )
             for prompt_input in _prompt_inputs(module, call, provider, resolver):
                 yield Detection(
                     self._entity(
@@ -97,6 +105,8 @@ class PromptFlowPythonDetector:
                         prompt_input,
                         resolver,
                         model_refs,
+                        tool_refs,
+                        capabilities,
                     )
                 )
 
@@ -108,6 +118,8 @@ class PromptFlowPythonDetector:
         prompt_input: PromptInput,
         resolver: ValueResolver,
         model_refs: list[str],
+        tool_refs: list[str],
+        capabilities: list[ToolCapability],
     ) -> Prompt:
         expression = prompt_input.expression
         resolved = resolver.resolve(expression)
@@ -146,6 +158,8 @@ class PromptFlowPythonDetector:
             trust_boundary=source.trust_boundary if source else None,
             user_controlled=trace.user_controlled,
             model_refs=model_refs,
+            tool_refs=tool_refs,
+            capabilities=[item.model_copy(deep=True) for item in capabilities],
             data_flow_path=[*trace.steps, sink_step],
             source_evidence=evidence,
             detector_ids=[self.detector_id],
@@ -305,6 +319,8 @@ class _FlowTracer:
 
 def _provider_for_call(module: PythonModule, call: ast.Call) -> str | None:
     qualified = module.qualified_name(call.func) or ""
+    if module.has_import("agents") and qualified in _OPENAI_AGENT_CONSTRUCTORS:
+        return "openai-agents"
     if module.has_import("openai", "langchain_openai") and qualified.endswith(
         _OPENAI_SUFFIXES
     ):
@@ -324,6 +340,19 @@ def _prompt_inputs(
 ) -> list[PromptInput]:
     qualified = module.qualified_name(call.func) or ""
     rel = module.relative_path
+
+    if provider == "openai-agents" and qualified in _OPENAI_AGENT_CONSTRUCTORS:
+        expression = argument_node(call, ("instructions",))
+        if expression is None:
+            return []
+        return [
+            PromptInput(
+                expression,
+                "system",
+                f"agent-instructions@{rel}:{getattr(expression, 'lineno', call.lineno)}",
+                "openai.agents.Agent.instructions",
+            )
+        ]
 
     if qualified.endswith(".beta.assistants.create"):
         expression = argument_node(call, ("instructions",))
@@ -510,6 +539,228 @@ def _model_refs(call: ast.Call, resolver: ValueResolver) -> list[str]:
     return [value]
 
 
+def _bound_tool_refs(module: PythonModule, call: ast.Call) -> list[str]:
+    """Return explicit tool names from an agent constructor's ``tools`` list."""
+    expression = argument_node(call, ("tools",))
+    if expression is None:
+        return []
+    sequence = _dereference_sequence(module, expression, set(), 0)
+    if sequence is None:
+        return []
+    names: list[str] = []
+    for item in sequence.elts:
+        qualified = module.qualified_name(item)
+        if qualified is None:
+            return []
+        name = qualified.rsplit(".", 1)[-1]
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _bound_tool_capabilities(
+    context: ScanContext,
+    module: PythonModule,
+    tool_refs: list[str],
+    detector_id: str,
+) -> list[ToolCapability]:
+    """Classify high-impact calls only inside explicitly bound decorated tools."""
+    found: list[ToolCapability] = []
+    for tool_name in tool_refs:
+        functions = [
+            info for info in module.functions.values() if info.name == tool_name
+        ]
+        if len(functions) != 1 or not _is_recognized_tool(module, functions[0].node):
+            continue
+        function = functions[0].node
+        parameters = _function_parameters(function)
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            qualified = module.qualified_name(node.func) or ""
+            classified = _classify_capability(qualified, node)
+            if classified is None:
+                continue
+            controlled = sorted(
+                parameter
+                for parameter in parameters
+                if _call_uses_parameter(module, node, parameter, set(), 0)
+            )
+            if not controlled:
+                continue
+            kind, impact, severity = classified
+            evidence = _capability_evidence(
+                context,
+                node,
+                detector_id,
+                tool_name,
+                kind,
+                qualified,
+            )
+            found.append(
+                ToolCapability(
+                    tool_name=tool_name,
+                    kind=kind,
+                    operation=qualified,
+                    impact=impact,
+                    severity=severity,
+                    controlled_parameters=controlled,
+                    source_evidence=[evidence],
+                )
+            )
+    return found
+
+
+def _is_recognized_tool(
+    module: PythonModule,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        qualified = module.qualified_name(target) or ""
+        if qualified == "agents.function_tool":
+            return True
+        if qualified in {
+            "langchain_core.tools.tool",
+            "langchain.tools.tool",
+            "mcp.tool",
+            "fastmcp.tool",
+        }:
+            return True
+        if qualified.endswith(".tool") and module.has_import("mcp", "fastmcp"):
+            return True
+    return False
+
+
+def _classify_capability(
+    qualified: str,
+    call: ast.Call,
+) -> tuple[str, str, str] | None:
+    lowered = qualified.lower()
+    if lowered in {
+        "subprocess.run",
+        "subprocess.popen",
+        "subprocess.call",
+        "subprocess.check_call",
+        "subprocess.check_output",
+        "os.system",
+        "os.popen",
+        "asyncio.create_subprocess_exec",
+        "asyncio.create_subprocess_shell",
+    }:
+        return ("command_execution", "execute operating-system commands", "critical")
+    if lowered in {
+        "os.remove",
+        "os.unlink",
+        "os.rmdir",
+        "shutil.rmtree",
+        "pathlib.path.unlink",
+        "pathlib.path.rmdir",
+        "unlink",
+        "rmdir",
+    }:
+        return ("destructive_filesystem", "delete files or directories", "high")
+    if lowered in {
+        "pathlib.path.write_text",
+        "pathlib.path.write_bytes",
+        "write_text",
+        "write_bytes",
+    } or (lowered in {"open", "builtins.open"} and _open_can_write(call)):
+        return ("filesystem_write", "write or overwrite local files", "medium")
+    if lowered.endswith((".sendmail", ".send_message")) and any(
+        marker in lowered for marker in ("smtp", "mail", "email")
+    ):
+        return ("external_action", "send messages to an external recipient", "high")
+    if lowered in {
+        "requests.post",
+        "requests.put",
+        "requests.patch",
+        "requests.delete",
+        "httpx.post",
+        "httpx.put",
+        "httpx.patch",
+        "httpx.delete",
+        "urllib.request.urlopen",
+    }:
+        return ("network_egress", "send data or state-changing requests off host", "medium")
+    return None
+
+
+def _open_can_write(call: ast.Call) -> bool:
+    mode: ast.AST | None = call.args[1] if len(call.args) > 1 else None
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            mode = keyword.value
+            break
+    return (
+        isinstance(mode, ast.Constant)
+        and isinstance(mode.value, str)
+        and any(flag in mode.value for flag in ("w", "a", "x", "+"))
+    )
+
+
+def _function_parameters(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    args = node.args
+    parameters = {
+        item.arg for item in (*args.posonlyargs, *args.args, *args.kwonlyargs)
+    }
+    if args.vararg is not None:
+        parameters.add(args.vararg.arg)
+    if args.kwarg is not None:
+        parameters.add(args.kwarg.arg)
+    return parameters
+
+
+def _call_uses_parameter(
+    module: PythonModule,
+    call: ast.Call,
+    parameter: str,
+    seen: set[tuple[str | None, str]],
+    depth: int,
+) -> bool:
+    expressions: list[ast.AST] = [*call.args, *(item.value for item in call.keywords)]
+    if isinstance(call.func, ast.Attribute):
+        expressions.append(call.func.value)
+    return any(
+        _expression_uses_parameter(module, item, parameter, seen, depth)
+        for item in expressions
+    )
+
+
+def _expression_uses_parameter(
+    module: PythonModule,
+    node: ast.AST,
+    parameter: str,
+    seen: set[tuple[str | None, str]],
+    depth: int,
+) -> bool:
+    if depth > _MAX_DEPTH:
+        return False
+    if isinstance(node, ast.Name):
+        if node.id == parameter:
+            return True
+        key = (module.scope_for(node), node.id)
+        if key in seen:
+            return False
+        assignment = module.assignment_for(node.id, node)
+        return (
+            assignment is not None
+            and _expression_uses_parameter(
+                module,
+                assignment.value,
+                parameter,
+                {*seen, key},
+                depth + 1,
+            )
+        )
+    return any(
+        _expression_uses_parameter(module, child, parameter, seen, depth + 1)
+        for child in ast.iter_child_nodes(node)
+    )
+
+
 def _named_source(name: str) -> tuple[str, str, str, bool | None] | None:
     lowered = name.lower()
     if lowered == "sys.argv" or lowered.startswith("sys.argv"):
@@ -626,4 +877,26 @@ def _source_evidence(
         confidence=0.9,
         detector_id=detector_id,
         kind="source",
+    )
+
+
+def _capability_evidence(
+    context: ScanContext,
+    node: ast.Call,
+    detector_id: str,
+    tool_name: str,
+    kind: str,
+    operation: str,
+) -> Evidence:
+    line = getattr(node, "lineno", 1)
+    return Evidence(
+        file=context.relative_path,
+        line_start=line,
+        line_end=getattr(node, "end_lineno", line),
+        column_start=getattr(node, "col_offset", 0) + 1,
+        snippet=f"<bound tool capability:{tool_name}:{kind}>",
+        matched_pattern=f"bound-tool-capability:{operation}",
+        confidence=0.98,
+        detector_id=detector_id,
+        kind="capability",
     )

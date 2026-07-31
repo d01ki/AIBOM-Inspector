@@ -188,6 +188,8 @@ def _merge_entity(into: Entity, other: Entity) -> None:
             into.user_controlled, other.user_controlled
         )
         _extend_unique(into.model_refs, other.model_refs)
+        _extend_unique(into.tool_refs, other.tool_refs)
+        _extend_unique(into.capabilities, other.capabilities)
         _merge_steps(into.data_flow_path, other.data_flow_path)
 
 

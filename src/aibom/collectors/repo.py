@@ -7,6 +7,7 @@ scanned code; it only reads text.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import re
 from collections import defaultdict
@@ -15,7 +16,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 from aibom.collectors.base import Collector
 from aibom.detectors.base import ScanContext
-from aibom.detectors.python.parser import classify_source_context, parse_python
+from aibom.detectors.javascript.parser import parse_javascript
+from aibom.detectors.python.parser import (
+    PythonModule,
+    classify_source_context,
+    parse_python,
+)
 from aibom.detectors.registry import DetectorRegistry, default_registry
 from aibom.inventory import Inventory
 from aibom.models.analysis import ConfidenceFactors, UsageState, ValueResolution
@@ -79,9 +85,14 @@ _TEXT_SUFFIXES = {
     ".jsx",
     ".mjs",
     ".cjs",
+    ".mts",
+    ".cts",
     ".ipynb",
 }
 _TEXT_NAMES = {"dockerfile", "requirements.txt", "pipfile", ".env"}
+
+# Source files handed to the syntax-aware JS/TS detectors.
+_JS_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
 
 # Serialized-model weight formats, by extension. Value = confidence.
 _WEIGHT_SUFFIXES: dict[str, float] = {
@@ -166,6 +177,9 @@ _RE_SECRET_ASSIGN = re.compile(
     r"""(?i)\b(?:api[_-]?key|secret|token|password|access[_-]?key)\s*[:=]\s*"""
     r"""['"]([^'"]{8,})['"]"""
 )
+_RE_SECRET_NAME = re.compile(
+    r"""(?i)^(?:api[_-]?key|secret|token|password|access[_-]?key)$"""
+)
 _RE_ENV_OR_PLACEHOLDER = re.compile(
     r"""(?i)(os\.environ|getenv|your[_-]|<[^>]+>|\{\{|\$\{|xxx+|changeme|example|placeholder|\.\.\.)"""
 )
@@ -183,6 +197,18 @@ _PROVIDER_IMPORTS = {
 def _looks_like_hf_repo(name: str) -> bool:
     """Heuristic: 'org/model' shape, not a local filesystem path."""
     return "/" in name and not name.startswith((".", "/", "~")) and " " not in name
+
+
+def _assignment_target_names(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return [
+            name
+            for item in node.elts
+            for name in _assignment_target_names(item)
+        ]
+    return []
 
 
 def _call_args(text: str, open_paren_idx: int) -> str | None:
@@ -248,6 +274,8 @@ class RepoCollector(Collector):
         detector_ids = self.detectors.detector_ids
         if "legacy.regex" not in self.disabled_detectors:
             detector_ids.append("legacy.regex")
+        if "python.security-signals.ast" not in self.disabled_detectors:
+            detector_ids.append("python.security-signals.ast")
         for detector_id in detector_ids:
             if detector_id not in inventory.stats.detectors_run:
                 inventory.stats.detectors_run.append(detector_id)
@@ -368,7 +396,29 @@ class RepoCollector(Collector):
                 for detection in self.detectors.detect(context):
                     canonical = inventory.add_entity(detection.entity)
                     buckets[type(canonical)].append(canonical.id)
+                if "python.security-signals.ast" not in self.disabled_detectors:
+                    self._scan_python_signals(inventory, python, rel)
                 legacy_text = python.sanitized_source()
+
+        elif path.suffix.lower() in _JS_SUFFIXES:
+            # The JS/TS parser is tolerant by design, so a malformed file
+            # degrades to the regex pass instead of failing the scan.
+            try:
+                javascript = parse_javascript(text, rel)
+            except RecursionError as exc:
+                inventory.stats.parse_errors.append(f"{rel}: {exc}")
+            else:
+                context = ScanContext(
+                    root=self.root,
+                    path=path,
+                    relative_path=rel,
+                    text=text,
+                    source_context=classify_source_context(rel),
+                    javascript=javascript,
+                )
+                for detection in self.detectors.detect(context):
+                    canonical = inventory.add_entity(detection.entity)
+                    buckets[type(canonical)].append(canonical.id)
 
         lines = legacy_text.splitlines()
 
@@ -398,7 +448,8 @@ class RepoCollector(Collector):
                     self._annotate_legacy(entity, rel)
                     canonical = inventory.add_entity(entity)
                     buckets[type(canonical)].append(canonical.id)
-                self._scan_signals(inventory, line, lineno, rel)
+                if not structured_python:
+                    self._scan_signals(inventory, line, lineno, rel)
 
         self._link_intra_file(inventory, buckets)
 
@@ -411,6 +462,7 @@ class RepoCollector(Collector):
                 RiskSignal(
                     kind=kind,
                     detail=detail,
+                    source_context=classify_source_context(rel),
                     source_evidence=[
                         Evidence(
                             file=rel,
@@ -435,6 +487,129 @@ class RepoCollector(Collector):
             signal("hardcoded_secret", "provider-key-literal", 0.9, "provider API key literal")
         elif _RE_SECRET_ASSIGN.search(line):
             signal("hardcoded_secret", "secret-assignment", 0.6, "secret assigned a string literal")
+
+    def _scan_python_signals(
+        self,
+        inventory: Inventory,
+        module: PythonModule,
+        rel: str,
+    ) -> None:
+        """Detect actual Python settings without matching strings that describe them."""
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Call):
+                for keyword in node.keywords:
+                    if (
+                        keyword.arg == "trust_remote_code"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value is True
+                    ):
+                        self._add_python_signal(
+                            inventory,
+                            rel,
+                            keyword.value,
+                            "trust_remote_code",
+                            "trust_remote_code=True",
+                            "<keyword:trust_remote_code=True>",
+                            0.99,
+                        )
+                    if keyword.arg is not None:
+                        self._add_secret_assignment_signal(
+                            inventory,
+                            rel,
+                            keyword.value,
+                            keyword.arg,
+                        )
+                continue
+
+            if isinstance(node, ast.Assign):
+                names = [
+                    name
+                    for target in node.targets
+                    for name in _assignment_target_names(target)
+                ]
+                for name in names:
+                    self._add_secret_assignment_signal(
+                        inventory,
+                        rel,
+                        node.value,
+                        name,
+                    )
+                continue
+
+            if isinstance(node, ast.AnnAssign) and node.value is not None:
+                for name in _assignment_target_names(node.target):
+                    self._add_secret_assignment_signal(
+                        inventory,
+                        rel,
+                        node.value,
+                        name,
+                    )
+
+    def _add_secret_assignment_signal(
+        self,
+        inventory: Inventory,
+        rel: str,
+        value_node: ast.AST,
+        name: str,
+    ) -> None:
+        if not isinstance(value_node, ast.Constant) or not isinstance(value_node.value, str):
+            return
+        value = value_node.value.strip()
+        provider_key = _RE_PROVIDER_KEY.fullmatch(value) is not None
+        secret_name = _RE_SECRET_NAME.fullmatch(name) is not None
+        if not provider_key and not (secret_name and len(value) >= 8):
+            return
+        if _RE_ENV_OR_PLACEHOLDER.search(value):
+            return
+        pattern = "provider-key-literal" if provider_key else "secret-assignment"
+        detail = (
+            "provider API key literal"
+            if provider_key
+            else "secret assigned a string literal"
+        )
+        self._add_python_signal(
+            inventory,
+            rel,
+            value_node,
+            "hardcoded_secret",
+            pattern,
+            f"{name} = <redacted>",
+            0.98 if provider_key else 0.85,
+            detail,
+        )
+
+    @staticmethod
+    def _add_python_signal(
+        inventory: Inventory,
+        rel: str,
+        node: ast.AST,
+        kind: str,
+        pattern: str,
+        snippet: str,
+        confidence: float,
+        detail: str | None = None,
+    ) -> None:
+        line = getattr(node, "lineno", 1)
+        inventory.add_signal(
+            RiskSignal(
+                kind=kind,
+                detail=detail,
+                source_context=classify_source_context(rel),
+                source_evidence=[
+                    Evidence(
+                        file=rel,
+                        line_start=line,
+                        line_end=getattr(node, "end_lineno", line),
+                        column_start=getattr(node, "col_offset", 0) + 1,
+                        snippet=snippet,
+                        matched_pattern=pattern,
+                        confidence=confidence,
+                        detector_id="python.security-signals.ast",
+                        kind="ast",
+                    )
+                ],
+            )
+        )
 
     def _scan_line(
         self,
@@ -512,12 +687,24 @@ class RepoCollector(Collector):
 
         # prompts — hardcoded system prompt
         if _RE_SYSTEM_PROMPT_VAR.search(line) or _RE_ROLE_SYSTEM.search(line):
+            content_hash = _sha(line)
             found.append(
                 Prompt(
                     name=f"system-prompt@{rel}:{lineno}",
                     kind="system",
-                    content_hash=_sha(line),
-                    source_evidence=[ev("system-prompt", line, 0.7)],
+                    content_hash=content_hash,
+                    source_evidence=[
+                        Evidence(
+                            file=rel,
+                            line_start=lineno,
+                            line_end=lineno,
+                            snippet=f"<prompt content sha256:{content_hash}>",
+                            matched_pattern="system-prompt",
+                            confidence=0.7,
+                            detector_id="legacy.regex",
+                            kind="regex",
+                        )
+                    ],
                 )
             )
 
@@ -702,7 +889,11 @@ class RepoCollector(Collector):
                                 snippet="prompt flows to resolved model argument",
                                 matched_pattern="prompt-model-data-flow",
                                 confidence=0.9,
-                                detector_id="python.prompt-flow.ast",
+                                detector_id=(
+                                    prompt.detector_ids[0]
+                                    if prompt.detector_ids
+                                    else "python.prompt-flow.ast"
+                                ),
                                 kind="data-flow",
                             )
                         ],

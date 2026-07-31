@@ -13,8 +13,16 @@ CLI / HTTP API
      -> DependencyCollector
      -> Inventory normalization and deduplication
      -> optional metadata/vulnerability resolvers
+     -> exposure + agent capability impact paths
      -> deterministic risk rules and score
   -> JSON / CycloneDX / SARIF / graph / self-contained HTML
+
+Baseline scan + candidate scan
+  -> prompt-slot matching (file + role + sink + ordinal; line-insensitive)
+  -> exposure-path comparison
+  -> agent capability impact-path comparison
+  -> component / usage / finding comparison
+  -> drift JSON + severity-gated CLI
 ```
 
 ## Detector boundary
@@ -33,6 +41,26 @@ CLI / HTTP API
 The registry supports per-detector disabling. `RepoCollector` parses each
 Python file once and shares the resulting AST index between provider detectors.
 
+## Exposure paths and behavioral drift
+
+`build_exposure_paths` derives a path only when a prompt is proven
+`user_controlled=True`. A path records the source kind, trust boundary, provider
+sink, prompt role, consuming model, reachability, sanitized resolution steps,
+confidence, and file/line evidence. Prompt content is never copied.
+
+`aibom diff` compares two independently scanned inventories. Prompt entities use
+a line-insensitive slot identity—source file, role, sink, and same-kind ordinal—
+so unrelated line movement does not become remove/add noise. A newly proven
+untrusted path into a system/developer prompt is a high-severity
+`exposure_added` change even when the two revisions have identical component
+sets.
+
+`build_impact_paths` is stricter than a graph reachability join. It requires a
+confirmed privileged exposure plus a direct agent tool binding and a bounded
+flow from a tool parameter into a recognized high-impact operation. The
+derived `ImpactPath` records the model, tool, controlled parameter, operation,
+severity, reachability, confidence, and source/sink/capability evidence.
+
 ## Compatibility migration
 
 The legacy regex detector remains enabled. For syntactically valid Python,
@@ -45,14 +73,25 @@ Inventory identity remains `<entity type, normalized name>`, so existing entity
 IDs and CycloneDX `bom-ref` values are stable. New analysis data is additive in
 inventory JSON and is exported as `aibom:*` CycloneDX properties.
 
+## Analysis policy view
+
+The normalized inventory is complete across production, test, example, and
+documentation contexts. Before risk evaluation, OSV mapping, graph projection,
+or behavioral path synthesis, `production_view` removes entities and signals
+that have only non-production evidence. It does not mutate or delete them from
+the exported inventory. This prevents deliberately vulnerable golden fixtures
+and detector source strings from becoming findings against the scanner that
+contains them.
+
 ## Current detector modules
 
 - `python.openai.ast`: OpenAI SDK, async/Azure clients, LangChain OpenAI.
 - `python.anthropic.ast`: Anthropic SDK/Bedrock clients, LangChain Anthropic.
 - `python.huggingface.ast`: Transformers, Diffusers, Datasets,
   SentenceTransformers, Hugging Face Hub, LangChain Hugging Face.
-- `python.prompt-flow.ast`: OpenAI/Anthropic prompt sinks, sanitized prompt
-  metadata, and bounded same-file source-to-sink paths.
+- `python.prompt-flow.ast`: OpenAI/Anthropic/OpenAI Agents SDK prompt sinks,
+  sanitized source-to-sink paths, explicit agent tool bindings, and bounded
+  tool-parameter-to-operation paths.
 - `legacy.regex`: compatibility and non-Python textual patterns.
 - `manifest.dependencies`: Python/npm dependency declarations.
 - `generic.weight-file`: serialized local model files.

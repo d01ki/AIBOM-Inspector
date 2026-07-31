@@ -189,6 +189,19 @@ def _prompt_component(prompt: Prompt) -> dict[str, Any]:
         props.append(_prop("aibom:prompt_user_controlled", _b(prompt.user_controlled)))
     if prompt.model_refs:
         _append_prop(props, "aibom:prompt_model_refs", ",".join(prompt.model_refs))
+    if prompt.tool_refs:
+        _append_prop(props, "aibom:prompt_tool_refs", ",".join(prompt.tool_refs))
+    for capability in prompt.capabilities:
+        props.append(
+            _prop(
+                "aibom:prompt_bound_capability",
+                (
+                    f"{capability.tool_name}:{capability.kind}:"
+                    f"{capability.operation}:{capability.severity}:"
+                    f"params={','.join(capability.controlled_parameters)}"
+                ),
+            )
+        )
     for step in prompt.data_flow_path:
         location = f"{step.file}:{step.line}" if step.line is not None else step.file
         symbol = f" {step.symbol}" if step.symbol else ""

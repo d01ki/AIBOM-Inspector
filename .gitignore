@@ -30,3 +30,5 @@ Thumbs.db
 # Scan outputs
 *.aibom.json
 inventory.json
+# Artifact drop created by the ./aibom launcher
+aibom-out/

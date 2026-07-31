@@ -12,6 +12,7 @@ from aibom.models.analysis import SourceContext
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from aibom.detectors.javascript.parser import JsModule
     from aibom.detectors.python.parser import PythonModule
 
 
@@ -25,6 +26,7 @@ class ScanContext:
     text: str
     source_context: SourceContext
     python: PythonModule | None = None
+    javascript: JsModule | None = None
 
 
 class Detector(Protocol):

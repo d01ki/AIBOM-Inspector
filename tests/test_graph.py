@@ -55,7 +55,12 @@ def test_empty_inventory_graph() -> None:
 
     inv = Inventory(metadata=ScanMetadata(tool_version=__version__, target="/x"))
     g = build_graph(inv, [])
-    assert g == {"nodes": [], "edges": []}
+    assert g == {
+        "nodes": [],
+        "edges": [],
+        "exposure_paths": [],
+        "impact_paths": [],
+    }
 
 
 def test_plain_packages_hidden_unless_flagged() -> None:
