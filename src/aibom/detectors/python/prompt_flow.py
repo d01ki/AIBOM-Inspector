@@ -9,12 +9,21 @@ prompt text in evidence or resolution paths.
 from __future__ import annotations
 
 import ast
-import hashlib
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from aibom.detectors.base import ScanContext
+from aibom.detectors.flow import (
+    FlowTrace,
+    SourceRef,
+    Span,
+    capability_evidence,
+    combine_traces,
+    content_hash,
+    flow_step,
+    sink_evidence,
+    source_evidence,
+)
 from aibom.detectors.python.common import argument_node, require_python
 from aibom.detectors.python.parser import PythonModule
 from aibom.detectors.python.value_resolver import ValueResolver
@@ -27,7 +36,6 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.entities import Prompt, ToolCapability
-from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
 _OPENAI_SUFFIXES = (
@@ -50,19 +58,14 @@ _UNTRUSTED_ENTRYPOINTS = {
 }
 
 
-@dataclass(frozen=True)
-class SourceRef:
-    kind: str
-    node: ast.AST
-    symbol: str
-    trust_boundary: str
-
-
-@dataclass(frozen=True)
-class FlowTrace:
-    user_controlled: bool | None
-    sources: tuple[SourceRef, ...] = ()
-    steps: tuple[ResolutionStep, ...] = ()
+def _span(node: ast.AST) -> Span:
+    """Reduce a Python AST node to the position the shared analysis uses."""
+    line = getattr(node, "lineno", 1)
+    return Span(
+        line=line,
+        end_line=getattr(node, "end_lineno", line) or line,
+        column=getattr(node, "col_offset", 0) + 1,
+    )
 
 
 @dataclass(frozen=True)
@@ -126,8 +129,8 @@ class PromptFlowPythonDetector:
         trace = _FlowTracer(module).trace(expression)
         reachable, reachability_path = module.reachability(call)
 
-        content_hash = (
-            _content_hash(resolved.value)
+        hashed = (
+            content_hash(resolved.value)
             if resolved.resolved and not trace.sources
             else None
         )
@@ -135,15 +138,17 @@ class PromptFlowPythonDetector:
             ValueResolution.RESOLVED if resolved.resolved else ValueResolution.UNRESOLVED
         )
         source = trace.sources[0] if trace.sources else None
-        evidence = [_sink_evidence(context, call, self.detector_id, prompt_input.sink_kind)]
+        evidence = [
+            sink_evidence(
+                context.relative_path, _span(call), self.detector_id, prompt_input.sink_kind
+            )
+        ]
         evidence.extend(
-            _source_evidence(context, item, self.detector_id) for item in trace.sources
+            source_evidence(context.relative_path, item, self.detector_id)
+            for item in trace.sources
         )
-        sink_step = _step(
-            context.relative_path,
-            call,
-            prompt_input.sink_kind,
-            "prompt_sink",
+        sink_step = flow_step(
+            context.relative_path, _span(call), prompt_input.sink_kind, "prompt_sink"
         )
         resolution_path = [
             item.model_copy(update={"value": None}) for item in resolved.steps
@@ -152,7 +157,7 @@ class PromptFlowPythonDetector:
         return Prompt(
             name=prompt_input.name,
             kind=prompt_input.kind,
-            content_hash=content_hash,
+            content_hash=hashed,
             source_kind=source.kind if source else None,
             sink_kind=prompt_input.sink_kind,
             trust_boundary=source.trust_boundary if source else None,
@@ -242,7 +247,7 @@ class _FlowTracer:
             source = _named_source(qualified)
             if source is not None:
                 return self._source(node, *source)
-            return _combine(
+            return combine_traces(
                 self._trace(node.value, seen, depth + 1),
                 self._trace(node.slice, seen, depth + 1),
             )
@@ -253,28 +258,28 @@ class _FlowTracer:
             if source is not None:
                 return self._source(node, *source)
             children = [*node.args, *(kw.value for kw in node.keywords)]
-            return _combine(*(self._trace(child, seen, depth + 1) for child in children))
+            return combine_traces(*(self._trace(child, seen, depth + 1) for child in children))
 
         if isinstance(node, ast.JoinedStr):
-            return _combine(*(self._trace(value, seen, depth + 1) for value in node.values))
+            return combine_traces(*(self._trace(value, seen, depth + 1) for value in node.values))
 
         if isinstance(node, ast.FormattedValue):
             return self._trace(node.value, seen, depth + 1)
 
         if isinstance(node, ast.Dict):
-            return _combine(*(self._trace(value, seen, depth + 1) for value in node.values))
+            return combine_traces(*(self._trace(value, seen, depth + 1) for value in node.values))
 
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            return _combine(*(self._trace(value, seen, depth + 1) for value in node.elts))
+            return combine_traces(*(self._trace(value, seen, depth + 1) for value in node.elts))
 
         if isinstance(node, ast.BinOp):
-            return _combine(
+            return combine_traces(
                 self._trace(node.left, seen, depth + 1),
                 self._trace(node.right, seen, depth + 1),
             )
 
         if isinstance(node, ast.IfExp):
-            return _combine(
+            return combine_traces(
                 self._trace(node.body, seen, depth + 1),
                 self._trace(node.orelse, seen, depth + 1),
             )
@@ -306,7 +311,7 @@ class _FlowTracer:
         boundary: str,
         user_controlled: bool | None,
     ) -> FlowTrace:
-        source = SourceRef(kind, node, symbol, boundary)
+        source = SourceRef(kind, _span(node), symbol, boundary)
         return FlowTrace(
             user_controlled,
             (source,),
@@ -314,7 +319,7 @@ class _FlowTracer:
         )
 
     def _step(self, node: ast.AST, symbol: str | None, operation: str) -> ResolutionStep:
-        return _step(self.module.relative_path, node, symbol, operation)
+        return flow_step(self.module.relative_path, _span(node), symbol, operation)
 
 
 def _provider_for_call(module: PythonModule, call: ast.Call) -> str | None:
@@ -589,13 +594,13 @@ def _bound_tool_capabilities(
             if not controlled:
                 continue
             kind, impact, severity = classified
-            evidence = _capability_evidence(
-                context,
-                node,
+            evidence = capability_evidence(
+                context.relative_path,
+                _span(node),
                 detector_id,
-                tool_name,
-                kind,
-                qualified,
+                tool_name=tool_name,
+                kind=kind,
+                operation=qualified,
             )
             found.append(
                 ToolCapability(
@@ -794,109 +799,3 @@ def _call_source(name: str) -> tuple[str, str, str, bool | None] | None:
     if lowered.endswith((".fetchone", ".fetchall")):
         return "database", name, "database_to_application", None
     return None
-
-
-def _combine(*traces: FlowTrace) -> FlowTrace:
-    if not traces:
-        return FlowTrace(None)
-    state: bool | None
-    if any(trace.user_controlled is True for trace in traces):
-        state = True
-    elif any(trace.user_controlled is None for trace in traces):
-        state = None
-    else:
-        state = False
-    sources: list[SourceRef] = []
-    steps: list[ResolutionStep] = []
-    source_keys: set[tuple[str, int, str]] = set()
-    step_keys: set[tuple[str, int | None, int | None, str | None, str]] = set()
-    for trace in traces:
-        for source in trace.sources:
-            source_key = (source.kind, getattr(source.node, "lineno", 1), source.symbol)
-            if source_key not in source_keys:
-                sources.append(source)
-                source_keys.add(source_key)
-        for step in trace.steps:
-            step_key = (step.file, step.line, step.column, step.symbol, step.operation)
-            if step_key not in step_keys:
-                steps.append(step)
-                step_keys.add(step_key)
-    steps.sort(key=lambda item: 0 if item.operation.startswith("source:") else 1)
-    return FlowTrace(state, tuple(sources), tuple(steps))
-
-
-def _content_hash(value: object | None) -> str:
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
-def _step(file: str, node: ast.AST, symbol: str | None, operation: str) -> ResolutionStep:
-    return ResolutionStep(
-        file=file,
-        line=getattr(node, "lineno", None),
-        column=(getattr(node, "col_offset", -1) + 1) or None,
-        symbol=symbol,
-        value=None,
-        operation=operation,
-    )
-
-
-def _sink_evidence(
-    context: ScanContext,
-    node: ast.AST,
-    detector_id: str,
-    sink_kind: str,
-) -> Evidence:
-    line = getattr(node, "lineno", 1)
-    return Evidence(
-        file=context.relative_path,
-        line_start=line,
-        line_end=getattr(node, "end_lineno", line),
-        column_start=getattr(node, "col_offset", 0) + 1,
-        snippet=f"<prompt sink:{sink_kind}>",
-        matched_pattern="prompt-sink",
-        confidence=0.98,
-        detector_id=detector_id,
-        kind="sink",
-    )
-
-
-def _source_evidence(
-    context: ScanContext,
-    source: SourceRef,
-    detector_id: str,
-) -> Evidence:
-    line = getattr(source.node, "lineno", 1)
-    return Evidence(
-        file=context.relative_path,
-        line_start=line,
-        line_end=getattr(source.node, "end_lineno", line),
-        column_start=getattr(source.node, "col_offset", 0) + 1,
-        snippet=f"<prompt source:{source.kind}>",
-        matched_pattern=f"prompt-source:{source.kind}",
-        confidence=0.9,
-        detector_id=detector_id,
-        kind="source",
-    )
-
-
-def _capability_evidence(
-    context: ScanContext,
-    node: ast.Call,
-    detector_id: str,
-    tool_name: str,
-    kind: str,
-    operation: str,
-) -> Evidence:
-    line = getattr(node, "lineno", 1)
-    return Evidence(
-        file=context.relative_path,
-        line_start=line,
-        line_end=getattr(node, "end_lineno", line),
-        column_start=getattr(node, "col_offset", 0) + 1,
-        snippet=f"<bound tool capability:{tool_name}:{kind}>",
-        matched_pattern=f"bound-tool-capability:{operation}",
-        confidence=0.98,
-        detector_id=detector_id,
-        kind="capability",
-    )
