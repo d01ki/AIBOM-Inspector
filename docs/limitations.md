@@ -14,6 +14,29 @@
   RubyGems, Packagist and NuGet. Lockfiles are not read, so transitive
   dependencies are absent unless the manifest names them; `go.mod` is the
   exception, since it lists resolved versions.
+
+## What counts as an "AI package"
+
+Every dependency is inventoried, but the `ai` flag — which is what the risk
+rules, graph and score act on — comes from a curated per-ecosystem allowlist.
+Its scope is deliberately narrow and consistent across ecosystems:
+
+- **In scope:** LLM provider SDKs, ML/DL frameworks, agent frameworks, MCP.
+- **Out of scope:** vector stores (Chroma, Pinecone, Weaviate, Milvus, Qdrant,
+  pgvector), and general cloud SDKs used to reach a hosted model (`boto3` for
+  Bedrock, `google-cloud-aiplatform` for Vertex, `watsonx`). These are absent
+  from *all* ecosystem lists, so a RAG stack's datastore is listed in the BOM
+  but not flagged as AI.
+
+Scanning `tmc/langchaingo` illustrates the effect: 295 Go modules inventoried,
+2 flagged. Most of the difference is vector-store and cloud SDK clients that
+are out of scope by the rule above — not a Go-specific gap. Whether vector
+stores belong in the AI layer is a real open question; today the answer is
+"no", uniformly.
+
+The allowlist is curated, so it lags new SDKs. A missing entry is a recall
+miss, never a wrong claim: the package is still in the BOM with its purl, just
+without the `ai` flag.
 - Maven version resolution follows a single `${property}` indirection in the
   same POM. Parent POMs, `dependencyManagement`, BOM imports and Gradle version
   catalogs are not resolved, so some versions stay unknown.

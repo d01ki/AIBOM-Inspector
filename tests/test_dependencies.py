@@ -282,3 +282,29 @@ def test_ordinary_dependencies_never_get_the_ai_flag(tmp_path: Path) -> None:
     (tmp_path / "Cargo.toml").write_text('[dependencies]\nserde = "1.0"\n', encoding="utf-8")
     inv = _scan(tmp_path)
     assert all(not p.ai for p in inv.by_type(EntityType.PACKAGE))
+
+
+def test_go_llm_sdks_match_their_pypi_counterparts(tmp_path: Path) -> None:
+    """Mistral and Cohere are AI on PyPI/npm; Go must not disagree."""
+    (tmp_path / "go.mod").write_text(
+        "require (\n"
+        "\tgithub.com/gage-technologies/mistral-go v1.1.0\n"
+        "\tgithub.com/cohere-ai/tokenizer v1.1.2\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    pkgs = _packages(_scan(tmp_path))
+    assert pkgs["github.com/gage-technologies/mistral-go"].ai is True
+    assert pkgs["github.com/cohere-ai/tokenizer"].ai is True
+
+
+def test_vector_stores_are_inventoried_but_not_flagged(tmp_path: Path) -> None:
+    """Documented scope: vector stores are out of the AI layer in every ecosystem."""
+    (tmp_path / "go.mod").write_text(
+        "require github.com/pinecone-io/go-pinecone v2.0.0\n", encoding="utf-8"
+    )
+    (tmp_path / "requirements.txt").write_text("chromadb==0.5.0\n", encoding="utf-8")
+    pkgs = _packages(_scan(tmp_path))
+    assert pkgs["github.com/pinecone-io/go-pinecone"].ai is False
+    assert pkgs["chromadb"].ai is False
+    assert pkgs["chromadb"].purl, "still part of the complete BOM"
