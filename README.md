@@ -27,6 +27,14 @@ That analysis runs on **Python and TypeScript/JavaScript alike** — including
 the Vercel AI SDK, OpenAI Agents, MCP TypeScript servers, and Next.js/Express
 route handlers, where most agent code now lives.
 
+## Demo
+
+[![Watch Demo](docs/demo.png)](https://youtu.be/BPWNt6KgGvY)
+
+Or watch directly: <https://youtu.be/BPWNt6KgGvY>
+
+Hosted instance: <https://aibom-inspector.com/>
+
 ## Quick start
 
 Clone, then run one command. The launcher builds the image on first use and
@@ -51,12 +59,9 @@ On Windows PowerShell use `.\aibom.ps1` with the same arguments. Local paths are
 mounted read-only and rewritten automatically; reports land in `./aibom-out`.
 
 The UI and the CLI run the same pipeline and expose the same capabilities —
-scan, behavioral drift, impact paths, and every export.
-
-![AIBOM Inspector web UI scanning openai/openai-quickstart-python: 41/100 security score, risk-colored dependency graph, and OSV-backed findings with file:line evidence](docs/assets/ui-scan-result.png)
-
-Shareable scan links work too: `http://localhost:8000/?repo=https://github.com/owner/repo`
-pre-fills the form and starts the scan on load.
+scan, behavioral drift, impact paths, and every export. Shareable scan links
+work too: `http://localhost:8000/?repo=https://github.com/owner/repo` pre-fills
+the form and starts the scan on load.
 
 ---
 
