@@ -253,7 +253,14 @@
   .demo-launch button { min-height: 40px; }
   .demo-launch span { color: var(--muted); font-size: 14px; }
   .demo-launch { flex-wrap: wrap; }
-  .drift-lede { margin: 10px 0 0; color: var(--muted); max-width: 74ch; }
+  .mode-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0;
+    border-bottom: 1px solid var(--border); }
+  .mode-tabs button { min-height: 38px; padding: 8px 14px; border: 0; border-radius: 0;
+    background: none; color: var(--muted); font-size: 14px; font-weight: 650;
+    border-bottom: 2px solid transparent; }
+  .mode-tabs button[aria-selected="true"] { color: var(--accent);
+    border-bottom-color: var(--accent); }
+  .mode-lede { margin: 14px 0 16px; color: var(--muted); max-width: 74ch; }
   .drift-refs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
   .drift-refs label { display: grid; gap: 4px; font-size: 13px; flex: 1 1 200px; }
   .drift-verdict { margin: 16px 0 0; padding: 13px 14px; border-radius: 5px;
@@ -914,40 +921,77 @@
         </div>
       </header>
 
-      <ol class="scan-steps" aria-label="Scan workflow">
+      <div class="mode-tabs" role="tablist" aria-label="Analysis mode">
+        <button role="tab" type="button" id="modeScan" data-mode="scan"
+                aria-selected="true" aria-controls="scanFields">Scan one revision</button>
+        <button role="tab" type="button" id="modeDrift" data-mode="drift"
+                aria-selected="false" aria-controls="driftFields">Compare two revisions</button>
+      </div>
+
+      <ol class="scan-steps" aria-label="Analysis workflow">
         <li class="is-current" id="step1" aria-current="step">
           <span class="step-number">1</span>
-          <span><strong>Enter repository URL</strong><small>GitHub, GitLab, Bitbucket, or Codeberg</small></span>
+          <span><strong id="step1Title">Enter repository URL</strong><small id="step1Hint">GitHub, GitLab, Bitbucket, or Codeberg</small></span>
         </li>
         <li id="step2">
           <span class="step-number">2</span>
-          <span><strong>Run the scan</strong><small>Files and advisories are inspected</small></span>
+          <span><strong id="step2Title">Run the scan</strong><small id="step2Hint">Files and advisories are inspected</small></span>
         </li>
         <li id="step3">
           <span class="step-number">3</span>
-          <span><strong>Review the evidence</strong><small>Findings, graph, inventory, and exports</small></span>
+          <span><strong id="step3Title">Review the evidence</strong><small id="step3Hint">Findings, graph, inventory, and exports</small></span>
         </li>
       </ol>
 
       <div class="scan-body">
-        <label for="repo">Repository URL</label>
-        <div class="scan-row">
-          <input type="url" id="repo" placeholder="https://github.com/owner/repository"
-                 autocomplete="off" spellcheck="false" aria-describedby="repo-help status">
-          <button id="scan" type="button">Start analysis</button>
+        <div id="scanFields" role="tabpanel" aria-labelledby="modeScan">
+          <label for="repo">Repository URL</label>
+          <div class="scan-row">
+            <input type="url" id="repo" placeholder="https://github.com/owner/repository"
+                   autocomplete="off" spellcheck="false" aria-describedby="repo-help status">
+            <button id="scan" type="button">Start analysis</button>
+          </div>
+          <div class="field-help">
+            <button class="text-action" id="loadExample" type="button">Load a public example URL</button>
+          </div>
+          <div class="demo-launch">
+            <button id="runDemo" type="button">Run built-in impact demo</button>
+            <span>No repository URL, API key, or network access required.</span>
+          </div>
         </div>
-        <div class="field-help">
-          <button class="text-action" id="loadExample" type="button">Load a public example URL</button>
+
+        <div id="driftFields" role="tabpanel" aria-labelledby="modeDrift" hidden>
+          <p class="mode-lede">A component-only BOM diff goes quiet when two revisions ship the
+            same model, SDK, packages, and tools. This compares <strong>behavior</strong>: it
+            reports a newly connected untrusted input → privileged instructions → bound tool →
+            operation path even when the component inventory is byte-for-byte identical.</p>
+          <label for="driftRepo">Repository URL</label>
+          <div class="scan-row">
+            <input type="url" id="driftRepo" placeholder="https://github.com/owner/repository"
+                   autocomplete="off" spellcheck="false" aria-describedby="status">
+            <button id="runDiff" type="button">Compare</button>
+          </div>
+          <div class="drift-refs">
+            <label for="baseRef">Baseline ref
+              <input type="text" id="baseRef" value="main" autocomplete="off" spellcheck="false">
+            </label>
+            <label for="headRef">Candidate ref
+              <input type="text" id="headRef" placeholder="branch, tag, or commit SHA"
+                     autocomplete="off" spellcheck="false">
+            </label>
+          </div>
+          <div class="demo-launch">
+            <button id="runDriftPy" type="button">Built-in drift demo (Python)</button>
+            <button id="runDriftTs" type="button">Built-in drift demo (TypeScript)</button>
+            <span>Identical components in both revisions. No URL, API key, or network needed.</span>
+          </div>
         </div>
-        <div class="demo-launch">
-          <button id="runDemo" type="button">Run built-in impact demo</button>
-          <span>No repository URL, API key, or network access required.</span>
-        </div>
+
         <div class="status-block">
           <p id="status" role="status" aria-live="polite"></p>
           <div class="scan-progress" aria-hidden="true">
             <span class="spinner"></span>
-            <span>Cloning repository, reading supported files, and resolving advisories.</span>
+            <span id="progressHint">Cloning repository, reading supported files, and resolving advisories.</span>
           </div>
         </div>
       </div>
@@ -970,59 +1014,10 @@
       </div>
     </details>
 
-    <section class="scan-panel" id="driftSection" aria-labelledby="drift-panel-title">
-      <header class="panel-titlebar">
-        <div>
-          <span class="panel-index">02</span>
-          <h2 id="drift-panel-title">Behavioral drift between revisions</h2>
-        </div>
-      </header>
-
-      <p class="drift-lede">A component-only BOM diff goes quiet when two revisions ship the
-        same model, SDK, packages, and tools. This compares <strong>behavior</strong>: it reports a
-        newly connected untrusted input → privileged instructions → bound tool → operation path
-        even when the component inventory is byte-for-byte identical.</p>
-
-      <div class="scan-body">
-        <label for="driftRepo">Repository URL</label>
-        <div class="scan-row">
-          <input type="url" id="driftRepo" placeholder="https://github.com/owner/repository"
-                 autocomplete="off" spellcheck="false" aria-describedby="driftStatus">
-          <button id="runDiff" type="button">Compare revisions</button>
-        </div>
-        <div class="drift-refs">
-          <label for="baseRef">Baseline ref
-            <input type="text" id="baseRef" value="main" autocomplete="off" spellcheck="false">
-          </label>
-          <label for="headRef">Candidate ref
-            <input type="text" id="headRef" placeholder="feature-branch, tag, or commit SHA"
-                   autocomplete="off" spellcheck="false">
-          </label>
-        </div>
-        <div class="demo-launch">
-          <button id="runDriftPy" type="button">Built-in drift demo (Python)</button>
-          <button id="runDriftTs" type="button">Built-in drift demo (TypeScript)</button>
-          <span>Identical components in both revisions. No URL, API key, or network needed.</span>
-        </div>
-        <div class="status-block">
-          <p id="driftStatus" role="status" aria-live="polite"></p>
-        </div>
-
-        <div id="driftResults" hidden>
-          <div class="drift-verdict" id="driftVerdict"></div>
-          <div class="drift-revisions" id="driftRevisions"></div>
-          <div class="tablewrap" style="margin-top:14px"><table id="driftTable">
-            <thead><tr><th>Severity</th><th>Change</th><th>What changed</th><th>Evidence</th></tr></thead>
-            <tbody></tbody>
-          </table></div>
-        </div>
-      </div>
-    </section>
-
     <section class="results-area" id="resultsArea" aria-labelledby="results-area-title">
       <header class="section-titlebar">
         <div>
-          <span class="panel-index">03</span>
+          <span class="panel-index">02</span>
           <h2 id="results-area-title">Analysis results</h2>
         </div>
         <span class="result-state" id="resultState">Waiting for input</span>
@@ -1040,7 +1035,7 @@
       <div class="results" id="results" tabindex="-1">
       <header class="result-header">
         <div>
-          <p class="result-overline">SCAN RESULT</p>
+          <p class="result-overline" id="resultOverline">SCAN RESULT</p>
           <h2 id="resultRepoName">Repository</h2>
           <p class="result-meta" id="resultMeta"></p>
         </div>
@@ -1049,9 +1044,20 @@
           <button class="ghost" id="downloadCdx" type="button" disabled>CycloneDX JSON</button>
           <button class="ghost" id="downloadSarif" type="button" disabled>SARIF</button>
           <button class="ghost" id="downloadInventory" type="button" disabled>Inventory JSON</button>
+          <button class="ghost" id="downloadDrift" type="button" hidden>Drift JSON</button>
         </div>
       </header>
 
+      <div id="driftResult" hidden>
+        <div class="drift-verdict" id="driftVerdict"></div>
+        <div class="drift-revisions" id="driftRevisions"></div>
+        <div class="tablewrap" style="margin-top:14px"><table id="driftTable">
+          <thead><tr><th>Severity</th><th>Change</th><th>What changed</th><th>Evidence</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div id="scanResult">
       <nav class="result-nav" aria-label="Result sections">
         <a href="#overview">Overview</a>
         <a href="#findingsSection">Findings</a>
@@ -1169,6 +1175,7 @@
         </table></div>
       </section>
       </div>
+      </div>
     </section>
 
     <details class="collapsible-panel help-panel" id="helpPanel">
@@ -1222,6 +1229,8 @@ function apiBase() {
 
 let lastRequest = null;
 let lastResult = null;
+let lastDrift = null;
+let analysisMode = "scan";
 
 function esc(s) {
   const d = document.createElement("div");
@@ -1299,50 +1308,71 @@ function loadExample() {
   input.focus();
 }
 
+const ACTION_BUTTONS = ["scan", "runDemo", "runDiff", "runDriftPy", "runDriftTs"];
+const SCAN_EXPORTS = ["download", "downloadCdx", "downloadSarif", "downloadInventory"];
+
 function setExportsEnabled(enabled) {
-  for (const id of ["download", "downloadCdx", "downloadSarif", "downloadInventory"]) {
-    $(id).disabled = !enabled;
-  }
+  for (const id of SCAN_EXPORTS) $(id).disabled = !enabled;
 }
 
-async function runDemo() {
-  const button = $("runDemo");
-  const scanButton = $("scan");
-  const api = apiBase();
-  lastRequest = { repo_url: "built-in://impact-demo", resolve: false, api, demo: true };
-  lastResult = null;
-  button.disabled = true;
-  button.textContent = "Running impact demo\u2026";
-  scanButton.disabled = true;
+// Show either the scan body or the drift body inside the shared results area,
+// with the export buttons that actually apply to it.
+function showResultBody(kind) {
+  const isDrift = kind === "drift";
+  $("scanResult").hidden = isDrift;
+  $("driftResult").hidden = !isDrift;
+  $("downloadDrift").hidden = !isDrift;
+  $("downloadDrift").disabled = !isDrift;
+  for (const id of SCAN_EXPORTS) $(id).hidden = isDrift;
+  $("emptyState").hidden = true;
+  $("results").style.display = "";
+}
+
+// One busy/error/scroll path for every analysis the panel can start.
+async function runAnalysis(button, busyLabel, spec) {
+  const original = button.textContent;
+  ACTION_BUTTONS.forEach((id) => { $(id).disabled = true; });
+  button.textContent = busyLabel;
   $("scanSection").setAttribute("aria-busy", "true");
-  setExportsEnabled(false);
   $("results").style.display = "none";
+  setExportsEnabled(false);
   setWorkflowStep(2);
-  showWorkspaceState("RUNNING", "Built-in impact demo in progress",
-    "Tracing external input through agent instructions to directly bound tool capabilities.");
-  setStatus("Running the offline built-in impact demo\u2026", false);
+  showWorkspaceState("RUNNING", spec.running[0], spec.running[1]);
+  setStatus(spec.status, false);
   try {
-    const resp = await fetch(api + "/api/demo", { method: "POST" });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-    render(data);
-    lastResult = data;
-    setStatus("Impact demo complete. Review Potential blast radius first.", false);
-    setExportsEnabled(true);
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const data = await spec.request();
+    spec.render(data);
+    setWorkflowStep(3);
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto" : "smooth";
     $("results").scrollIntoView({ behavior, block: "start" });
     $("results").focus({ preventScroll: true });
   } catch (e) {
-    setStatus("The built-in demo could not be completed: " + e.message, true);
-    showWorkspaceState("NO RESULT", "Demo failed",
-      "Confirm that the scanner service is available, then try the built-in demo again.");
+    setStatus(spec.failure + ": " + e.message, true);
+    showWorkspaceState("NO RESULT", spec.failure,
+      "Review the error above, adjust the input if needed, and try again.");
     setWorkflowStep(1);
   } finally {
-    button.disabled = false;
-    button.textContent = "Run built-in impact demo";
-    scanButton.disabled = false;
+    ACTION_BUTTONS.forEach((id) => { $(id).disabled = false; });
+    button.textContent = original;
     $("scanSection").removeAttribute("aria-busy");
   }
+}
+
+function runDemo() {
+  lastRequest = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
+  lastResult = null;
+  return runAnalysis($("runDemo"), "Running impact demo…", {
+    status: "Running the offline built-in impact demo…",
+    running: ["Built-in impact demo in progress",
+      "Tracing external input through agent instructions to directly bound tool capabilities."],
+    failure: "The built-in demo could not be completed",
+    request: () => postJson(apiBase() + "/api/demo"),
+    render: (data) => {
+      renderScan(data);
+      setStatus("Impact demo complete. Review Potential blast radius first.", false);
+    },
+  });
 }
 
 // Proof-of-work line: what the scan actually read, and how long each step took.
@@ -1363,64 +1393,38 @@ function statsLine(repo, st) {
   return msg;
 }
 
-async function scan() {
+function scan() {
   const repoInput = $("repo");
-  const scanButton = $("scan");
   const repo = repoInput.value.trim();
-  const api = apiBase();
-  if (!repo) {
-    repoInput.setAttribute("aria-invalid", "true");
-    setStatus("Enter a repository URL to start the analysis.", true);
-    repoInput.focus();
-    return;
-  }
   if (!isRepositoryUrl(repo)) {
     repoInput.setAttribute("aria-invalid", "true");
-    setStatus("Enter a complete repository URL, including https://.", true);
+    setStatus(repo
+      ? "Enter a complete repository URL, including https://."
+      : "Enter a repository URL to start the analysis.", true);
     repoInput.focus();
-    return;
+    return Promise.resolve();
   }
   repoInput.removeAttribute("aria-invalid");
-  lastRequest = { repo_url: repo, resolve: true, api };
+  lastRequest = { repo_url: repo, resolve: true, api: apiBase() };
   lastResult = null;
-
-  scanButton.disabled = true;
-  scanButton.textContent = "Analyzing…";
-  scanButton.closest(".scan-panel").setAttribute("aria-busy", "true");
-  setExportsEnabled(false);
-  $("results").style.display = "none";
-  setWorkflowStep(2);
-  showWorkspaceState("RUNNING", "Scan in progress",
-    "The repository is being cloned and analyzed. Results will replace this message when ready.");
-  setStatus("Inspecting " + repoLabel(repo) + "…", false);
-  try {
-    const resp = await fetch(api + "/api/scan", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_url: repo, resolve: lastRequest.resolve }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-    render(data);
-    lastResult = data;
-    setStatus("Analysis complete. " + statsLine(repo, data.stats), false);
-    setExportsEnabled(true);
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    $("results").scrollIntoView({ behavior, block: "start" });
-    $("results").focus({ preventScroll: true });
-  } catch (e) {
-    setStatus("The analysis could not be completed: " + e.message +
-      " Check that the repository is public and the scanner service is available, then try again.", true);
-    showWorkspaceState("NO RESULT", "Scan failed",
-      "Review the error above, update the repository URL if needed, and start the analysis again.");
-    setWorkflowStep(1);
-  } finally {
-    scanButton.disabled = false;
-    scanButton.textContent = "Start analysis";
-    scanButton.closest(".scan-panel").removeAttribute("aria-busy");
-  }
+  return runAnalysis($("scan"), "Analyzing…", {
+    status: "Inspecting " + repoLabel(repo) + "…",
+    running: ["Scan in progress",
+      "The repository is being cloned and analyzed. Results will replace this message when ready."],
+    failure: "The analysis could not be completed",
+    request: () => postJson(apiBase() + "/api/scan", { repo_url: repo, resolve: true }),
+    render: (data) => {
+      renderScan(data);
+      setStatus("Analysis complete. " + statsLine(repo, data.stats), false);
+    },
+  });
 }
 
-function render(d) {
+function renderScan(d) {
+  lastResult = d;
+  showResultBody("scan");
+  setExportsEnabled(true);
+  $("resultOverline").textContent = "SCAN RESULT";
   const sc = d.score;
   const allEnts = (d.inventory && d.inventory.entities) || [];
   // Non-AI packages complete the BOM but don't count as AI usage.
@@ -1539,8 +1543,6 @@ function render(d) {
     typeFilter.appendChild(option);
   });
 
-  $("results").style.display = "block";
-  $("emptyState").hidden = true;
   $("resultState").textContent = "Analysis complete";
   $("resultState").dataset.state = "complete";
   setWorkflowStep(3);
@@ -1640,51 +1642,32 @@ async function downloadSarif() {
 }
 
 // ── behavioral drift between two revisions ──────────────────────────────────
+// Drift shares the scan panel's status line, workflow steps, and results area;
+// only the result body and the export button differ.
 
-function setDriftStatus(message, isError) {
-  const el = $("driftStatus");
-  el.textContent = message;
-  el.className = isError ? "err" : "";
-}
-
-function driftButtons() {
-  return [$("runDiff"), $("runDriftPy"), $("runDriftTs")];
-}
-
-async function withDriftBusy(activeButton, busyLabel, task) {
-  const buttons = driftButtons();
-  const original = activeButton.textContent;
-  buttons.forEach((b) => { b.disabled = true; });
-  activeButton.textContent = busyLabel;
-  $("driftSection").setAttribute("aria-busy", "true");
-  try {
-    await task();
-  } catch (e) {
-    setDriftStatus("The comparison could not be completed: " + e.message, true);
-    $("driftResults").hidden = true;
-  } finally {
-    buttons.forEach((b) => { b.disabled = false; });
-    activeButton.textContent = original;
-    $("driftSection").removeAttribute("aria-busy");
-  }
-}
-
-async function postDrift(url, options) {
-  const resp = await fetch(url, options);
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-  return data;
+function postJson(url, body) {
+  const options = body
+    ? { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body) }
+    : { method: "POST" };
+  return fetch(url, options).then(async (resp) => {
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    return data;
+  });
 }
 
 function runDriftDemo(language) {
   const button = language === "typescript" ? $("runDriftTs") : $("runDriftPy");
-  return withDriftBusy(button, "Comparing…", async () => {
-    setDriftStatus("Comparing the built-in " + language + " baseline and candidate…", false);
-    const data = await postDrift(
-      apiBase() + "/api/diff/demo?language=" + encodeURIComponent(language),
-      { method: "POST" },
-    );
-    renderDrift(data);
+  const label = language === "typescript" ? "TypeScript" : "Python";
+  return runAnalysis(button, "Comparing…", {
+    status: `Comparing the built-in ${label} baseline and candidate…`,
+    running: ["Built-in drift comparison in progress",
+      "Scanning both revisions and diffing their proven behavioral paths."],
+    failure: "Drift comparison failed",
+    request: () => postJson(
+      apiBase() + "/api/diff/demo?language=" + encodeURIComponent(language)),
+    render: renderDrift,
   });
 }
 
@@ -1695,22 +1678,23 @@ function runDiff() {
   const head = $("headRef").value.trim();
   if (!isRepositoryUrl(repo)) {
     repoInput.setAttribute("aria-invalid", "true");
-    setDriftStatus("Enter a complete repository URL, including https://.", true);
+    setStatus("Enter a complete repository URL, including https://.", true);
     repoInput.focus();
     return Promise.resolve();
   }
   if (!base || !head) {
-    setDriftStatus("Enter both a baseline ref and a candidate ref.", true);
+    setStatus("Enter both a baseline ref and a candidate ref.", true);
     return Promise.resolve();
   }
   repoInput.removeAttribute("aria-invalid");
-  return withDriftBusy($("runDiff"), "Comparing…", async () => {
-    setDriftStatus(`Cloning ${repoLabel(repo)} at ${base} and ${head}…`, false);
-    const data = await postDrift(apiBase() + "/api/diff", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_url: repo, base_ref: base, head_ref: head }),
-    });
-    renderDrift(data);
+  return runAnalysis($("runDiff"), "Comparing…", {
+    status: `Cloning ${repoLabel(repo)} at ${esc(base)} and ${esc(head)}…`,
+    running: ["Revision comparison in progress",
+      "Both revisions are cloned and scanned before their behavior is diffed."],
+    failure: "Drift comparison failed",
+    request: () => postJson(apiBase() + "/api/diff",
+      { repo_url: repo, base_ref: base, head_ref: head }),
+    render: renderDrift,
   });
 }
 
@@ -1718,6 +1702,14 @@ function renderDrift(data) {
   const changes = (data.drift && data.drift.changes) || [];
   const identical = Boolean(data.components_identical);
   const worst = changes.length ? changes[0].severity : null;
+  lastDrift = data;
+
+  showResultBody("drift");
+  $("resultOverline").textContent = "DRIFT RESULT";
+  $("resultRepoName").textContent = shortTarget(data.candidate && data.candidate.target);
+  $("resultMeta").textContent = changes.length
+    ? `${changes.length} security-significant change(s) · most severe: ${worst}`
+    : "No security-significant drift between these revisions.";
 
   const verdict = $("driftVerdict");
   verdict.setAttribute("data-identical", String(identical && changes.length > 0));
@@ -1735,14 +1727,13 @@ function renderDrift(data) {
     verdict.innerHTML = `<strong>${esc(headline)}</strong><span>${esc(detail)}</span>`;
   }
 
-  const summary = (side) => {
-    const s = data[side];
+  const side = (name) => {
+    const s = data[name];
     if (!s) return "";
-    return `<span><strong>${esc(side)}</strong> ${esc(s.target || "")}`
+    return `<span><strong>${esc(name)}</strong> ${esc(shortTarget(s.target))}`
       + ` · ${s.production_ai_components} AI components · ${s.findings} findings</span>`;
   };
-  $("driftRevisions").innerHTML = summary("baseline") + summary("candidate")
-    + (worst ? `<span><strong>worst change</strong> ${esc(worst)}</span>` : "");
+  $("driftRevisions").innerHTML = side("baseline") + side("candidate");
 
   const body = $("driftTable").querySelector("tbody");
   body.innerHTML = "";
@@ -1764,8 +1755,9 @@ function renderDrift(data) {
       + "No trust-boundary, capability, or component drift detected.</td></tr>";
   }
 
-  $("driftResults").hidden = false;
-  setDriftStatus(
+  $("resultState").textContent = "Comparison complete";
+  $("resultState").dataset.state = "complete";
+  setStatus(
     changes.length
       ? `${changes.length} security-significant change(s); most severe: ${worst}.`
       : "Comparison complete: no security-significant drift.",
@@ -1773,6 +1765,14 @@ function renderDrift(data) {
   );
 }
 
+function shortTarget(target) {
+  if (!target) return "Comparison";
+  return target.replace(/^built-in:\/\//, "").replace(/^https?:\/\//, "");
+}
+
+function downloadDrift() {
+  if (lastDrift) saveJson(lastDrift, "aibom-drift.json", "Drift JSON");
+}
 // ── dependency graph (dependency-free SVG force layout) ──────────────────────
 const SVGNS = "http://www.w3.org/2000/svg";
 const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
@@ -2059,6 +2059,46 @@ function filterInventory() {
     "No components match the current filters.");
 }
 
+// The panel has two modes; the steps and empty state describe the active one.
+const MODE_COPY = {
+  scan: {
+    steps: [["Enter repository URL", "GitHub, GitLab, Bitbucket, or Codeberg"],
+            ["Run the scan", "Files and advisories are inspected"],
+            ["Review the evidence", "Findings, graph, inventory, and exports"]],
+    progress: "Cloning repository, reading supported files, and resolving advisories.",
+    empty: ["No analysis loaded",
+      "Enter a repository URL above and start the analysis. Findings and evidence will appear here."],
+  },
+  drift: {
+    steps: [["Enter repository and refs", "A baseline and a candidate revision"],
+            ["Compare the revisions", "Both are scanned, then their behavior is diffed"],
+            ["Review the drift", "New privileged paths and blast radius, with evidence"]],
+    progress: "Cloning both revisions, scanning each, and diffing their behavioral paths.",
+    empty: ["No comparison loaded",
+      "Enter two refs above, or run a built-in drift demo. Behavioral changes will appear here."],
+  },
+};
+
+function setMode(mode) {
+  analysisMode = mode;
+  const copy = MODE_COPY[mode];
+  $("modeScan").setAttribute("aria-selected", String(mode === "scan"));
+  $("modeDrift").setAttribute("aria-selected", String(mode === "drift"));
+  $("scanFields").hidden = mode !== "scan";
+  $("driftFields").hidden = mode !== "drift";
+  copy.steps.forEach(([title, hint], index) => {
+    $("step" + (index + 1) + "Title").textContent = title;
+    $("step" + (index + 1) + "Hint").textContent = hint;
+  });
+  $("progressHint").textContent = copy.progress;
+  if ($("results").style.display === "none" || !$("emptyState").hidden) {
+    showWorkspaceState("READY", copy.empty[0], copy.empty[1]);
+    $("results").style.display = "none";
+  }
+  setWorkflowStep(1);
+  setStatus("", false);
+}
+
 $("scan").addEventListener("click", scan);
 $("loadExample").addEventListener("click", loadExample);
 $("runDemo").addEventListener("click", runDemo);
@@ -2066,6 +2106,9 @@ $("download").addEventListener("click", download);
 $("downloadCdx").addEventListener("click", downloadCycloneDX);
 $("downloadSarif").addEventListener("click", downloadSarif);
 $("downloadInventory").addEventListener("click", downloadInventory);
+$("downloadDrift").addEventListener("click", downloadDrift);
+$("modeScan").addEventListener("click", () => setMode("scan"));
+$("modeDrift").addEventListener("click", () => setMode("drift"));
 $("runDiff").addEventListener("click", runDiff);
 $("runDriftPy").addEventListener("click", () => runDriftDemo("python"));
 $("runDriftTs").addEventListener("click", () => runDriftDemo("typescript"));
@@ -2082,9 +2125,13 @@ $("inventorySearch").addEventListener("input", filterInventory);
 $("typeFilter").addEventListener("change", filterInventory);
 
 // Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
-const preset = new URLSearchParams(location.search).get("repo");
-const demoPreset = new URLSearchParams(location.search).get("demo");
-if (demoPreset === "1") runDemo();
+const params = new URLSearchParams(location.search);
+const preset = params.get("repo");
+const driftPreset = params.get("drift");   // 'python' | 'typescript'
+if (driftPreset) {
+  setMode("drift");
+  runDriftDemo(driftPreset === "typescript" ? "typescript" : "python");
+} else if (params.get("demo") === "1") runDemo();
 else if (preset) { $("repo").value = preset; scan(); }
 </script>
 </body>

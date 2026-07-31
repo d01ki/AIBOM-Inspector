@@ -1,0 +1,12 @@
+{
+  "repository": "encode/httpx",
+  "commit": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+  "language": "python",
+  "local_path": "benchmark/checkouts/httpx",
+  "notes": [
+    "Negative case: a widely used HTTP library with no AI supply chain.",
+    "98 files are read and the expected component set is empty, so any",
+    "component reported here is a false positive."
+  ],
+  "components": []
+}

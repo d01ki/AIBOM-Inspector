@@ -1,27 +1,69 @@
-version: 1
+version: 2
 
-# Every enabled public case must have a manually reviewed ground-truth JSON and
-# an immutable commit. The first checked-in case is local and deterministic;
-# the candidate list is intentionally not counted until curation is complete.
+# Every enabled public case has a manually reviewed ground-truth JSON and an
+# immutable commit. The candidate lists below are NOT counted until curation is
+# complete - they record intent, not evidence.
+#
+# Status 2026-07-31: 6 public cases curated (2 positive, 4 negative) across both
+# language front ends. The documented target is 20; this is not there yet, and
+# the shortfall is stated in docs/limitations.md rather than papered over.
 repositories:
   - repository: local/vulnerable-ai-app
     commit: fixture-v1
+    language: python
     ground_truth: ground_truth/vulnerable-ai-app.json
+    enabled: true
+  - repository: local/vulnerable-ts-agent
+    commit: fixture-v1
+    language: typescript
+    ground_truth: ground_truth/vulnerable-ts-agent.json
     enabled: true
 
 public_repositories:
   - repository: openai/openai-quickstart-python
     commit: ec8890d101bdc17d66512d94a76b5e7131d188a1
+    language: python
     ground_truth: ground_truth_public/openai-quickstart-python.json
+    role: positive
+    enabled_by_default: false
+  - repository: vercel/ai-chatbot
+    commit: c2f8235e1f3ea903ad8b7f61447c4f74164b5c58
+    language: typescript
+    ground_truth: ground_truth_public/ai-chatbot.json
     role: positive
     enabled_by_default: false
   - repository: pallets/flask
     commit: 36e4a824f340fdee7ed50937ba8e7f6bc7d17f81
+    language: python
     ground_truth: ground_truth_public/flask.json
     role: negative
     enabled_by_default: false
+  - repository: expressjs/express
+    commit: a3714473feb3d2908add734d340e7755fd85e0a3
+    language: typescript
+    ground_truth: ground_truth_public/express.json
+    role: negative
+    enabled_by_default: false
+  - repository: psf/requests
+    commit: 414f0513c33883adf6f2b46901d4f0b38a455851
+    language: python
+    ground_truth: ground_truth_public/requests.json
+    role: negative
+    enabled_by_default: false
+  - repository: encode/httpx
+    commit: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
+    language: python
+    ground_truth: ground_truth_public/httpx.json
+    role: negative
+    enabled_by_default: false
 
+# Positive candidates still needing hand-reviewed ground truth. Large monorepos
+# are deliberately low priority: a case is only useful when every component can
+# be reviewed, and recall on a 10k-file tree cannot be honestly hand-checked.
 candidates:
+  - modelcontextprotocol/servers
+  - openai/openai-cookbook
+  - anthropics/anthropic-cookbook
   - langchain-ai/langchain
   - langchain-ai/langgraph
   - run-llama/llama_index
@@ -30,22 +72,16 @@ candidates:
   - deepset-ai/haystack
   - BerriAI/litellm
   - huggingface/transformers
-  - huggingface/diffusers
-  - ollama/ollama
-  - vllm-project/vllm
-  - open-webui/open-webui
-  - modelcontextprotocol/python-sdk
-  - modelcontextprotocol/servers
-  - openai/openai-cookbook
-  - anthropics/anthropic-cookbook
   - microsoft/semantic-kernel
-  - ggml-org/llama.cpp
-  - huggingface/text-generation-inference
-  - microsoft/guidance
+
+typescript_candidates:
+  - modelcontextprotocol/typescript-sdk
+  - vercel/ai
+  - langchain-ai/langchainjs
+  - mastra-ai/mastra
+  - openai/openai-node
 
 negative_candidates:
-  - pallets/flask
   - django/django
-  - expressjs/express
-  - psf/requests
-  - encode/httpx
+  - fastify/fastify
+  - vuejs/core

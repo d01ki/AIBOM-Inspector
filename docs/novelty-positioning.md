@@ -182,12 +182,18 @@ Demo sequence:
 
 ## Evidence still needed before the talk
 
-- Expand the public benchmark from two repositories to at least 20, including
-  negative and mixed-role prompt cases.
+- Expand the public benchmark from **six** repositories to at least 20,
+  including mixed-role prompt cases. (Was two; `vercel/ai-chatbot`,
+  `expressjs/express`, `psf/requests`, and `encode/httpx` were curated
+  2026-07-31.)
+- Close the TypeScript recall gap the corpus exposed: model ids declared in a
+  data structure and resolved through `gateway.languageModel(id)` are not
+  followed, giving public-corpus recall of 0.79 for TypeScript vs 1.00 for
+  Python.
 - ~~Add JavaScript/TypeScript syntax-aware prompt-flow analysis~~ — shipped
-  2026-07-31 (`javascript.prompt-flow.ast`). Still to do: extend the benchmark
-  corpus to real TypeScript agent repositories, and measure JS/TS precision
-  separately from Python.
+  2026-07-31 (`javascript.prompt-flow.ast`).
+- ~~Measure JS/TS precision separately from Python~~ — shipped 2026-07-31
+  (`## By language` in the benchmark report).
 - Measure drift precision on real pull requests, not only synthetic revisions.
 - Publish a pinned comparison corpus and commands so competitors and reviewers
   can reproduce the capability matrix.

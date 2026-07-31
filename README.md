@@ -140,7 +140,8 @@ The dated, source-linked competitive analysis and claim boundaries are in
   interactive risk-colored dependency graph, a revision-comparison panel, and
   the same exports as the CLI (HTML, CycloneDX, SARIF, inventory JSON)
 - **Reproducible benchmark harness** — category precision/recall/F1 with
-  explicit false-positive and false-negative reports
+  explicit false-positive and false-negative reports, scored **per language**
+  so Python results cannot mask TypeScript ones
 
 Design & roadmap → [SPEC.md](SPEC.md).
 
@@ -376,9 +377,20 @@ uv run mypy              # types
 python benchmark/evaluate.py  # precision/recall benchmark
 ```
 
-The benchmark covers a deterministic local fixture plus a
-[pinned public evaluation](benchmark/reports/external-latest.md) — regression
-evidence, not a claim of broad ecosystem coverage.
+The benchmark covers two deterministic local fixtures (one Python, one
+TypeScript) plus a [pinned public evaluation](benchmark/reports/external-latest.md)
+over six repositories — two positive and four negative, across both language
+front ends.
+
+Current public-corpus result: **precision 1.00** (no false positives anywhere,
+including a 163-file pure-JavaScript codebase) and **recall 0.85** — Python
+1.00, TypeScript 0.79. The six recall misses are listed in the report rather
+than trimmed from the ground truth; they are model ids declared in a data
+structure and resolved through an indirection, which the scanner does not
+follow yet.
+
+Six repositories is regression evidence, not a claim of broad ecosystem
+coverage. The documented target is 20.
 
 Implementation details: [architecture](docs/architecture.md),
 [detection methodology](docs/detection-methodology.md),

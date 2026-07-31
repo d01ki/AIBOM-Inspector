@@ -1,0 +1,215 @@
+{
+  "repository": "vercel/ai-chatbot",
+  "commit": "c2f8235e1f3ea903ad8b7f61447c4f74164b5c58",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/ai-chatbot",
+  "notes": [
+    "Curated 2026-07-31 by reviewing every AI SDK call site plus lib/ai/models.ts.",
+    "Prompts are recorded at their sink, not as separate constants in",
+    "lib/ai/prompts.ts, so an instruction string is counted once.",
+    "Known gaps kept as expectations, not deleted:",
+    "- the five model ids are declared in a ChatModel[] literal and reached via",
+    "  gateway.languageModel(id); neither the data structure nor the indirection",
+    "  is resolved, so all five are false negatives.",
+    "- the Vercel AI Gateway is the external service every model call goes",
+    "  through; no provider SDK is imported, so it is not detected."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "@ai-sdk/otel",
+      "file": "package.json",
+      "line": 22,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "@ai-sdk/provider",
+      "file": "package.json",
+      "line": 23,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "@ai-sdk/react",
+      "file": "package.json",
+      "line": 24,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "ai",
+      "file": "package.json",
+      "line": 40,
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@app/(chat)/actions.ts:29",
+      "file": "app/(chat)/actions.ts",
+      "line": 28,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@app/(chat)/api/chat/route.ts:280",
+      "file": "app/(chat)/api/chat/route.ts",
+      "line": 269,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/code/server.ts:19",
+      "file": "artifacts/code/server.ts",
+      "line": 18,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/code/server.ts:41",
+      "file": "artifacts/code/server.ts",
+      "line": 40,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/sheet/server.ts:12",
+      "file": "artifacts/sheet/server.ts",
+      "line": 11,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/sheet/server.ts:34",
+      "file": "artifacts/sheet/server.ts",
+      "line": 33,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/text/server.ts:14",
+      "file": "artifacts/text/server.ts",
+      "line": 11,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@artifacts/text/server.ts:37",
+      "file": "artifacts/text/server.ts",
+      "line": 35,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@lib/ai/tools/request-suggestions.ts:44",
+      "file": "lib/ai/tools/request-suggestions.ts",
+      "line": 42,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@app/(chat)/api/chat/route.ts:281",
+      "file": "app/(chat)/api/chat/route.ts",
+      "line": 269,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@app/(chat)/actions.ts:31",
+      "file": "app/(chat)/actions.ts",
+      "line": 28,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/code/server.ts:21",
+      "file": "artifacts/code/server.ts",
+      "line": 18,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/code/server.ts:43",
+      "file": "artifacts/code/server.ts",
+      "line": 40,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/sheet/server.ts:14",
+      "file": "artifacts/sheet/server.ts",
+      "line": 11,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/sheet/server.ts:36",
+      "file": "artifacts/sheet/server.ts",
+      "line": 33,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/text/server.ts:16",
+      "file": "artifacts/text/server.ts",
+      "line": 11,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@artifacts/text/server.ts:39",
+      "file": "artifacts/text/server.ts",
+      "line": 35,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@lib/ai/tools/request-suggestions.ts:55",
+      "file": "lib/ai/tools/request-suggestions.ts",
+      "line": 42,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "moonshotai/kimi-k2.5",
+      "file": "lib/ai/models.ts",
+      "line": 6,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "deepseek/deepseek-v3.2",
+      "file": "lib/ai/models.ts",
+      "line": 30,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "openai/gpt-oss-20b",
+      "file": "lib/ai/models.ts",
+      "line": 44,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "openai/gpt-oss-120b",
+      "file": "lib/ai/models.ts",
+      "line": 52,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "xai/grok-4.1-fast-non-reasoning",
+      "file": "lib/ai/models.ts",
+      "line": 60,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "vercel-ai-gateway",
+      "file": "lib/ai/providers.ts",
+      "line": 25,
+      "status": "invoked"
+    }
+  ]
+}

@@ -102,3 +102,28 @@ def test_plain_ts_without_ai_stays_empty(tmp_path: Any) -> None:
     )
     inv = _scan(tmp_path)
     assert not inv.entities
+
+
+def test_ai_sdk_provider_packages_map_to_their_service(tmp_path: Any) -> None:
+    """`@ai-sdk/openai` puts the OpenAI API in the supply chain just as `openai` does."""
+    (tmp_path / "route.ts").write_text(
+        "import { openai } from '@ai-sdk/openai';\n"
+        "import { anthropic } from '@ai-sdk/anthropic';\n"
+        "export const models = [openai('gpt-4.1'), anthropic('claude-sonnet-4-5')];\n",
+        encoding="utf-8",
+    )
+    inv = _scan(tmp_path)
+    services = {s.name: s for s in inv.by_type(EntityType.SERVICE)}
+    assert {"openai", "anthropic"} <= services.keys()
+    assert services["openai"].endpoint == "https://api.openai.com"
+
+
+def test_one_service_entity_spans_every_file_that_reaches_it(tmp_path: Any) -> None:
+    """Identity is the service, not the import site; evidence keeps both files."""
+    (tmp_path / "a.ts").write_text("import { openai } from '@ai-sdk/openai';\n", encoding="utf-8")
+    (tmp_path / "b.ts").write_text("import OpenAI from 'openai';\n", encoding="utf-8")
+    inv = _scan(tmp_path)
+    openai_services = [s for s in inv.by_type(EntityType.SERVICE) if s.name == "openai"]
+    assert len(openai_services) == 1
+    files = {e.file for e in openai_services[0].source_evidence}
+    assert files == {"a.ts", "b.ts"}

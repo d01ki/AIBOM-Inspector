@@ -1,0 +1,12 @@
+{
+  "repository": "psf/requests",
+  "commit": "414f0513c33883adf6f2b46901d4f0b38a455851",
+  "language": "python",
+  "local_path": "benchmark/checkouts/requests",
+  "notes": [
+    "Negative case: a widely used HTTP library with no AI supply chain.",
+    "82 files are read and the expected component set is empty, so any",
+    "component reported here is a false positive."
+  ],
+  "components": []
+}

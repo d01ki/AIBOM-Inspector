@@ -1,0 +1,38 @@
+{
+  "repository": "local/vulnerable-ts-agent",
+  "commit": "fixture-v1",
+  "language": "typescript",
+  "local_path": "tests/fixtures/vulnerable-ts-agent",
+  "notes": [
+    "Hand-curated from the three source files. Components are what an AIBOM ought",
+    "to record, not a transcript of current scanner output.",
+    "Services are deduplicated by identity, so the OpenAI API appears once even",
+    "though it is reached from two files (route.ts via '@ai-sdk/openai' and",
+    "mcp-server.ts via the 'openai' SDK). Per-file coverage of that binding is",
+    "asserted in tests/test_js_mcp_detection.py instead."
+  ],
+  "components": [
+    {"type": "model", "name": "gpt-4.1", "file": "app/api/support/route.ts", "line": 15, "status": "invoked"},
+    {"type": "model", "name": "claude-sonnet-4-5", "file": "src/server.ts", "line": 13, "status": "invoked"},
+    {"type": "model", "name": "gpt-4o-mini", "file": "src/mcp-server.ts", "line": 13, "status": "invoked"},
+
+    {"type": "prompt", "name": "system-prompt@app/api/support/route.ts:16", "file": "app/api/support/route.ts", "line": 14, "status": "invoked"},
+    {"type": "prompt", "name": "user-prompt@app/api/support/route.ts:17", "file": "app/api/support/route.ts", "line": 14, "status": "invoked"},
+    {"type": "prompt", "name": "system-prompt@src/server.ts:14", "file": "src/server.ts", "line": 14, "status": "invoked"},
+    {"type": "prompt", "name": "user-prompt@src/server.ts:15:0", "file": "src/server.ts", "line": 15, "status": "invoked"},
+    {"type": "prompt", "name": "system-prompt@src/mcp-server.ts:15", "file": "src/mcp-server.ts", "line": 15, "status": "invoked"},
+    {"type": "prompt", "name": "user-prompt@src/mcp-server.ts:16:1", "file": "src/mcp-server.ts", "line": 12, "status": "invoked"},
+
+    {"type": "service", "name": "anthropic", "file": "src/server.ts", "line": 3, "status": "invoked"},
+    {"type": "service", "name": "openai", "file": "src/mcp-server.ts", "line": 4, "status": "invoked"},
+
+    {"type": "mcp", "name": "mcp-server@src/mcp-server.ts", "file": "src/mcp-server.ts", "line": 3, "status": "instantiated"},
+
+    {"type": "ai_package", "name": "@ai-sdk/anthropic", "file": "package.json", "line": 7, "status": "declared"},
+    {"type": "ai_package", "name": "@ai-sdk/openai", "file": "package.json", "line": 8, "status": "declared"},
+    {"type": "ai_package", "name": "@anthropic-ai/sdk", "file": "package.json", "line": 9, "status": "declared"},
+    {"type": "ai_package", "name": "@modelcontextprotocol/sdk", "file": "package.json", "line": 10, "status": "declared"},
+    {"type": "ai_package", "name": "ai", "file": "package.json", "line": 11, "status": "declared"},
+    {"type": "ai_package", "name": "openai", "file": "package.json", "line": 14, "status": "declared"}
+  ]
+}

@@ -12,12 +12,21 @@ never retains prompt text or tool argument values.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from aibom.detectors.base import ScanContext
+from aibom.detectors.flow import (
+    FlowTrace,
+    SourceRef,
+    Span,
+    capability_evidence,
+    combine_traces,
+    content_hash,
+    flow_step,
+    sink_evidence,
+    source_evidence,
+)
 from aibom.detectors.javascript.nodes import (
     ArrayExpr,
     AssignExpr,
@@ -47,7 +56,6 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.entities import Prompt, ToolCapability
-from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
 _SUPPORTED_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
@@ -77,19 +85,9 @@ _UNTRUSTED_ENTRYPOINTS = {
 _PRIVILEGED_ROLES = {"system", "developer"}
 
 
-@dataclass(frozen=True)
-class SourceRef:
-    kind: str
-    node: Node
-    symbol: str
-    trust_boundary: str
-
-
-@dataclass(frozen=True)
-class FlowTrace:
-    user_controlled: bool | None
-    sources: tuple[SourceRef, ...] = ()
-    steps: tuple[ResolutionStep, ...] = ()
+def _span(node: Node) -> Span:
+    """Reduce a JS/TS node to the language-agnostic position the analysis uses."""
+    return Span(line=node.line, end_line=node.end_line, column=node.column)
 
 
 @dataclass(frozen=True)
@@ -157,24 +155,29 @@ class PromptFlowJavaScriptDetector:
         static_value = _static_value(module, expression)
         reachable, reachability_path = _reachability(module, call)
 
-        content_hash = (
-            _content_hash(static_value)
+        hashed = (
+            content_hash(static_value)
             if static_value is not None and not trace.sources
             else None
         )
         source = trace.sources[0] if trace.sources else None
-        evidence = [_sink_evidence(context, call, self.detector_id, prompt_input.sink_kind)]
+        evidence = [
+            sink_evidence(
+                context.relative_path, _span(call), self.detector_id, prompt_input.sink_kind
+            )
+        ]
         evidence.extend(
-            _source_evidence(context, item, self.detector_id) for item in trace.sources
+            source_evidence(context.relative_path, item, self.detector_id)
+            for item in trace.sources
         )
-        sink_step = _step(
-            context.relative_path, call, prompt_input.sink_kind, "prompt_sink"
+        sink_step = flow_step(
+            context.relative_path, _span(call), prompt_input.sink_kind, "prompt_sink"
         )
 
         return Prompt(
             name=prompt_input.name,
             kind=prompt_input.kind,
-            content_hash=content_hash,
+            content_hash=hashed,
             source_kind=source.kind if source else None,
             sink_kind=prompt_input.sink_kind,
             trust_boundary=source.trust_boundary if source else None,
@@ -271,7 +274,10 @@ def _prompt_inputs(
 
     if provider == "vercel-ai":
         family = (module.qualified_name(call.callee) or "").rsplit(".", 1)[-1]
+        # The AI SDK renamed the privileged slot from `system` to `instructions`
+        # in v5; both still appear in the wild, and both are privileged.
         add(_prop(options, "system"), "system", f"ai.{family}.system")
+        add(_prop(options, "instructions"), "system", f"ai.{family}.instructions")
         add(_prop(options, "prompt"), "user", f"ai.{family}.prompt")
         found.extend(
             _split_messages(module, _prop(options, "messages"), f"ai.{family}.messages")
@@ -488,8 +494,13 @@ def _tool_capabilities(
                     severity=severity,
                     controlled_parameters=controlled,
                     source_evidence=[
-                        _capability_evidence(
-                            context, node, detector_id, tool.name, kind, qualified
+                        capability_evidence(
+                            context.relative_path,
+                            _span(node),
+                            detector_id,
+                            tool_name=tool.name,
+                            kind=kind,
+                            operation=qualified,
                         )
                     ],
                 )
@@ -681,7 +692,7 @@ class _FlowTracer:
                 return self._source(node, *source)
             traced = self._trace(node.obj, seen, depth + 1)
             if node.computed:
-                return _combine(traced, self._trace(node.prop, seen, depth + 1))
+                return combine_traces(traced, self._trace(node.prop, seen, depth + 1))
             return traced
 
         if isinstance(node, CallExpr):
@@ -693,31 +704,31 @@ class _FlowTracer:
             traces = [self._trace(argument, seen, depth + 1) for argument in node.args]
             if isinstance(node.callee, MemberExpr):
                 traces.append(self._trace(node.callee, seen, depth + 1))
-            return _combine(*traces)
+            return combine_traces(*traces)
 
         if isinstance(node, TemplateLiteral):
-            return _combine(
+            return combine_traces(
                 *(self._trace(item, seen, depth + 1) for item in node.expressions)
             )
 
         if isinstance(node, BinaryExpr):
-            return _combine(
+            return combine_traces(
                 self._trace(node.left, seen, depth + 1),
                 self._trace(node.right, seen, depth + 1),
             )
 
         if isinstance(node, ObjectExpr):
-            return _combine(
+            return combine_traces(
                 *(self._trace(prop.value, seen, depth + 1) for prop in node.properties)
             )
 
         if isinstance(node, ArrayExpr):
-            return _combine(
+            return combine_traces(
                 *(self._trace(item, seen, depth + 1) for item in node.elements)
             )
 
         if isinstance(node, ConditionalExpr):
-            return _combine(
+            return combine_traces(
                 self._trace(node.consequent, seen, depth + 1),
                 self._trace(node.alternate, seen, depth + 1),
             )
@@ -770,7 +781,7 @@ class _FlowTracer:
         boundary: str,
         user_controlled: bool | None,
     ) -> FlowTrace:
-        source = SourceRef(kind, node, symbol, boundary)
+        source = SourceRef(kind, _span(node), symbol, boundary)
         return FlowTrace(
             user_controlled,
             (source,),
@@ -778,7 +789,7 @@ class _FlowTracer:
         )
 
     def _step(self, node: Node, symbol: str | None, operation: str) -> ResolutionStep:
-        return _step(self.module.relative_path, node, symbol, operation)
+        return flow_step(self.module.relative_path, _span(node), symbol, operation)
 
 
 def _named_source(name: str) -> tuple[str, str, str, bool | None] | None:
@@ -846,35 +857,6 @@ def _call_source(name: str) -> tuple[str, str, str, bool | None] | None:
     ):
         return "database", name, "database_to_application", None
     return None
-
-
-def _combine(*traces: FlowTrace) -> FlowTrace:
-    if not traces:
-        return FlowTrace(None)
-    state: bool | None
-    if any(trace.user_controlled is True for trace in traces):
-        state = True
-    elif any(trace.user_controlled is None for trace in traces):
-        state = None
-    else:
-        state = False
-    sources: list[SourceRef] = []
-    steps: list[ResolutionStep] = []
-    source_keys: set[tuple[str, int, str]] = set()
-    step_keys: set[tuple[str, int | None, int | None, str | None, str]] = set()
-    for trace in traces:
-        for source in trace.sources:
-            key = (source.kind, source.node.line, source.symbol)
-            if key not in source_keys:
-                sources.append(source)
-                source_keys.add(key)
-        for step in trace.steps:
-            step_key = (step.file, step.line, step.column, step.symbol, step.operation)
-            if step_key not in step_keys:
-                steps.append(step)
-                step_keys.add(step_key)
-    steps.sort(key=lambda item: 0 if item.operation.startswith("source:") else 1)
-    return FlowTrace(state, tuple(sources), tuple(steps))
 
 
 # ---------------------------------------------------------------------------
@@ -945,71 +927,3 @@ def _reachability(module: JsModule, call: CallExpr) -> tuple[Reachability, list[
         scope = scope.rsplit(".", 1)[0] if "." in scope else ""
     return Reachability.UNKNOWN, []
 
-
-def _content_hash(value: object | None) -> str:
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
-def _step(file: str, node: Node, symbol: str | None, operation: str) -> ResolutionStep:
-    return ResolutionStep(
-        file=file,
-        line=node.line,
-        column=node.column or None,
-        symbol=symbol,
-        value=None,
-        operation=operation,
-    )
-
-
-def _sink_evidence(
-    context: ScanContext, node: Node, detector_id: str, sink_kind: str
-) -> Evidence:
-    return Evidence(
-        file=context.relative_path,
-        line_start=node.line,
-        line_end=node.end_line,
-        column_start=node.column,
-        snippet=f"<prompt sink:{sink_kind}>",
-        matched_pattern="prompt-sink",
-        confidence=0.98,
-        detector_id=detector_id,
-        kind="sink",
-    )
-
-
-def _source_evidence(
-    context: ScanContext, source: SourceRef, detector_id: str
-) -> Evidence:
-    return Evidence(
-        file=context.relative_path,
-        line_start=source.node.line,
-        line_end=source.node.end_line,
-        column_start=source.node.column,
-        snippet=f"<prompt source:{source.kind}>",
-        matched_pattern=f"prompt-source:{source.kind}",
-        confidence=0.9,
-        detector_id=detector_id,
-        kind="source",
-    )
-
-
-def _capability_evidence(
-    context: ScanContext,
-    node: Node,
-    detector_id: str,
-    tool_name: str,
-    kind: str,
-    operation: str,
-) -> Evidence:
-    return Evidence(
-        file=context.relative_path,
-        line_start=node.line,
-        line_end=node.end_line,
-        column_start=node.column,
-        snippet=f"<bound tool capability:{tool_name}:{kind}>",
-        matched_pattern=f"bound-tool-capability:{operation}",
-        confidence=0.98,
-        detector_id=detector_id,
-        kind="capability",
-    )

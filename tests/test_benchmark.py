@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from benchmark.evaluate import evaluate_case, evaluate_suite, render_markdown
 from jsonschema import Draft202012Validator
 
@@ -57,25 +58,45 @@ def test_checked_in_ground_truth_validates_against_schema() -> None:
     schema = json.loads(
         (root / "benchmark/schemas/ground-truth.schema.json").read_text(encoding="utf-8")
     )
-    document = json.loads(
-        (root / "benchmark/ground_truth/vulnerable-ai-app.json").read_text(encoding="utf-8")
-    )
-    Draft202012Validator(schema).validate(document)
+    for path in sorted((root / "benchmark/ground_truth").glob("*.json")):
+        Draft202012Validator(schema).validate(json.loads(path.read_text(encoding="utf-8")))
     for public_path in sorted((root / "benchmark/ground_truth_public").glob("*.json")):
         Draft202012Validator(schema).validate(json.loads(public_path.read_text(encoding="utf-8")))
 
 
-def test_checked_in_fixture_matches_ground_truth() -> None:
+@pytest.mark.parametrize(
+    ("case", "expected_true_positives"),
+    [("vulnerable-ai-app", 20), ("vulnerable-ts-agent", 18)],
+)
+def test_checked_in_fixture_matches_ground_truth(
+    case: str, expected_true_positives: int
+) -> None:
     root = Path(__file__).parents[1]
     document = json.loads(
-        (root / "benchmark/ground_truth/vulnerable-ai-app.json").read_text(encoding="utf-8")
+        (root / f"benchmark/ground_truth/{case}.json").read_text(encoding="utf-8")
     )
     result = evaluate_case(document, root / document["local_path"])
     assert result["overall"] == {
-        "true_positives": 20,
+        "true_positives": expected_true_positives,
         "false_positives": 0,
         "false_negatives": 0,
         "precision": 1.0,
         "recall": 1.0,
         "f1": 1.0,
     }
+
+
+def test_metrics_are_reported_per_language() -> None:
+    """A blended score would let strong Python results mask weak TypeScript ones."""
+    root = Path(__file__).parents[1]
+    cases = []
+    for name in ("vulnerable-ai-app", "vulnerable-ts-agent"):
+        document = json.loads(
+            (root / f"benchmark/ground_truth/{name}.json").read_text(encoding="utf-8")
+        )
+        cases.append((document, root / document["local_path"]))
+    suite = evaluate_suite(cases)
+    assert set(suite["languages"]) == {"python", "typescript"}
+    assert suite["languages"]["typescript"]["repository_count"] == 1
+    assert suite["languages"]["typescript"]["true_positives"] == 18
+    assert "## By language" in render_markdown(suite)

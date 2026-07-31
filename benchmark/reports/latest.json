@@ -1,17 +1,37 @@
 {
-  "schema_version": 1,
-  "repository_count": 1,
+  "schema_version": 2,
+  "repository_count": 2,
   "overall": {
-    "true_positives": 20,
+    "true_positives": 38,
     "false_positives": 0,
     "false_negatives": 0,
     "precision": 1.0,
     "recall": 1.0,
     "f1": 1.0
   },
+  "languages": {
+    "python": {
+      "true_positives": 20,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "repository_count": 1
+    },
+    "typescript": {
+      "true_positives": 18,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "repository_count": 1
+    }
+  },
   "categories": {
     "models": {
-      "true_positives": 5,
+      "true_positives": 8,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -19,7 +39,7 @@
       "f1": 1.0
     },
     "services": {
-      "true_positives": 2,
+      "true_positives": 4,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -27,7 +47,7 @@
       "f1": 1.0
     },
     "prompts": {
-      "true_positives": 4,
+      "true_positives": 10,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -51,12 +71,12 @@
       "f1": null
     },
     "mcp": {
-      "true_positives": 0,
+      "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "precision": null,
-      "recall": null,
-      "f1": null
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
     },
     "datasets": {
       "true_positives": 1,
@@ -75,7 +95,7 @@
       "f1": 1.0
     },
     "ai_packages": {
-      "true_positives": 5,
+      "true_positives": 11,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -87,6 +107,7 @@
     {
       "repository": "local/vulnerable-ai-app",
       "commit": "fixture-v1",
+      "language": "python",
       "overall": {
         "true_positives": 20,
         "false_positives": 0,
@@ -162,6 +183,95 @@
         },
         "ai_packages": {
           "true_positives": 5,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "false_positives": [],
+      "false_negatives": []
+    },
+    {
+      "repository": "local/vulnerable-ts-agent",
+      "commit": "fixture-v1",
+      "language": "typescript",
+      "overall": {
+        "true_positives": 18,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "categories": {
+        "models": {
+          "true_positives": 3,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "services": {
+          "true_positives": 2,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "prompts": {
+          "true_positives": 6,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "agents": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "tools": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "mcp": {
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "datasets": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "model_files": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "ai_packages": {
+          "true_positives": 6,
           "false_positives": 0,
           "false_negatives": 0,
           "precision": 1.0,
