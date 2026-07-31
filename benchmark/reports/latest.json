@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "repository_count": 2,
+  "repository_count": 3,
   "overall": {
-    "true_positives": 38,
+    "true_positives": 51,
     "false_positives": 0,
     "false_negatives": 0,
     "precision": 1.0,
@@ -10,6 +10,15 @@
     "f1": 1.0
   },
   "languages": {
+    "mixed": {
+      "true_positives": 13,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "repository_count": 1
+    },
     "python": {
       "true_positives": 20,
       "false_positives": 0,
@@ -31,7 +40,7 @@
   },
   "categories": {
     "models": {
-      "true_positives": 8,
+      "true_positives": 11,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -39,7 +48,7 @@
       "f1": 1.0
     },
     "services": {
-      "true_positives": 4,
+      "true_positives": 5,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -47,7 +56,7 @@
       "f1": 1.0
     },
     "prompts": {
-      "true_positives": 10,
+      "true_positives": 13,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -95,7 +104,7 @@
       "f1": 1.0
     },
     "ai_packages": {
-      "true_positives": 11,
+      "true_positives": 17,
       "false_positives": 0,
       "false_negatives": 0,
       "precision": 1.0,
@@ -104,6 +113,95 @@
     }
   },
   "repositories": [
+    {
+      "repository": "local/multi-language-agent",
+      "commit": "fixture-v1",
+      "language": "mixed",
+      "overall": {
+        "true_positives": 13,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "categories": {
+        "models": {
+          "true_positives": 3,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "services": {
+          "true_positives": 1,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "prompts": {
+          "true_positives": 3,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "agents": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "tools": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "mcp": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "datasets": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "model_files": {
+          "true_positives": 0,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null
+        },
+        "ai_packages": {
+          "true_positives": 6,
+          "false_positives": 0,
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "false_positives": [],
+      "false_negatives": []
+    },
     {
       "repository": "local/vulnerable-ai-app",
       "commit": "fixture-v1",

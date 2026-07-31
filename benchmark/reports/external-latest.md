@@ -1,6 +1,6 @@
 # AIBOM Inspector benchmark
 
-Repositories evaluated: 6
+Repositories evaluated: 7
 
 | Category | Precision | Recall | F1 | TP | FP | FN |
 |---|---:|---:|---:|---:|---:|---:|
@@ -19,6 +19,7 @@ Repositories evaluated: 6
 
 | Language | Repos | Precision | Recall | F1 | TP | FP | FN |
 |---|---:|---:|---:|---:|---:|---:|---:|
+| go | 1 | N/A | N/A | N/A | 0 | 0 | 0 |
 | python | 4 | 1.0000 | 1.0000 | 1.0000 | 11 | 0 | 0 |
 | typescript | 2 | 1.0000 | 0.7857 | 0.8800 | 22 | 0 | 6 |
 

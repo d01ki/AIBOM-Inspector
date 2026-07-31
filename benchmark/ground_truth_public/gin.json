@@ -1,0 +1,14 @@
+{
+  "repository": "gin-gonic/gin",
+  "commit": "34dac209ffb6ef85cc78c5d217bbb7ad001d68fd",
+  "language": "go",
+  "local_path": "benchmark/checkouts/gin",
+  "notes": [
+    "Negative case for the Phase 1 pattern layer: a large, widely used Go",
+    "codebase with no AI supply chain.",
+    "Its value is precision. 121 files are read and 35 Go modules are inventoried",
+    "from go.mod, so any AI component reported here is a false positive - the",
+    "risk that comes with reading .go/.java/.rs/.rb/.cs/.php with regex rules."
+  ],
+  "components": []
+}

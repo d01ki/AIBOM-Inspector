@@ -1,5 +1,23 @@
 # Known limitations
 
+## Language coverage is two-tier
+
+- **Python and JavaScript/TypeScript** are parsed into a syntax tree, so they
+  get prompt-flow, blast-radius and drift analysis.
+- **Go, Java, Kotlin, Rust, Ruby, C#, PHP, Swift and Scala** are read by the
+  pattern layer only: dependencies, model ids, provider SDK imports, prompt
+  constants and secrets. They **never** yield an impact path, an exposure path
+  or a drift verdict, because those claims need a parse tree to be honest.
+  Anything else — every other language, and any construct the regex rules do
+  not name — is not analyzed at all.
+- Dependency manifests are parsed for PyPI, npm, Go, crates.io, Maven,
+  RubyGems, Packagist and NuGet. Lockfiles are not read, so transitive
+  dependencies are absent unless the manifest names them; `go.mod` is the
+  exception, since it lists resolved versions.
+- Maven version resolution follows a single `${property}` indirection in the
+  same POM. Parent POMs, `dependencyManagement`, BOM imports and Gradle version
+  catalogs are not resolved, so some versions stay unknown.
+
 - Reachability is same-file. Imported calls, dependency injection, dynamic
   dispatch, reflection, monkey patching, and framework-generated routes can
   produce `unknown` or conservative `false` results.

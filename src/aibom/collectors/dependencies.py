@@ -129,9 +129,109 @@ _AI_NPM_PREFIXES = (
     "@modelcontextprotocol/",
 )
 
+# Curated per-ecosystem AI allowlists. Exact names plus prefixes - the same
+# precision-first shape as PyPI/npm. A substring match would flag things like
+# "openapi-generator", and the ai flag drives the risk score.
+_AI_GO = {
+    "github.com/openai/openai-go",
+    "github.com/sashabaranov/go-openai",
+    "github.com/anthropics/anthropic-sdk-go",
+    "github.com/tmc/langchaingo",
+    "github.com/google/generative-ai-go",
+    "github.com/ollama/ollama",
+    "github.com/mark3labs/mcp-go",
+    "github.com/cohere-ai/cohere-go",
+}
+_AI_GO_PREFIXES = ("github.com/tmc/langchaingo/", "github.com/modelcontextprotocol/")
+
+_AI_CARGO = {
+    "async-openai",
+    "openai-api-rs",
+    "anthropic-sdk",
+    "langchain-rust",
+    "tch",
+    "ort",
+    "tokenizers",
+    "hf-hub",
+    "llama-cpp-2",
+    "rmcp",
+}
+_AI_CARGO_PREFIXES = ("candle-", "llm-chain", "rig-")
+
+_AI_MAVEN = {
+    "com.theokanning.openai-gpt3-java:service",
+}
+_AI_MAVEN_PREFIXES = (
+    "dev.langchain4j:",
+    "ai.djl:",
+    "org.deeplearning4j:",
+    "io.modelcontextprotocol:",
+    "org.springframework.ai:",
+    "com.openai:",
+    "com.anthropic:",
+)
+
+_AI_RUBYGEMS = {
+    "ruby-openai",
+    "anthropic",
+    "ruby-anthropic",
+    "informers",
+    "transformers-rb",
+    "mcp",
+}
+_AI_RUBYGEMS_PREFIXES = ("langchainrb",)
+
+_AI_PACKAGIST = {
+    "theodo-group/llphant",
+    "anthropic-php/anthropic-sdk-php",
+    "logiscape/mcp-sdk-php",
+}
+_AI_PACKAGIST_PREFIXES = ("openai-php/", "llm-agents/")
+
+_AI_NUGET = {
+    "openai",
+    "anthropic.sdk",
+    "langchain",
+    "modelcontextprotocol",
+    "ollamasharp",
+}
+_AI_NUGET_PREFIXES = ("microsoft.semantickernel", "microsoft.ml", "langchain.", "azure.ai.")
+
+_MANIFEST_NAMES = {
+    "pyproject.toml",
+    "pipfile",
+    "package.json",
+    "go.mod",
+    "cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gemfile",
+    "composer.json",
+}
+
 _RE_REQ = re.compile(
     r"""^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*"""
     r"""(?:(===|==|~=|>=|<=|!=|>|<)\s*([A-Za-z0-9][A-Za-z0-9._*+!-]*))?"""
+)
+
+# go.mod: "require github.com/x/y v1.2.3" and entries inside a require block.
+_RE_GO_REQUIRE = re.compile(
+    r"""^\s*(?:require\s+)?([A-Za-z0-9][\w.\-]*(?:\.[A-Za-z]{2,})?/[\w.\-/~]+)\s+(v[\w.\-+]+)"""
+)
+# Gemfile: gem "name", "~> 1.2"
+_RE_GEMFILE = re.compile(
+    r"""^\s*gem\s+["']([^"']+)["'](?:\s*,\s*["']([^"']+)["'])?"""
+)
+# Gradle: implementation("group:artifact:version") or 'group:artifact:version'
+_RE_GRADLE = re.compile(
+    r"""["']([A-Za-z0-9][\w.\-]*:[\w.\-]+)(?::([\w.\-+]+))?["']"""
+)
+# csproj: <PackageReference Include="Name" Version="1.2.3" />
+_RE_CSPROJ = re.compile(
+    r"""<PackageReference\s+[^>]*Include\s*=\s*["']([^"']+)["']"""
+    r"""(?:[^>]*Version\s*=\s*["']([^"']+)["'])?""",
+    re.IGNORECASE,
 )
 _RE_PEP508_NAME = re.compile(r"""^\s*([A-Za-z0-9][A-Za-z0-9._-]*)""")
 _RE_PIN = re.compile(r"""===?\s*([^,;\s]+)""")
@@ -168,6 +268,36 @@ def _is_ai_npm(name: str) -> bool:
     return n in _AI_NPM or n.startswith(_AI_NPM_PREFIXES)
 
 
+# ecosystem -> (exact names, name prefixes), all compared lowercase.
+_AI_BY_ECOSYSTEM: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {
+    "go": (frozenset(_AI_GO), _AI_GO_PREFIXES),
+    "crates.io": (frozenset(_AI_CARGO), _AI_CARGO_PREFIXES),
+    "maven": (frozenset(_AI_MAVEN), _AI_MAVEN_PREFIXES),
+    "rubygems": (frozenset(_AI_RUBYGEMS), _AI_RUBYGEMS_PREFIXES),
+    "packagist": (frozenset(_AI_PACKAGIST), _AI_PACKAGIST_PREFIXES),
+    "nuget": (frozenset(_AI_NUGET), _AI_NUGET_PREFIXES),
+}
+
+
+def _is_ai_package(name: str, ecosystem: str) -> bool:
+    """Decide the AI flag for any supported ecosystem."""
+    eco = ecosystem.strip().lower()
+    if eco == "pypi":
+        return _is_ai_pypi(name)
+    if eco == "npm":
+        return _is_ai_npm(name)
+    table = _AI_BY_ECOSYSTEM.get(eco)
+    if table is None:
+        return False
+    exact, prefixes = table
+    normalized = name.strip().lower()
+    # Go modules are often versioned (".../v2"); the suffix is not part of the
+    # identity for allowlist purposes.
+    if eco == "go":
+        normalized = re.sub(r"/v[0-9]+$", "", normalized)
+    return normalized in exact or normalized.startswith(prefixes)
+
+
 class DependencyCollector(Collector):
     """Scan dependency manifests for AI/ML packages."""
 
@@ -191,6 +321,20 @@ class DependencyCollector(Collector):
                     self._parse_pipfile(inventory, path, rel)
                 elif name == "package.json":
                     self._parse_package_json(inventory, path, rel)
+                elif name == "go.mod":
+                    self._parse_go_mod(inventory, path, rel)
+                elif name == "cargo.toml":
+                    self._parse_cargo_toml(inventory, path, rel)
+                elif name == "pom.xml":
+                    self._parse_pom(inventory, path, rel)
+                elif name in {"build.gradle", "build.gradle.kts"}:
+                    self._parse_gradle(inventory, path, rel)
+                elif name == "gemfile":
+                    self._parse_gemfile(inventory, path, rel)
+                elif name == "composer.json":
+                    self._parse_composer(inventory, path, rel)
+                elif name.endswith(".csproj"):
+                    self._parse_csproj(inventory, path, rel)
                 else:
                     continue
             except (OSError, ValueError):
@@ -210,11 +354,11 @@ class DependencyCollector(Collector):
             if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
                 continue
             n = path.name.lower()
-            if (n.startswith("requirements") and n.endswith(".txt")) or n in {
-                "pyproject.toml",
-                "pipfile",
-                "package.json",
-            }:
+            if (
+                (n.startswith("requirements") and n.endswith(".txt"))
+                or n.endswith(".csproj")
+                or n in _MANIFEST_NAMES
+            ):
                 out.append(path)
         return sorted(out)
 
@@ -238,7 +382,7 @@ class DependencyCollector(Collector):
         version: str | None,
         pinned: bool,
     ) -> None:
-        ai = _is_ai_pypi(name) if ecosystem == "PyPI" else _is_ai_npm(name)
+        ai = _is_ai_package(name, ecosystem)
         ev = Evidence(
             file=rel,
             line_start=lineno,
@@ -334,6 +478,149 @@ class DependencyCollector(Collector):
                     pinned,
                 )
 
+    # -- other ecosystems ------------------------------------------------------
+
+    def _parse_go_mod(self, inventory: Inventory, path: Path, rel: str) -> None:
+        """go.mod: single `require` lines and `require ( ... )` blocks."""
+        text = path.read_text(encoding="utf-8", errors="replace")
+        in_block = False
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.split("//", 1)[0].strip()
+            if not stripped:
+                continue
+            if stripped.startswith("require") and stripped.endswith("("):
+                in_block = True
+                continue
+            if in_block and stripped == ")":
+                in_block = False
+                continue
+            if not in_block and not stripped.startswith("require "):
+                continue
+            match = _RE_GO_REQUIRE.match(stripped)
+            if match:
+                # Go versions in go.mod are exact resolved versions.
+                self._emit(
+                    inventory, rel, lineno, line, match.group(1), "Go", match.group(2), True
+                )
+
+    def _parse_cargo_toml(self, inventory: Inventory, path: Path, rel: str) -> None:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        data = _load_toml(raw)
+        if data is None:
+            return
+        lines = raw.splitlines()
+        for section in ("dependencies", "dev-dependencies", "build-dependencies"):
+            for name, spec in (data.get(section, {}) or {}).items():
+                version, pinned = _cargo_version(spec)
+                self._emit(
+                    inventory,
+                    rel,
+                    _find_line(lines, name),
+                    f"{name} = {spec}",
+                    str(name),
+                    "crates.io",
+                    version,
+                    pinned,
+                )
+
+    def _parse_pom(self, inventory: Inventory, path: Path, rel: str) -> None:
+        """Maven POM. Parsed with the stdlib XML reader, entities disabled."""
+        from xml.etree import ElementTree  # noqa: S405 - defused below
+
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        lines = raw.splitlines()
+        try:
+            # No custom parser: ElementTree ignores DTDs and does not expand
+            # external entities, so a hostile pom cannot reach the filesystem.
+            root = ElementTree.fromstring(raw)  # noqa: S314
+        except ElementTree.ParseError:
+            return
+        namespace = root.tag.partition("}")[0].lstrip("{") if root.tag.startswith("{") else ""
+        prefix = f"{{{namespace}}}" if namespace else ""
+        properties = {
+            child.tag[len(prefix):]: (child.text or "").strip()
+            for child in root.findall(f"{prefix}properties/*")
+        }
+        for dependency in root.iter(f"{prefix}dependency"):
+            group = dependency.findtext(f"{prefix}groupId", default="").strip()
+            artifact = dependency.findtext(f"{prefix}artifactId", default="").strip()
+            if not group or not artifact:
+                continue
+            version = _resolve_maven_version(
+                dependency.findtext(f"{prefix}version", default="").strip(), properties
+            )
+            self._emit(
+                inventory,
+                rel,
+                _find_line(lines, artifact),
+                f"{group}:{artifact}",
+                f"{group}:{artifact}",
+                "Maven",
+                version or None,
+                bool(version),
+            )
+
+    def _parse_gradle(self, inventory: Inventory, path: Path, rel: str) -> None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.split("//", 1)[0]
+            for match in _RE_GRADLE.finditer(stripped):
+                coordinate, version = match.group(1), match.group(2)
+                if coordinate.count(":") != 1:
+                    continue
+                self._emit(
+                    inventory, rel, lineno, line, coordinate, "Maven", version, bool(version)
+                )
+
+    def _parse_gemfile(self, inventory: Inventory, path: Path, rel: str) -> None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.split("#", 1)[0]
+            match = _RE_GEMFILE.match(stripped)
+            if not match:
+                continue
+            constraint = match.group(2)
+            version, pinned = _gem_version(constraint)
+            self._emit(
+                inventory, rel, lineno, line, match.group(1), "RubyGems", version, pinned
+            )
+
+    def _parse_composer(self, inventory: Inventory, path: Path, rel: str) -> None:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(raw)
+        lines = raw.splitlines()
+        for section in ("require", "require-dev"):
+            for name, spec in (data.get(section, {}) or {}).items():
+                if "/" not in str(name):  # php, ext-*, composer-plugin-api
+                    continue
+                version, pinned = _npm_version(str(spec))
+                self._emit(
+                    inventory,
+                    rel,
+                    _find_line(lines, f'"{name}"'),
+                    f'"{name}": "{spec}"',
+                    str(name),
+                    "Packagist",
+                    version,
+                    pinned,
+                )
+
+    def _parse_csproj(self, inventory: Inventory, path: Path, rel: str) -> None:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        lines = raw.splitlines()
+        for match in _RE_CSPROJ.finditer(raw):
+            name, version = match.group(1), match.group(2)
+            self._emit(
+                inventory,
+                rel,
+                _find_line(lines, name),
+                match.group(0)[:200],
+                name,
+                "NuGet",
+                version,
+                bool(version),
+            )
+
     # -- pep508 helpers --------------------------------------------------------
 
     def _emit_pep508(self, inventory: Inventory, rel: str, lines: list[str], spec: str) -> None:
@@ -395,6 +682,41 @@ def _npm_version(spec: str) -> tuple[str | None, bool]:
         return text, True
     m = re.search(r"""(\d+\.\d+(?:\.\d+)?)""", text)
     return (m.group(1), False) if m else (None, False)
+
+
+def _cargo_version(spec: Any) -> tuple[str | None, bool]:
+    """Cargo deps are either "1.2.3" or a table with a version key."""
+    raw = str(spec.get("version", "") or "") if isinstance(spec, dict) else str(spec)
+    text = raw.strip()
+    if not text:
+        return None, False
+    # A bare "1.2.3" in Cargo means "^1.2.3", so it is not an exact pin;
+    # "=1.2.3" is.
+    if text.startswith("="):
+        exact = text[1:].strip()
+        return (exact, True) if exact else (None, False)
+    match = re.search(r"""(\d+(?:\.\d+){0,2})""", text)
+    return (match.group(1), False) if match else (None, False)
+
+
+def _gem_version(constraint: str | None) -> tuple[str | None, bool]:
+    """Gemfile: a bare "1.2.3" pins; "~> 1.2" and ">= 1.2" do not."""
+    if not constraint:
+        return None, False
+    text = constraint.strip()
+    if re.fullmatch(r"""\d+(?:\.\d+){0,2}""", text):
+        return text, True
+    match = re.search(r"""(\d+(?:\.\d+){0,2})""", text)
+    return (match.group(1), False) if match else (None, False)
+
+
+def _resolve_maven_version(version: str, properties: dict[str, str]) -> str:
+    """Expand a single ${property} indirection; leave anything else alone."""
+    text = version.strip()
+    match = re.fullmatch(r"""\$\{([^}]+)\}""", text)
+    if match:
+        return properties.get(match.group(1), "").strip()
+    return text
 
 
 def _find_line(lines: list[str], needle: str) -> int:
