@@ -17,6 +17,7 @@ from aibom.collectors.repo import RepoCollector
 from aibom.config import ignored
 from aibom.inventory import Inventory, ScanMetadata
 from aibom.models.findings import Finding, SecurityScore
+from aibom.policy import production_view
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
 from aibom.risk.engine import evaluate as evaluate_risk
 from aibom.risk.engine import order_findings
@@ -74,10 +75,11 @@ def run_scan(
 
     apply_confidence_filter(inventory, min_confidence)
 
-    findings = evaluate_risk(inventory)
+    risk_inventory = production_view(inventory)
+    findings = evaluate_risk(risk_inventory)
     if vulns:
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
-        findings = order_findings(findings + OSVMapper().map(inventory))
+        findings = order_findings(findings + OSVMapper().map(risk_inventory))
     if ignore_rules:
         findings = [f for f in findings if not ignored(f.rule_id, ignore_rules)]
     score = score_findings(findings)

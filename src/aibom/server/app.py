@@ -15,14 +15,19 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from aibom import __version__
+from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
+from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
+from aibom.export.sarif import to_sarif
 from aibom.graph import build_graph
+from aibom.policy import production_ai_component_count, production_view
 from aibom.report.html import render_html
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
 from aibom.service import ScanResult, run_scan
 
-# A cloner takes a URL and returns a context manager yielding the checkout path.
-Cloner = Callable[[str], AbstractContextManager[Path]]
+# A cloner takes a URL (and optional git ref) and returns a context manager
+# yielding the checkout path.
+Cloner = Callable[..., AbstractContextManager[Path]]
 
 
 class ScanRequest(BaseModel):
@@ -40,6 +45,20 @@ class ScanRequest(BaseModel):
     vulns: bool = Field(
         default=True, description="Map pinned dependencies to known vulnerabilities (OSV)."
     )
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class DiffRequest(BaseModel):
+    """Body for ``POST /api/diff`` — one repository at two revisions.
+
+    This is the web equivalent of ``aibom diff``: it answers whether a revision
+    introduced a new untrusted-to-privileged path, even when the component
+    inventory is byte-for-byte identical.
+    """
+
+    repo_url: str = Field(description="Public repo URL, e.g. https://github.com/owner/repo")
+    base_ref: str = Field(description="Baseline branch, tag, or commit SHA.")
+    head_ref: str = Field(description="Candidate branch, tag, or commit SHA.")
     min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -64,6 +83,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     port = os.environ.get("AIBOM_PORT") or os.environ.get("PORT") or "8000"
     print(
         f"\n  AIBOM Inspector is ready -- open  http://localhost:{port}  in your browser\n"
+        "  Quick demo: click \"Run built-in impact demo\" (no URL or network needed)\n"
+        "  CLI demo:   docker compose run --rm demo\n"
         f"  (from another machine: http://<this-host's-IP>:{port})\n",
         flush=True,
     )
@@ -95,6 +116,11 @@ def create_app() -> FastAPI:
         result = _scan(req, cloner)
         return _to_payload(req.repo_url, result)
 
+    @app.post("/api/demo")
+    def demo_scan() -> dict[str, Any]:
+        result = _run_demo()
+        return _to_payload("built-in://impact-demo", result)
+
     @app.post("/api/report", response_class=HTMLResponse)
     def report(
         req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
@@ -103,8 +129,102 @@ def create_app() -> FastAPI:
         html = render_html(result.inventory, result.findings, result.score)
         return HTMLResponse(content=html)
 
+    @app.post("/api/demo/report", response_class=HTMLResponse)
+    def demo_report() -> HTMLResponse:
+        result = _run_demo()
+        return HTMLResponse(
+            content=render_html(result.inventory, result.findings, result.score)
+        )
+
+    @app.post("/api/diff")
+    def diff(
+        req: DiffRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
+    ) -> dict[str, Any]:
+        display = _validated_url(req.repo_url)
+        try:
+            with cloner(req.repo_url, ref=req.base_ref) as base_path:
+                baseline = run_scan(
+                    base_path,
+                    min_confidence=req.min_confidence,
+                    display_target=f"{display}@{req.base_ref}",
+                )
+            with cloner(req.repo_url, ref=req.head_ref) as head_path:
+                candidate = run_scan(
+                    head_path,
+                    min_confidence=req.min_confidence,
+                    display_target=f"{display}@{req.head_ref}",
+                )
+        except CloneError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _to_drift_payload(baseline, candidate)
+
+    @app.post("/api/diff/demo")
+    def diff_demo(language: str = "python") -> dict[str, Any]:
+        pair = ts_drift_demo_paths() if language == "typescript" else drift_demo_paths()
+        if pair is None:
+            raise HTTPException(
+                status_code=503, detail=f"the built-in {language} drift demo is unavailable"
+            )
+        baseline_path, candidate_path = pair
+        baseline = run_scan(
+            baseline_path, display_target=f"built-in://drift/{language}/baseline"
+        )
+        candidate = run_scan(
+            candidate_path, display_target=f"built-in://drift/{language}/candidate"
+        )
+        return _to_drift_payload(baseline, candidate)
+
+    @app.post("/api/sarif")
+    def sarif(
+        req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
+    ) -> dict[str, Any]:
+        return to_sarif(_scan(req, cloner).findings)
+
+    @app.post("/api/demo/sarif")
+    def demo_sarif() -> dict[str, Any]:
+        return to_sarif(_run_demo().findings)
+
     _mount_frontend(app)
     return app
+
+
+def _validated_url(url: str) -> str:
+    try:
+        return normalize_repo_url(url)
+    except CloneError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _to_drift_payload(baseline: ScanResult, candidate: ScanResult) -> dict[str, Any]:
+    """Drift plus the component counts that prove an inventory stayed identical."""
+    report = compare_scan_results(baseline, candidate)
+    return {
+        "drift": report.model_dump(),
+        "baseline": _revision_summary(baseline),
+        "candidate": _revision_summary(candidate),
+        "components_identical": _component_signature(baseline)
+        == _component_signature(candidate),
+    }
+
+
+def _revision_summary(result: ScanResult) -> dict[str, Any]:
+    inv = result.inventory
+    return {
+        "target": inv.metadata.target,
+        "counts": inv.counts(),
+        "production_ai_components": production_ai_component_count(inv),
+        "score": result.score.model_dump() | {"grade": result.score.grade},
+        "findings": len(result.findings),
+    }
+
+
+def _component_signature(result: ScanResult) -> list[list[str]]:
+    """Every non-prompt component, so 'same parts, new behavior' is checkable."""
+    return sorted(
+        [entity.type.value, entity.name, str(getattr(entity, "version", "") or "")]
+        for entity in result.inventory.entities
+        if entity.type.value != "prompt"
+    )
 
 
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
@@ -129,13 +249,34 @@ def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _run_demo() -> ScanResult:
+    path = impact_demo_path()
+    if path is None:
+        raise HTTPException(status_code=503, detail="built-in impact demo is unavailable")
+    return run_scan(
+        path,
+        resolve=False,
+        vulns=False,
+        display_target="built-in://impact-demo",
+    )
+
+
 def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
     inv = result.inventory
+    policy_inventory = production_view(inv)
     return {
         "repo_url": repo_url,
         "metadata": inv.metadata.model_dump(),
         "stats": inv.stats.model_dump(),
         "counts": inv.counts(),
+        "analysis_scope": {
+            "risk_context": "production",
+            "production_counts": policy_inventory.counts(),
+            "production_ai_components": production_ai_component_count(inv),
+            "excluded_non_production_entities": (
+                len(inv.entities) - len(policy_inventory.entities)
+            ),
+        },
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": [f.model_dump() for f in result.findings],
         "graph": build_graph(inv, result.findings),

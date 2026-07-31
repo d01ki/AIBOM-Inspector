@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from aibom.inventory import Inventory
 from aibom.models.findings import Finding
+from aibom.policy import production_view
 from aibom.risk.rules import ALL_RULES, Rule
 
 
@@ -14,6 +15,7 @@ class RiskEngine:
         self.rules = rules if rules is not None else list(ALL_RULES)
 
     def evaluate(self, inventory: Inventory) -> list[Finding]:
+        inventory = production_view(inventory)
         findings: list[Finding] = []
         for rule in self.rules:
             findings.extend(rule(inventory))

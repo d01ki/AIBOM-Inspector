@@ -12,6 +12,7 @@ from math import cos, pi, sin
 from aibom.graph import build_graph
 from aibom.inventory import Inventory
 from aibom.models.findings import Finding, SecurityScore, Severity
+from aibom.policy import production_view
 
 _SEVERITY_COLOR = {
     Severity.CRITICAL: "#b3123b",
@@ -31,6 +32,8 @@ body { margin: 0; font: 15px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Ari
 h1 { font-size: 24px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 36px 0 12px; }
 .sub { color: #5a6472; margin: 0 0 24px; font-size: 13px; word-break: break-all; }
+.scope-note { margin: -12px 0 20px; padding: 9px 11px; border: 1px solid #d8dee8;
+  border-radius: 7px; background: #f8fafc; color: #4b5563; font-size: 12px; }
 .cards { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
 .score { flex: 0 0 180px; background: #fff; border-radius: 12px; padding: 20px; text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -67,6 +70,17 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; font-size: 12p
   color: #5a6472; font-size: 12px; }
 .graph-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .graph-legend i { width: 10px; height: 10px; border-radius: 50%; }
+.exposure-paths { display: grid; gap: 8px; margin: 0 0 12px; }
+.exposure-path { background: #fff; border: 1px solid #e1e5ea; border-left: 4px solid #6b7280;
+  border-radius: 8px; padding: 10px 12px; font-size: 12px; }
+.exposure-path.privileged { border-left-color: #d64500; }
+.exposure-path strong { display: block; margin-bottom: 3px; }
+.exposure-path .meta { color: #5a6472; margin-left: 6px; }
+.impact-paths { display: grid; gap: 10px; margin: 0 0 14px; }
+.impact-path { background: #fff7f8; border: 1px solid #d7b2b7; border-left: 5px solid #b3123b;
+  border-radius: 8px; padding: 12px 14px; font-size: 12px; }
+.impact-path strong { display: block; margin-bottom: 4px; color: #7e2532; }
+.impact-path .route { display: block; margin-bottom: 4px; font-weight: 650; }
 footer { margin-top: 40px; color: #8a929e; font-size: 12px; }
 """
 
@@ -92,10 +106,14 @@ def render_html(inventory: Inventory, findings: list[Finding], score: SecuritySc
         f"<p class='sub'>{escape(meta.target)} · "
         f"{escape(meta.tool)} {escape(meta.tool_version)} · {escape(meta.created_at)}"
         f"{_stats_suffix(inventory)}</p>",
+        _scope_notice(inventory),
         # "Nothing found" must not read as a triumphant 100/A.
         _score_cards(score)
-        if inventory.has_ai_components()
-        else "<div class='empty'>No AI components detected — nothing to score.</div>",
+        if production_view(inventory).has_ai_components()
+        else (
+            "<div class='empty'>No production AI components detected — nothing to score. "
+            "Test/example/docs components remain in the inventory.</div>"
+        ),
         _severity_chips(score),
         _findings_section(findings),
         _graph_section(inventory, findings),
@@ -119,6 +137,21 @@ def _stats_suffix(inventory: Inventory) -> str:
     if st.manifests_parsed:
         parts += f" · manifests: {escape(', '.join(st.manifests_parsed))}"
     return parts
+
+
+def _scope_notice(inventory: Inventory) -> str:
+    policy_inventory = production_view(inventory)
+    excluded = len(inventory.entities) - len(policy_inventory.entities)
+    suffix = (
+        f" {excluded} test/example/docs component(s) remain in the inventory "
+        "but are excluded from findings, score, and graph."
+        if excluded
+        else " No non-production components were excluded."
+    )
+    return (
+        "<p class='scope-note'><strong>Risk scope: production.</strong>"
+        f"{escape(suffix)}</p>"
+    )
 
 
 def _score_cards(score: SecurityScore) -> str:
@@ -193,7 +226,62 @@ def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
     graph = build_graph(inventory, findings)
     nodes = graph["nodes"]
     if not nodes:
-        return "<h2>Dependency context</h2><div class='empty'>No components to graph.</div>"
+        return (
+            "<h2>Trust-boundary and dependency context</h2>"
+            "<div class='empty'>No components to graph.</div>"
+        )
+
+    exposure_markup: list[str] = []
+    for path in graph.get("exposure_paths", []):
+        models = ", ".join(path.get("model_names", [])) or "unresolved model"
+        label = (
+            f"{path['source_kind']} &rarr; {path['sink_kind']} &rarr; {models}"
+        )
+        heading = (
+            "Privileged prompt exposure"
+            if path.get("privileged")
+            else "Expected user-input path"
+        )
+        css_class = "exposure-path privileged" if path.get("privileged") else "exposure-path"
+        evidence = path.get("source_evidence", [])
+        location = ""
+        if evidence:
+            first = evidence[0]
+            location = f"{first['file']}:{first['line_start']}"
+        exposure_markup.append(
+            f"<div class='{css_class}'><strong>{heading}</strong>"
+            f"<code>{escape(label)}</code>"
+            f"<span class='meta'>{escape(path['trust_boundary'])}"
+            f"{' &middot; ' + escape(location) if location else ''}</span></div>"
+        )
+
+    impact_markup: list[str] = []
+    for path in graph.get("impact_paths", []):
+        models = ", ".join(path.get("model_names", [])) or "unresolved model"
+        tools = ", ".join(path.get("tool_names", [])) or "unresolved tool"
+        route = (
+            f"{path['source_kind']} -> privileged instructions -> {models} -> {tools}"
+        )
+        capabilities = path.get("capabilities", [])
+        consequences = "; ".join(
+            dict.fromkeys(str(item.get("impact", "")) for item in capabilities)
+        )
+        operations = ", ".join(
+            (
+                f"{item.get('operation', '')}"
+                f"({', '.join(item.get('controlled_parameters', []))})"
+            )
+            for item in capabilities
+        )
+        impact_markup.append(
+            "<div class='impact-path'>"
+            f"<strong>Potential blast radius &middot; {escape(path['severity'])}</strong>"
+            f"<span class='route'>{escape(route)}</span>"
+            f"Could {escape(consequences)}."
+            f"<span class='meta'> Direct binding + tool-parameter flow &middot; "
+            f"{escape(operations)}"
+            f" &middot; confidence {float(path['confidence']):.2f}</span></div>"
+        )
 
     width = 900
     height = 460 if len(nodes) > 1 else 300
@@ -267,7 +355,9 @@ def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
         for color, label in legend_items
     )
     return (
-        "<h2>Dependency context</h2>"
+        "<h2>Trust-boundary and dependency context</h2>"
+        f"<div class='impact-paths'>{''.join(impact_markup)}</div>"
+        f"<div class='exposure-paths'>{''.join(exposure_markup)}</div>"
         "<figure class='graph-card'>"
         f"<svg viewBox='0 0 {width} {height}' role='img' "
         "aria-labelledby='graph-title graph-description'>"

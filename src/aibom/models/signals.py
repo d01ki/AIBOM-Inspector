@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from aibom.models.analysis import SourceContext
 from aibom.models.evidence import Evidence
 
 
@@ -18,6 +19,7 @@ class RiskSignal(BaseModel):
 
     kind: str = Field(description="e.g. 'trust_remote_code' | 'hardcoded_secret'.")
     detail: str | None = Field(default=None, description="Optional human-readable context.")
+    source_context: SourceContext = SourceContext.PRODUCTION
     source_evidence: list[Evidence] = Field(default_factory=list)
 
     def location_key(self) -> tuple[str, str, int]:

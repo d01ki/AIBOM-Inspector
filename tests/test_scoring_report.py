@@ -108,7 +108,7 @@ def test_html_report_is_self_contained(fixture_inventory: Inventory) -> None:
         assert needle not in html.lower() or needle == "http://"
     assert "TDR-001" in html
     assert str(score.overall) in html
-    assert "<h2>Dependency context</h2>" in html
+    assert "<h2>Trust-boundary and dependency context</h2>" in html
     assert "<svg" in html
     assert "AI dependency graph" in html
 

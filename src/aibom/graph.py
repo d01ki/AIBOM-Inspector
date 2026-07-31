@@ -11,12 +11,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from aibom.exposure import build_exposure_paths
+from aibom.impact import build_impact_paths
 from aibom.inventory import Inventory
 from aibom.models.findings import Finding, Severity
+from aibom.policy import production_view
 
 
 def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]:
     """Return ``{"nodes": [...], "edges": [...]}`` for the inventory."""
+    inventory = production_view(inventory)
     worst: dict[str, Severity] = {}
     counts: dict[str, int] = {}
     for f in findings:
@@ -66,4 +70,15 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         seen.add(key)
         edges.append({"source": r.source_id, "target": r.target_id, "type": r.relationship.value})
 
-    return {"nodes": nodes, "edges": edges}
+    exposure_paths = [
+        path.model_dump(mode="json") for path in build_exposure_paths(inventory)
+    ]
+    impact_paths = [
+        path.model_dump(mode="json") for path in build_impact_paths(inventory)
+    ]
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "exposure_paths": exposure_paths,
+        "impact_paths": impact_paths,
+    }

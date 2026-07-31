@@ -65,6 +65,11 @@ packages = ["src/aibom"]
 [tool.hatch.build.targets.wheel.force-include]
 "web" = "aibom/web"
 "tests/fixtures/vulnerable-ai-app" = "aibom/demo_app"
+"tests/fixtures/impact-demo" = "aibom/impact_demo"
+"tests/fixtures/impact-demo-baseline" = "aibom/impact_demo_baseline"
+"tests/fixtures/impact-demo-ts" = "aibom/impact_demo_ts"
+"tests/fixtures/impact-demo-ts-baseline" = "aibom/impact_demo_ts_baseline"
+"examples/trust-boundary-drift" = "aibom/drift_demo"
 
 [tool.ruff]
 line-length = 100

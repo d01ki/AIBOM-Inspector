@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# AIBOM Inspector launcher — one command, no Docker flags to remember.
+#
+#   ./aibom                     guided menu
+#   ./aibom ui                  web UI at http://localhost:8000
+#   ./aibom demo                offline blast-radius + drift demo
+#   ./aibom scan .              scan this directory
+#   ./aibom scan https://…      scan a public repo URL
+#   ./aibom diff old/ new/      behavioral drift between two revisions
+#
+# Local paths are mounted read-only and rewritten automatically; reports land
+# in ./aibom-out. Anything not listed above is passed straight to the CLI.
+set -euo pipefail
+
+IMAGE="${AIBOM_IMAGE:-aibom-inspector}"
+PORT="${AIBOM_PORT:-8000}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK="$(pwd -P)"
+OUT="$WORK/aibom-out"
+
+die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 2; }
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 ||
+    die "Docker is not installed. Install Docker Desktop, or run 'pip install -e .' and use 'aibom' directly."
+  docker info >/dev/null 2>&1 ||
+    die "the Docker daemon is not responding. Start Docker Desktop, wait for it to report ready, then rerun."
+}
+
+ensure_image() {
+  if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    printf 'Building the %s image (first run only)…\n' "$IMAGE" >&2
+    docker build -t "$IMAGE" "$HERE" >&2
+  fi
+}
+
+# Rewrite an existing host path into its mounted location inside the container.
+# Anything else (URL, flag, plain value) is passed through untouched.
+map_arg() {
+  local arg="$1"
+  case "$arg" in
+    -*|*://*) printf '%s' "$arg"; return ;;
+  esac
+  [ -e "$arg" ] || { printf '%s' "$arg"; return; }
+  local abs
+  if [ -d "$arg" ]; then
+    abs="$(cd "$arg" && pwd -P)"
+  else
+    abs="$(cd "$(dirname "$arg")" && pwd -P)/$(basename "$arg")"
+  fi
+  case "$abs" in
+    "$WORK") printf '/work' ;;
+    "$WORK"/*) printf '/work/%s' "${abs#"$WORK"/}" ;;
+    *) die "'$arg' is outside $WORK. cd to a directory that contains it, then rerun." ;;
+  esac
+}
+
+run_cli() {
+  mkdir -p "$OUT"
+  local mapped=()
+  local arg
+  for arg in "$@"; do mapped+=("$(map_arg "$arg")"); done
+  local tty=()
+  [ -t 0 ] && [ -t 1 ] && tty=(-it)
+  exec docker run --rm "${tty[@]}" \
+    -v "$WORK:/work:ro" \
+    -v "$OUT:/out" \
+    -w /work \
+    "$IMAGE" aibom "${mapped[@]}"
+}
+
+require_docker
+ensure_image
+
+case "${1-}" in
+  ui|serve|web)
+    printf 'AIBOM Inspector UI → http://localhost:%s   (Ctrl-C to stop)\n' "$PORT"
+    exec docker run --rm -it -p "$PORT:8000" -e "AIBOM_PORT=$PORT" "$IMAGE"
+    ;;
+  -h|--help|help)
+    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    printf '\nFull CLI reference:\n'
+    run_cli --help
+    ;;
+  *)
+    run_cli "$@"
+    ;;
+esac

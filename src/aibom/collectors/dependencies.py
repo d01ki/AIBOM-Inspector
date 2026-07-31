@@ -51,6 +51,7 @@ _AI_PYPI = {
     "jaxlib",
     "flax",
     "openai",
+    "openai-agents",
     "anthropic",
     "cohere",
     "mistralai",

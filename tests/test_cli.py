@@ -195,12 +195,12 @@ def test_bare_invocation_non_tty_prints_help() -> None:
 
 def test_menu_demo_scan(monkeypatch: Any) -> None:
     monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
-    # choice 3 (demo), decline the HTML report
-    result = runner.invoke(app, [], input="3\nn\n")
+    result = runner.invoke(app, [], input="1\n")
     assert result.exit_code == 0
-    assert "Demo - scan the bundled vulnerable AI app" in result.stdout
+    assert "Impact demo" in result.stdout
+    assert "Potential blast radius" in result.stdout
     assert "Security score" in result.stdout
-    assert "TDR-001" in result.stdout
+    assert "AIBOM-IMPACT-001" in result.stdout
 
 
 def test_menu_quit(monkeypatch: Any) -> None:
@@ -212,7 +212,7 @@ def test_menu_quit(monkeypatch: Any) -> None:
 
 def test_menu_invalid_choice_reprompts(monkeypatch: Any) -> None:
     monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
-    result = runner.invoke(app, [], input="7\nq\n")
+    result = runner.invoke(app, [], input="9\nq\n")
     assert result.exit_code == 0
     assert "Please answer" in result.stdout
 
@@ -223,12 +223,12 @@ def test_scan_demo_flag() -> None:
     assert "TDR-001" in result.stdout
 
 
-def test_menu_demo_writes_report(monkeypatch: Any, tmp_path: Path) -> None:
-    monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
-    monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, [], input="3\ny\n")
+def test_demo_command_runs_impact_and_drift() -> None:
+    result = runner.invoke(app, ["demo"])
     assert result.exit_code == 0
-    assert (tmp_path / "report.html").exists()
+    assert "Potential blast radius" in result.stdout
+    assert "Behavioral drift demo" in result.stdout
+    assert "impact_path_added" in result.stdout
 
 
 def test_scan_target_under_ignored_dir_name_still_scans(tmp_path: Path) -> None:

@@ -1,4 +1,10 @@
-# One-command startup: `docker compose up` -> UI + API at http://localhost:8000
+# Prefer the launcher: ./aibom ui | ./aibom demo | ./aibom scan .
+# Compose is the equivalent for people who already live in Compose.
+#
+#   docker compose up                     UI + API at http://localhost:8000
+#   docker compose run --rm demo          offline blast-radius + drift demo
+#   docker compose run --rm cli scan /work   scan the current directory
+#
 # Port 8000 taken? Override the host port:  AIBOM_PORT=8080 docker compose up
 services:
   aibom:
@@ -22,3 +28,22 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  # One short command for the talk/demo: docker compose run --rm demo
+  demo:
+    profiles: ["demo"]
+    build: .
+    image: aibom-inspector
+    command: ["aibom", "demo"]
+
+  # Scan the current directory: docker compose run --rm cli scan /work
+  # The tree is mounted read-only; artifacts are written to ./aibom-out.
+  cli:
+    profiles: ["cli"]
+    build: .
+    image: aibom-inspector
+    entrypoint: ["aibom"]
+    working_dir: /work
+    volumes:
+      - "${AIBOM_TARGET:-.}:/work:ro"
+      - "./aibom-out:/out"

@@ -129,6 +129,32 @@ class Dataset(Entity):
     )
 
 
+class ToolCapability(BaseModel):
+    """A security-relevant operation inside a directly bound agent tool.
+
+    The scanner records the operation category and its source location, never
+    argument values.  ``direct_binding`` means the containing tool was present
+    in the analyzed agent constructor's explicit ``tools=[...]`` list.
+    """
+
+    tool_name: str
+    kind: str = Field(
+        description=(
+            "command_execution | destructive_filesystem | filesystem_write | "
+            "external_action | network_egress"
+        )
+    )
+    operation: str = Field(description="Sanitized qualified call name.")
+    impact: str = Field(description="Concise consequence if the tool is steered.")
+    severity: str = Field(description="Impact severity: medium | high | critical.")
+    direct_binding: bool = True
+    controlled_parameters: list[str] = Field(
+        default_factory=list,
+        description="Tool parameters proven to influence the operation call.",
+    )
+    source_evidence: list[Evidence] = Field(default_factory=list)
+
+
 class Prompt(Entity):
     """A prompt: a template file or a hardcoded system/user prompt."""
 
@@ -154,6 +180,14 @@ class Prompt(Entity):
     model_refs: list[str] = Field(
         default_factory=list,
         description="Model names resolved from the consuming API call.",
+    )
+    tool_refs: list[str] = Field(
+        default_factory=list,
+        description="Tools directly bound by the same agent constructor.",
+    )
+    capabilities: list[ToolCapability] = Field(
+        default_factory=list,
+        description="Security-relevant operations proven inside directly bound tools.",
     )
     data_flow_path: list[ResolutionStep] = Field(
         default_factory=list,
