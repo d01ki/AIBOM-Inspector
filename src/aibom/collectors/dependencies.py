@@ -141,6 +141,11 @@ _AI_GO = {
     "github.com/ollama/ollama",
     "github.com/mark3labs/mcp-go",
     "github.com/cohere-ai/cohere-go",
+    # Direct counterparts of entries already on the PyPI/npm lists
+    # (mistralai, tokenizers); their absence here was an inconsistency, found
+    # by scanning tmc/langchaingo.
+    "github.com/gage-technologies/mistral-go",
+    "github.com/cohere-ai/tokenizer",
 }
 _AI_GO_PREFIXES = ("github.com/tmc/langchaingo/", "github.com/modelcontextprotocol/")
 
