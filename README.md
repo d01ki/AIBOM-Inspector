@@ -27,6 +27,12 @@ That analysis runs on **Python and TypeScript/JavaScript alike** — including
 the Vercel AI SDK, OpenAI Agents, MCP TypeScript servers, and Next.js/Express
 route handlers, where most agent code now lives.
 
+**Two tiers, stated plainly.** Python and JS/TS get syntax-aware behavioral
+analysis, because every claim is backed by a parse tree. Go, Java, Rust, Ruby,
+C# and PHP get *inventory* coverage — dependencies, model ids, provider SDKs,
+prompt constants and secrets — from the pattern layer. Those languages never
+produce impact paths or drift verdicts, and the tool does not pretend otherwise.
+
 ## Demo
 
 [![Watch Demo](docs/demo.png)](https://youtu.be/BPWNt6KgGvY)
@@ -122,8 +128,10 @@ The dated, source-linked competitive analysis and claim boundaries are in
   component BOM is unchanged but a new trust-boundary path makes a powerful
   bound capability steerable
 - **Complete dependency BOM** — every package in `requirements*.txt`,
-  `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm) with versions and
-  purls; the AI/ML layer is flagged and drives the risk analysis
+  `pyproject.toml`, `Pipfile`, `package.json`, `go.mod`, `Cargo.toml`,
+  `pom.xml`, `build.gradle`, `Gemfile`, `composer.json` and `*.csproj` with
+  versions and purls across **PyPI, npm, Go, crates.io, Maven, RubyGems,
+  Packagist and NuGet**; the AI/ML layer is flagged and drives the risk analysis
 - **Hugging Face resolver** — license, model card, serialization formats,
   author, downloads, gated status (network-optional, cache-backed,
   offline-friendly; **never downloads or loads weights**)
@@ -359,7 +367,8 @@ that fixture directory directly (as `aibom demo` does).
 | **Agents / capabilities** | LangChain/LangGraph constructors plus OpenAI Agents SDK direct tool bindings; bounded tool-parameter flow into command execution, filesystem writes/deletes, network egress, and external actions |
 | **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
 | **TypeScript / JavaScript prompts & tools** | syntax-aware sinks (`generateText`/`streamText`/`generateObject` from `ai`, `new Agent({instructions})` from `@openai/agents`, `chat.completions.create`, `responses.create`, `messages.create`), sources (Next.js `request.json()`, Express `req.body`/`query`/`params`, MCP tool parameters, `process.argv`/`env`, `searchParams`), direct tool bindings (`tools: { name: tool({ execute }) }`, `tools: [boundTool]`), and operations inside them (`child_process`, `fs` writes/deletes, `eval`/`vm`, state-changing `fetch`/`axios`) |
-| **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json` (PyPI + npm), with version + purl — a complete BOM. AI/ML-ecosystem packages (incl. `mcp`/`fastmcp`/`@modelcontextprotocol/*`) are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |
+| **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `Gemfile`, `composer.json`, `*.csproj` — PyPI, npm, Go, crates.io, Maven, RubyGems, Packagist, NuGet — with version + purl. AI/ML-ecosystem packages are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |
+| **Other languages** (Go, Java, Kotlin, Rust, Ruby, C#, PHP, Swift, Scala) | pattern-tier only: model ids, provider SDK imports, prompt constants (`static final String SYSTEM_PROMPT = …`, `const SYSTEM_PROMPT: &str = …`, `systemPrompt := …`), MCP configs, secrets. **No** impact paths or drift verdicts — those need a parse tree |
 
 ## Design principles
 

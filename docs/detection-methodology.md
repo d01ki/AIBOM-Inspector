@@ -66,6 +66,32 @@ explicitly bound tool's executor, and at least one of that executor's parameters
 must be proven to influence the call. A fixed command, an unbound helper, or a
 merely co-located dangerous call is not promoted to a capability.
 
+## Other languages: the pattern tier
+
+Go, Java, Kotlin, Rust, Ruby, C#, PHP, Swift and Scala are read, but only by the
+line-level pattern rules — there is no parser for them. That buys
+*inventory* coverage:
+
+- dependency manifests: `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`,
+  `Gemfile`, `composer.json`, `*.csproj`, each emitted with the OSV ecosystem
+  name and a purl so advisories and Dependency-Track still work;
+- model ids, provider SDK imports, MCP configurations, hardcoded secrets;
+- system-prompt constants, recognized across the declaration shapes those
+  languages use (`static final String SYSTEM_PROMPT = …`,
+  `const SYSTEM_PROMPT: &str = …`, `systemPrompt := …`).
+
+It explicitly does **not** buy behavioral analysis. No impact path, exposure
+path, or drift verdict is ever produced from a regex match, because the
+evidence contract requires a syntax tree behind the claim. The split is
+enforced by a test: scanning the multi-language fixture must yield zero impact
+paths and no `user_controlled` prompt.
+
+The precision risk here is real and specific — `system` is a substring of
+`ecosystem`, `filesystem_path` and `subsystem`. The prompt-constant rule
+therefore requires `system` to begin the identifier, or to follow an underscore
+*and* carry a prompt-ish suffix. `gin-gonic/gin` (121 files) is checked in as a
+negative case for exactly this reason.
+
 ## Prompt source-to-sink analysis
 
 The `python.prompt-flow.ast` detector recognizes privileged and user prompt

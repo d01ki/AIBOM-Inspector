@@ -11,7 +11,7 @@
     "local_path": {"type": "string", "minLength": 1},
     "language": {
       "description": "Primary language of the case; metrics are reported per language.",
-      "enum": ["python", "typescript", "mixed"]
+      "enum": ["python", "typescript", "go", "java", "rust", "ruby", "csharp", "php", "mixed"]
     },
     "notes": {
       "description": "Curation notes recording how the expectations were decided.",

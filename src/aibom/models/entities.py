@@ -212,6 +212,21 @@ class Service(Entity):
     kind: str = Field(default="api", description="'api' | 'mcp' | 'other'.")
 
 
+# Ecosystem name (as OSV spells it) -> purl type. Keeping OSV's spelling means
+# the same string can be sent to the advisory API and rendered into a purl.
+_PURL_TYPES = {
+    "pypi": "pypi",
+    "npm": "npm",
+    "conda": "conda",
+    "go": "golang",
+    "crates.io": "cargo",
+    "maven": "maven",
+    "rubygems": "gem",
+    "packagist": "composer",
+    "nuget": "nuget",
+}
+
+
 class Package(Entity):
     """A software dependency declared in a manifest.
 
@@ -221,7 +236,13 @@ class Package(Entity):
     """
 
     type: EntityType = EntityType.PACKAGE
-    ecosystem: str | None = Field(default=None, description="'PyPI' | 'npm' | 'conda'.")
+    ecosystem: str | None = Field(
+        default=None,
+        description=(
+            "OSV ecosystem name: PyPI | npm | conda | Go | crates.io | Maven | "
+            "RubyGems | Packagist | NuGet."
+        ),
+    )
     version: str | None = Field(default=None, description="Declared version, if any.")
     version_pinned: bool = Field(default=False, description="True for an exact (==) pin.")
     ai: bool = Field(default=False, description="True if this is an AI/ML-ecosystem package.")
@@ -236,10 +257,12 @@ class Package(Entity):
     def purl(self) -> str | None:
         """Package URL (purl), e.g. ``pkg:pypi/transformers@4.40`` — enables
         ecosystem vulnerability correlation (OSV, Dependency-Track)."""
-        eco = {"pypi": "pypi", "npm": "npm", "conda": "conda"}.get((self.ecosystem or "").lower())
+        eco = _PURL_TYPES.get((self.ecosystem or "").lower())
         if not eco:
             return None
-        base = f"pkg:{eco}/{self.name}"
+        # Maven coordinates are group:artifact; purl separates them with '/'.
+        name = self.name.replace(":", "/", 1) if eco == "maven" else self.name
+        base = f"pkg:{eco}/{name}"
         return f"{base}@{self.version}" if self.version else base
 
 

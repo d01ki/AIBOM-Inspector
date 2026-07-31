@@ -1,0 +1,109 @@
+{
+  "repository": "local/multi-language-agent",
+  "commit": "fixture-v1",
+  "language": "mixed",
+  "local_path": "tests/fixtures/multi-language-agent",
+  "notes": [
+    "Phase 1 coverage fixture: one AI dependency and one ordinary dependency in",
+    "each of Go, Rust, Maven, RubyGems, Packagist and NuGet, plus a model id and",
+    "a system-prompt constant per language.",
+    "Only AI packages are expected; the ordinary ones (gin, tokio, slf4j, rails,",
+    "monolog, Newtonsoft.Json) must NOT carry the ai flag, which is what keeps",
+    "this an AIBOM rather than a generic SBOM.",
+    "Behavioural analysis (prompt flow, blast radius) is intentionally absent:",
+    "these languages are read by the pattern layer only."
+  ],
+  "components": [
+    {
+      "type": "model",
+      "name": "claude-sonnet-4-5",
+      "file": "Agent.java",
+      "line": 4,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4.1",
+      "file": "main.go",
+      "line": 10,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o-mini",
+      "file": "agent.rs",
+      "line": 5,
+      "status": "invoked"
+    },
+    {
+      "type": "ai_package",
+      "name": "OpenAI",
+      "file": "Agent.csproj",
+      "line": 3,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "async-openai",
+      "file": "Cargo.toml",
+      "line": 6,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "com.openai:openai-java",
+      "file": "pom.xml",
+      "line": 8,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "github.com/sashabaranov/go-openai",
+      "file": "go.mod",
+      "line": 6,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "openai-php/client",
+      "file": "composer.json",
+      "line": 4,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "ruby-openai",
+      "file": "Gemfile",
+      "line": 2,
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@Agent.java:3",
+      "file": "Agent.java",
+      "line": 3,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@agent.rs:2",
+      "file": "agent.rs",
+      "line": 2,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@main.go:6",
+      "file": "main.go",
+      "line": 6,
+      "status": "invoked"
+    },
+    {
+      "type": "service",
+      "name": "openai",
+      "file": "main.go",
+      "line": 4,
+      "status": "invoked"
+    }
+  ]
+}

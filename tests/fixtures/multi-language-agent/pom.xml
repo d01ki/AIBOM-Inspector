@@ -1,0 +1,17 @@
+<project>
+  <properties>
+    <openai.version>0.8.0</openai.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.openai</groupId>
+      <artifactId>openai-java</artifactId>
+      <version>${openai.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.13</version>
+    </dependency>
+  </dependencies>
+</project>

@@ -88,8 +88,33 @@ _TEXT_SUFFIXES = {
     ".mts",
     ".cts",
     ".ipynb",
+    # Read by the pattern layer only: model ids, provider SDK imports, prompt
+    # constants, and secrets. Prompt-flow and blast-radius analysis stay
+    # Python/JS-TS, where a syntax tree backs every claim.
+    ".go",
+    ".java",
+    ".kt",
+    ".kts",
+    ".rs",
+    ".rb",
+    ".cs",
+    ".php",
+    ".swift",
+    ".scala",
 }
-_TEXT_NAMES = {"dockerfile", "requirements.txt", "pipfile", ".env"}
+_TEXT_NAMES = {
+    "dockerfile",
+    "requirements.txt",
+    "pipfile",
+    ".env",
+    "go.mod",
+    "cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gemfile",
+    "composer.json",
+}
 
 # Source files handed to the syntax-aware JS/TS detectors.
 _JS_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
@@ -124,9 +149,32 @@ _RE_LOAD_DATASET = re.compile(r"""load_dataset\(\s*['"]([^'"]+)['"]""")
 _RE_LLM_MODEL = re.compile(r"""['"]((?:gpt-|o1|o3|o4|chatgpt-|claude-)[A-Za-z0-9._\-]+)['"]""")
 # A SYSTEM-ish variable assigned a *string literal* — the hardcoded-prompt shape.
 # Requiring the string RHS avoids matching expressions like ``= re.compile(...)``.
+# A SYSTEM-ish binding assigned a *string literal* — the hardcoded-prompt shape.
+# Leading modifiers/types are optional so the same shape is recognized in Java,
+# C#, Go, Rust, Kotlin and Swift, not only Python:
+#   SYSTEM_PROMPT = "..."                       (Python)
+#   static final String SYSTEM_PROMPT = "..."   (Java)
+#   const SYSTEM_PROMPT: &str = "..."           (Rust)
+#   systemPrompt := "..."                       (Go)
+# Requiring the string RHS avoids matching expressions like ``= re.compile(...)``.
 _RE_SYSTEM_PROMPT_VAR = re.compile(
-    r"""^\s*(?:[A-Z_]*SYSTEM[A-Z_]*(?:PROMPT|MESSAGE)?|system_prompt|system_message)"""
-    r"""\s*=\s*[rbfRBF]{0,2}['"]"""
+    r"""(?x)
+    ^\s*
+    (?:(?:public|private|protected|internal|static|final|const|readonly|let|var|
+        val|def|string|String|str)\s+){0,4}     # optional modifiers / simple type
+    # Either the identifier starts with 'system', or 'system' follows an
+    # underscore AND carries a prompt-ish suffix. That keeps AGENT_SYSTEM_PROMPT
+    # while rejecting ecosystem, filesystem_path, subsystem, operating_system.
+    (?:
+        (?:SYSTEM|System|system)[A-Za-z0-9_]*
+      | (?:[A-Za-z][A-Za-z0-9]*_)+ (?:SYSTEM|System|system) _?
+        (?:PROMPT|Prompt|prompt|MESSAGE|Message|message
+           |INSTRUCTIONS?|Instructions?|instructions?)
+    )
+    \s*(?::\s*[\w:<>\[\]&'\ ]{1,40})?           # optional type annotation
+    \s*(?::=|=)\s*
+    [rbfRBF@$]{0,2}['"]
+    """
 )
 _RE_ROLE_SYSTEM = re.compile(r"""["']role["']\s*:\s*["']system["']""")
 _RE_BASE_URL = re.compile(r"""base_url\s*=\s*['"](https?://[^'"]+)['"]""")
