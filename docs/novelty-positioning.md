@@ -177,8 +177,9 @@ Demo sequence:
    `generateText({ system })`, the binding is `tools: { runDiagnostic: tool(…) }`,
    and the operation is `execSync(command)` — the same reasoning, a different
    ecosystem, and no npm install.
-5. For the visual version, run `./aibom ui`, open the printed URL, and click
-   **Built-in drift demo (TypeScript)** — no URL, API key, or network needed.
+5. The drift demo is a CLI capability: `aibom demo` runs the Python and
+   TypeScript comparisons offline — no URL, API key, or network needed. The web
+   UI covers single-revision scans only.
 
 ## Evidence still needed before the talk
 

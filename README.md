@@ -206,8 +206,9 @@ The dated, source-linked competitive analysis and claim boundaries are in
   schema), SARIF 2.1.0 for GitHub Code Scanning, JSON inventory, self-contained
   HTML report, severity-gated exit codes for CI
 - **Web app** — FastAPI backend (`aibom serve`) + single-page UI with an
-  interactive risk-colored dependency graph, a revision-comparison panel, and
-  the same exports as the CLI (HTML, CycloneDX, SARIF, inventory JSON)
+  interactive risk-colored dependency graph, the minimum-elements conformance
+  table, and the same exports as the CLI (HTML, CycloneDX, SARIF, inventory
+  JSON). Revision comparison is CLI/API only (`aibom diff`, `POST /api/diff`)
 - **Reproducible benchmark harness** — category precision/recall/F1 with
   explicit false-positive and false-negative reports, scored **per language**
   so Python results cannot mask TypeScript ones
@@ -401,9 +402,10 @@ aibom demo
 
 ## Web app
 
-`./aibom ui`, open the printed URL, then click **Run built-in impact demo** or
-**Built-in drift demo (TypeScript)**. After that, paste a repository URL for a
-normal scan, or two refs to compare revisions. Without Docker:
+`./aibom ui`, open the printed URL, then click **Run built-in impact demo**.
+After that, paste a repository URL for a normal scan. The UI scans one revision;
+comparing two revisions is a CLI and API capability (`aibom diff`,
+`POST /api/diff`). Without Docker:
 
 ```bash
 pip install -e ".[server]"         # in the venv from "Install without Docker"
