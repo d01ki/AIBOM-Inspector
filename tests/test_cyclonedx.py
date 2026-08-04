@@ -66,6 +66,9 @@ def test_dependencies_reference_known_refs(fixture_inventory: Inventory) -> None
     doc = to_cyclonedx(fixture_inventory)
     known = {c["bom-ref"] for c in doc["components"]}
     known |= {s["bom-ref"] for s in doc.get("services", [])}
+    # The primary component is a legitimate dependency ref: it is the root of
+    # the graph, not an orphan.
+    known.add(doc["metadata"]["component"]["bom-ref"])
     for dep in doc.get("dependencies", []):
         assert dep["ref"] in known
         for t in dep["dependsOn"]:

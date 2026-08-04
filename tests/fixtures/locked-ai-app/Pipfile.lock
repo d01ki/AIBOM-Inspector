@@ -1,0 +1,12 @@
+{
+    "_meta": {"hash": {"sha256": "1111111111111111111111111111111111111111111111111111111111111111"}},
+    "default": {
+        "cohere": {
+            "hashes": [
+                "sha256:9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a"
+            ],
+            "version": "==5.5.8"
+        }
+    },
+    "develop": {}
+}

@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from aibom import __version__
+from aibom.compliance.minimum_elements import evaluate_cyclonedx
 from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
 from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
@@ -264,6 +265,7 @@ def _run_demo() -> ScanResult:
 def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
     inv = result.inventory
     policy_inventory = production_view(inv)
+    bom = to_cyclonedx(inv)
     return {
         "repo_url": repo_url,
         "metadata": inv.metadata.model_dump(),
@@ -281,7 +283,8 @@ def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
         "findings": [f.model_dump() for f in result.findings],
         "graph": build_graph(inv, result.findings),
         "inventory": inv.model_dump(),
-        "cyclonedx": to_cyclonedx(inv),
+        "cyclonedx": bom,
+        "minimum_elements": evaluate_cyclonedx(bom).to_dict(),
     }
 
 

@@ -14,6 +14,14 @@ negatives.
 The report provides micro-averaged overall and category metrics. Categories
 with no expected components and no predictions show `N/A`, not a perfect score.
 
+## Scan mode
+
+The harness scans with lockfile resolution **off**. Ground truth records the
+components a repository declares; lockfile resolution correctly adds transitive
+components that no hand-authored ground truth lists, and scoring those as false
+positives would make precision meaningless. Lockfile coverage is exercised by
+the unit tests (`tests/test_lockfiles.py`), not by this corpus.
+
 ## Reproducibility rules
 
 - Public repositories must be pinned to immutable full commit SHAs.

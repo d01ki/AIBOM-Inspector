@@ -11,10 +11,20 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, Field, PrivateAttr, SerializeAsAny
 
 from aibom.models.analysis import Reachability, ResolutionStep
-from aibom.models.entities import Agent, Entity, EntityType, Model, Prompt, Relationship, Service
+from aibom.models.entities import (
+    Agent,
+    DependencyScope,
+    Entity,
+    EntityType,
+    Model,
+    Package,
+    Prompt,
+    Relationship,
+    Service,
+)
 from aibom.models.signals import RiskSignal
 
 T = TypeVar("T")
@@ -64,18 +74,36 @@ class Inventory(BaseModel):
     signals: list[RiskSignal] = Field(default_factory=list)
     stats: ScanStats = Field(default_factory=ScanStats)
 
+    # Natural key -> entity, so merging stays O(1) per add. A lockfile can
+    # contribute thousands of components; a linear scan per add would make the
+    # inventory quadratic in the size of the dependency graph.
+    _index: dict[tuple[str, str], Entity] = PrivateAttr(default_factory=dict)
+    _indexed: tuple[int, int] = PrivateAttr(default=(0, 0))
+
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.
 
         Returns the canonical entity that now lives in the inventory (either the
         pre-existing one, with evidence unioned in, or the newly added one).
         """
-        for existing in self.entities:
-            if existing.natural_key() == entity.natural_key():
-                _merge_entity(existing, entity)
-                return existing
+        index = self._entity_index()
+        key = entity.natural_key()
+        existing = index.get(key)
+        if existing is not None:
+            _merge_entity(existing, entity)
+            return existing
         self.entities.append(entity)
+        index[key] = entity
+        self._indexed = (id(self.entities), len(self.entities))
         return entity
+
+    def _entity_index(self) -> dict[tuple[str, str], Entity]:
+        """The dedupe index, rebuilt if ``entities`` was replaced or filtered."""
+        stamp = (id(self.entities), len(self.entities))
+        if stamp != self._indexed:
+            self._index = {e.natural_key(): e for e in self.entities}
+            self._indexed = stamp
+        return self._index
 
     def add_relationship(self, relationship: Relationship) -> None:
         """Add an edge, deduplicating on (source, target, type)."""
@@ -179,6 +207,24 @@ def _merge_entity(into: Entity, other: Entity) -> None:
         into.framework = into.framework or other.framework
         _extend_unique(into.tools, other.tools)
         _extend_unique(into.model_refs, other.model_refs)
+    elif isinstance(into, Package) and isinstance(other, Package):
+        # A lockfile resolves what a manifest only constrains: an exact pin
+        # always beats a range, whichever collector saw the package first.
+        if other.version_pinned and not into.version_pinned:
+            into.version = other.version
+            into.version_pinned = True
+        else:
+            into.version = into.version or other.version
+        if DependencyScope.DIRECT in {into.dependency_scope, other.dependency_scope}:
+            into.dependency_scope = DependencyScope.DIRECT
+        into.license = into.license or other.license
+        into.producer = into.producer or other.producer
+        into.producer_url = into.producer_url or other.producer_url
+        if into.content_hash is None and other.content_hash is not None:
+            into.content_hash = other.content_hash
+            into.hash_algorithm = other.hash_algorithm
+            into.hash_artifact = other.hash_artifact
+        into.ai = into.ai or other.ai
     elif isinstance(into, Prompt) and isinstance(other, Prompt):
         into.content_hash = into.content_hash or other.content_hash
         into.source_kind = into.source_kind or other.source_kind

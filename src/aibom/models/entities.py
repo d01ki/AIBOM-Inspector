@@ -227,12 +227,24 @@ _PURL_TYPES = {
 }
 
 
+class DependencyScope(str, Enum):
+    """Whether a package was declared by the project or pulled in by another one."""
+
+    DIRECT = "direct"
+    TRANSITIVE = "transitive"
+
+
 class Package(Entity):
-    """A software dependency declared in a manifest.
+    """A software dependency declared in a manifest or resolved in a lockfile.
 
     *All* dependencies are inventoried (a complete BOM); ``ai`` marks the ones
     that belong to the AI/ML ecosystem — the layer this tool adds on top of a
     conventional SBOM.
+
+    Lockfile-sourced packages additionally carry the exact resolved version, the
+    artifact digest, and the distributing registry — the CISA 2026 minimum
+    elements ``Component Hash``, ``Component Hash Algorithm`` and
+    ``Component Producer``.
     """
 
     type: EntityType = EntityType.PACKAGE
@@ -246,6 +258,27 @@ class Package(Entity):
     version: str | None = Field(default=None, description="Declared version, if any.")
     version_pinned: bool = Field(default=False, description="True for an exact (==) pin.")
     ai: bool = Field(default=False, description="True if this is an AI/ML-ecosystem package.")
+    dependency_scope: DependencyScope = Field(
+        default=DependencyScope.DIRECT,
+        description="Direct (declared in a manifest) or transitive (resolved in a lockfile).",
+    )
+    license: str | None = Field(
+        default=None, description="License declared by the lockfile, when it records one."
+    )
+    producer: str | None = Field(
+        default=None,
+        description="Entity that supplied the artifact — usually the distributing registry.",
+    )
+    producer_url: str | None = Field(default=None, description="URL of the supplying registry.")
+    content_hash: str | None = Field(
+        default=None, description="Lowercase hex digest of the resolved artifact."
+    )
+    hash_algorithm: str | None = Field(
+        default=None, description="CycloneDX hash algorithm name, e.g. 'SHA-256'."
+    )
+    hash_artifact: str | None = Field(
+        default=None, description="File the digest belongs to (a package may ship several)."
+    )
 
     def natural_key(self) -> tuple[str, str]:
         """Packages dedupe per ecosystem — 'openai' on PyPI and npm are distinct."""

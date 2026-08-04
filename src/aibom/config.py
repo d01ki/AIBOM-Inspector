@@ -17,8 +17,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from aibom.export.cyclonedx import LIFECYCLE_PHASES
 from aibom.models.findings import Severity
 
 CONFIG_FILE = "aibom.toml"
@@ -46,6 +47,36 @@ class ScanConfig(BaseModel):
         default_factory=list,
         description="Finding rule IDs to suppress; 'PREFIX-*' matches a family (e.g. 'OSV-*').",
     )
+    lockfiles: bool = Field(
+        default=True,
+        description="Resolve lockfiles for transitive components and artifact digests.",
+    )
+    # -- SBOM authorship (CISA 2026 minimum elements about the document) -------
+    sbom_author: str | None = Field(
+        default=None, description="Entity that authors the SBOM data ('SBOM Author')."
+    )
+    sbom_author_email: str | None = Field(
+        default=None, description="Contact address for the SBOM author."
+    )
+    sbom_supplier: str | None = Field(
+        default=None,
+        description="Entity that produces the scanned software ('Component Producer').",
+    )
+    sbom_lifecycle: str | None = Field(
+        default=None,
+        description=(
+            "Lifecycle phase the SBOM is generated in ('SBOM Generation Context'): "
+            "design | pre-build | build | post-build | operations | discovery | decommission."
+        ),
+    )
+
+
+    @field_validator("sbom_lifecycle")
+    @classmethod
+    def _known_lifecycle(cls, value: str | None) -> str | None:
+        if value is not None and value not in LIFECYCLE_PHASES:
+            raise ValueError(f"must be one of: {', '.join(LIFECYCLE_PHASES)}")
+        return value
 
 
 def load_config(target: str | Path) -> ScanConfig:

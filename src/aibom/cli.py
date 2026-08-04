@@ -6,6 +6,7 @@ Static analysis only — running ``aibom scan`` never executes the target code.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -16,10 +17,23 @@ from rich.console import Console
 from rich.table import Table
 
 from aibom import __version__
+from aibom.compliance.minimum_elements import (
+    ElementOrigin,
+    ElementStatus,
+    MinimumElementsReport,
+    UnsupportedDocument,
+    evaluate_cyclonedx,
+)
 from aibom.config import ConfigError, ScanConfig, load_config
 from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
 from aibom.drift import DriftReport, compare_scan_results
-from aibom.export.cyclonedx import to_cyclonedx_json
+from aibom.export.cyclonedx import (
+    DEFAULT_LIFECYCLE,
+    LIFECYCLE_PHASES,
+    SbomContext,
+    to_cyclonedx,
+    to_cyclonedx_json,
+)
 from aibom.export.sarif import to_sarif_json
 from aibom.impact import ImpactPath, build_impact_paths
 from aibom.inventory import Inventory
@@ -178,6 +192,43 @@ def scan(
             "repeatable. Suppressed findings are excluded from the score and --fail-on.",
         ),
     ] = None,
+    minimum_elements: Annotated[
+        Path | None,
+        typer.Option(
+            "--minimum-elements",
+            help="Write the CISA 2026 SBOM minimum-elements conformance report as JSON.",
+        ),
+    ] = None,
+    sbom_author: Annotated[
+        str | None,
+        typer.Option(
+            "--sbom-author",
+            help="Entity authoring the SBOM data (CISA 2026 'SBOM Author').",
+        ),
+    ] = None,
+    sbom_supplier: Annotated[
+        str | None,
+        typer.Option(
+            "--sbom-supplier",
+            help="Entity producing the scanned software (CISA 2026 'Component Producer').",
+        ),
+    ] = None,
+    sbom_lifecycle: Annotated[
+        str | None,
+        typer.Option(
+            "--sbom-lifecycle",
+            help="Lifecycle phase the SBOM is generated in (CISA 2026 'SBOM Generation "
+            f"Context'): {' | '.join(LIFECYCLE_PHASES)}. Default: pre-build.",
+        ),
+    ] = None,
+    lockfiles: Annotated[
+        bool | None,
+        typer.Option(
+            "--lockfiles/--no-lockfiles",
+            help="Resolve lockfiles for transitive components and artifact digests "
+            "(CISA 2026 coverage + Component Hash). Default: on.",
+        ),
+    ] = None,
     no_config: Annotated[
         bool,
         typer.Option(
@@ -235,6 +286,8 @@ def scan(
     ignore_rules = config.ignore_rules + [
         r for r in (ignore_rule or []) if r not in config.ignore_rules
     ]
+    use_lockfiles = lockfiles if lockfiles is not None else config.lockfiles
+    sbom_context = _sbom_context(config, sbom_author, sbom_supplier, sbom_lifecycle)
 
     def _scan(path: Path, display: str | None = None) -> ScanResult:
         return run_scan(
@@ -246,6 +299,7 @@ def scan(
             disabled_detectors=disabled,
             ignore_rules=ignore_rules,
             display_target=display,
+            lockfiles=use_lockfiles,
         )
 
     if is_url:
@@ -292,14 +346,33 @@ def scan(
                 "score, and graph.[/dim]"
             )
 
+    if not quiet or minimum_elements is not None:
+        elements = evaluate_cyclonedx(to_cyclonedx(inventory, context=sbom_context))
+        if not quiet:
+            _render_minimum_elements(elements)
+        if minimum_elements is not None:
+            _write_or_exit(
+                minimum_elements,
+                json.dumps(elements.to_dict(), indent=2, ensure_ascii=False),
+                "SBOM minimum-elements report",
+            )
+
     if output is not None:
         _write_or_exit(output, inventory.model_dump_json(indent=2), "inventory")
 
     if cyclonedx is not None:
-        _write_or_exit(cyclonedx, to_cyclonedx_json(inventory), "CycloneDX AIBOM")
+        _write_or_exit(
+            cyclonedx,
+            to_cyclonedx_json(inventory, context=sbom_context),
+            "CycloneDX AIBOM",
+        )
 
     if report is not None:
-        _write_or_exit(report, render_html(inventory, findings, score), "HTML report")
+        _write_or_exit(
+            report,
+            render_html(inventory, findings, score, sbom_context=sbom_context),
+            "HTML report",
+        )
 
     if sarif is not None:
         _write_or_exit(sarif, to_sarif_json(findings), "SARIF log")
@@ -541,6 +614,56 @@ def diff_scans(
 
 
 @app.command()
+def conformance(
+    sbom: Annotated[
+        Path,
+        typer.Argument(help="CycloneDX JSON SBOM to check (any generator, not just this one)."),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write the conformance report as JSON."),
+    ] = None,
+    fail_on_missing: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-missing",
+            help="Exit non-zero if any minimum element is silently missing "
+            "(a declared known unknown is not a failure).",
+        ),
+    ] = False,
+) -> None:
+    """Check a CycloneDX SBOM against the CISA 2026 SBOM minimum elements.
+
+    The 2026 baseline replaces the 2021 NTIA minimum elements and applies to all
+    software, AI systems included. Data the generator could not know conforms
+    when it is *declared* — a silent gap does not.
+    """
+    if not sbom.is_file():
+        console.print(f"[red]error:[/red] no such file: {sbom}")
+        raise typer.Exit(code=2)
+    try:
+        doc = json.loads(sbom.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]error:[/red] cannot read {sbom}: {exc}")
+        raise typer.Exit(code=2) from None
+    try:
+        report = evaluate_cyclonedx(doc)
+    except UnsupportedDocument as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    _render_minimum_elements(report, detailed=True)
+    if output is not None:
+        _write_or_exit(
+            output,
+            json.dumps(report.to_dict(), indent=2, ensure_ascii=False),
+            "SBOM minimum-elements report",
+        )
+    if fail_on_missing and not report.conformant:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def serve(
     host: Annotated[
         str | None,
@@ -642,6 +765,103 @@ def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
             where,
         )
     console.print(table)
+
+
+def _sbom_context(
+    config: ScanConfig,
+    author: str | None,
+    supplier: str | None,
+    lifecycle: str | None,
+) -> SbomContext:
+    """Merge SBOM authorship from flags (winning) and config."""
+    phase = lifecycle or config.sbom_lifecycle
+    if phase is not None and phase not in LIFECYCLE_PHASES:
+        console.print(
+            f"[red]error:[/red] invalid --sbom-lifecycle '{phase}'. "
+            f"Choose one of: {', '.join(LIFECYCLE_PHASES)}"
+        )
+        raise typer.Exit(code=2)
+    return SbomContext(
+        author=author or config.sbom_author,
+        author_email=config.sbom_author_email,
+        supplier=supplier or config.sbom_supplier,
+        lifecycle=phase or DEFAULT_LIFECYCLE,
+    )
+
+
+_ELEMENT_STYLE = {
+    ElementStatus.SATISFIED: "green",
+    ElementStatus.PARTIAL: "yellow",
+    ElementStatus.DECLARED_UNKNOWN: "cyan",
+    ElementStatus.MISSING: "bold red",
+}
+
+_ELEMENT_LABEL = {
+    ElementStatus.SATISFIED: "ok",
+    ElementStatus.PARTIAL: "partial",
+    ElementStatus.DECLARED_UNKNOWN: "declared",
+    ElementStatus.MISSING: "MISSING",
+}
+
+_ORIGIN_LABEL = {
+    ElementOrigin.CARRIED_OVER: "2021",
+    ElementOrigin.UPDATED_2026: "2026 upd",
+    ElementOrigin.NEW_2026: "2026 new",
+}
+
+
+def _render_minimum_elements(report: MinimumElementsReport, *, detailed: bool = False) -> None:
+    """One summary line during a scan; the full table for `aibom conformance`."""
+    verdict = (
+        "[green]conformant — every gap is declared[/green]"
+        if report.conformant
+        else f"[bold red]{report.missing} element(s) silently missing[/bold red]"
+    )
+    console.print(
+        f"\n[bold]CISA 2026 SBOM minimum elements:[/bold] {verdict}\n"
+        f"[dim]{report.satisfied} satisfied · {report.partial} partial · "
+        f"{report.declared_unknown} declared unknown · {report.missing} missing "
+        f"of {len(report.elements)} elements[/dim]"
+    )
+    if not detailed:
+        if not report.conformant:
+            console.print(
+                "[dim]Run `aibom conformance <sbom.json>` for the per-element table.[/dim]"
+            )
+        return
+
+    table = Table(title="Minimum elements", show_lines=False)
+    table.add_column("Status", style="bold")
+    table.add_column("Element")
+    table.add_column("Since", style="dim")
+    table.add_column("Coverage", justify="right")
+    table.add_column("Where", style="dim")
+    for element in report.elements:
+        coverage = (
+            f"{element.present}/{element.applicable}"
+            if element.applicable > 1
+            else ("yes" if element.present else "no")
+        )
+        if element.declared_unknown:
+            coverage += f" (+{element.declared_unknown} declared)"
+        table.add_row(
+            f"[{_ELEMENT_STYLE[element.status]}]{_ELEMENT_LABEL[element.status]}[/]",
+            element.name,
+            _ORIGIN_LABEL[element.origin],
+            coverage,
+            element.cyclonedx_path,
+        )
+    console.print(table)
+
+    for element in report.elements:
+        if element.status is ElementStatus.MISSING:
+            examples = ", ".join(element.undeclared_gaps[:5])
+            suffix = f" [dim]({examples})[/dim]" if examples else ""
+            console.print(f"[red]missing[/red] {element.name}: {element.remediation}{suffix}")
+    console.print(
+        f"[dim]{report.components} component(s), {report.transitive_components} transitive · "
+        f"{report.document_format}[/dim]"
+    )
 
 
 def _render_drift(report: DriftReport) -> None:

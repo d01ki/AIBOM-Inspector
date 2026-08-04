@@ -69,7 +69,11 @@ def evaluate_case(ground_truth: dict[str, Any], checkout: str | Path) -> dict[st
     """Scan one checkout and compare it with one validated ground-truth document."""
     _validate_ground_truth(ground_truth)
     expected = [_expected_component(raw) for raw in ground_truth["components"]]
-    predictions = _predictions(run_scan(checkout).inventory.entities)
+    # Ground truth lists the components a repository *declares*, so the
+    # benchmark scans in manifest-only mode. Lockfile resolution adds correct
+    # transitive components that no hand-authored ground truth contains; they
+    # would be scored as false positives and make the numbers meaningless.
+    predictions = _predictions(run_scan(checkout, lockfiles=False).inventory.entities)
     matched_expected, matched_predictions = _match(expected, predictions)
 
     false_negatives = [

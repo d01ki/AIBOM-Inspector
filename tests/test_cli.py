@@ -251,3 +251,107 @@ def test_scan_target_under_ignored_dir_name_still_scans(tmp_path: Path) -> None:
     assert data["stats"]["files_scanned"] == 2
     names = {e["name"] for e in data["entities"]}
     assert "gpt-4o-mini" in names
+
+
+# ── CISA 2026 SBOM minimum elements ──────────────────────────────────────────
+
+
+def test_scan_prints_minimum_elements_summary() -> None:
+    result = runner.invoke(app, ["scan", str(FIXTURE)])
+    assert result.exit_code == 0
+    assert "CISA 2026 SBOM minimum elements" in result.stdout
+
+
+def test_scan_writes_minimum_elements_report(tmp_path: Path) -> None:
+    out = tmp_path / "elements.json"
+    result = runner.invoke(
+        app, ["scan", str(FIXTURE), "-q", "--minimum-elements", str(out)]
+    )
+    assert result.exit_code == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["conformant"] is True
+    assert report["summary"]["missing"] == 0
+    assert {e["id"] for e in report["elements"]} >= {
+        "sbom-author",
+        "component-hash",
+        "component-hash-algorithm",
+        "component-license",
+        "sbom-generation-context",
+        "coverage",
+        "known-unknowns",
+    }
+
+
+def test_sbom_author_and_lifecycle_reach_the_bom(tmp_path: Path) -> None:
+    out = tmp_path / "bom.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan", str(FIXTURE), "-q",
+            "--sbom-author", "Acme Security",
+            "--sbom-supplier", "Acme Inc",
+            "--sbom-lifecycle", "build",
+            "--cyclonedx", str(out),
+        ],
+    )
+    assert result.exit_code == 0
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["metadata"]["authors"] == [{"name": "Acme Security"}]
+    assert doc["metadata"]["supplier"] == {"name": "Acme Inc"}
+    assert doc["metadata"]["lifecycles"] == [{"phase": "build"}]
+
+
+def test_invalid_lifecycle_exits_2() -> None:
+    result = runner.invoke(
+        app, ["scan", str(FIXTURE), "-q", "--sbom-lifecycle", "whenever"]
+    )
+    assert result.exit_code == 2
+    assert "invalid --sbom-lifecycle" in result.stdout
+
+
+def test_conformance_command_checks_an_existing_bom(tmp_path: Path) -> None:
+    bom = tmp_path / "bom.json"
+    assert runner.invoke(app, ["scan", str(FIXTURE), "-q", "--cyclonedx", str(bom)]).exit_code == 0
+    out = tmp_path / "report.json"
+    result = runner.invoke(app, ["conformance", str(bom), "-o", str(out), "--fail-on-missing"])
+    assert result.exit_code == 0
+    assert "Minimum elements" in result.stdout
+    assert json.loads(out.read_text(encoding="utf-8"))["conformant"] is True
+
+
+def test_conformance_fails_on_a_bom_with_silent_gaps(tmp_path: Path) -> None:
+    bom = tmp_path / "bare.json"
+    bom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "metadata": {"timestamp": "2026-07-29T00:00:00Z"},
+                "components": [{"type": "library", "bom-ref": "a", "name": "left-pad"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["conformance", str(bom), "--fail-on-missing"])
+    assert result.exit_code == 1
+    assert "silently missing" in result.stdout
+
+
+def test_conformance_rejects_a_non_cyclonedx_document(tmp_path: Path) -> None:
+    spdx = tmp_path / "spdx.json"
+    spdx.write_text(json.dumps({"spdxVersion": "SPDX-2.3"}), encoding="utf-8")
+    result = runner.invoke(app, ["conformance", str(spdx)])
+    assert result.exit_code == 2
+    assert "not a CycloneDX document" in result.stdout
+
+
+def test_no_lockfiles_flag_drops_transitive_components(tmp_path: Path) -> None:
+    locked = Path(__file__).parent / "fixtures" / "locked-ai-app"
+    out = tmp_path / "inv.json"
+    result = runner.invoke(
+        app, ["scan", str(locked), "-q", "--no-lockfiles", "--output", str(out)]
+    )
+    assert result.exit_code == 0
+    entities = json.loads(out.read_text(encoding="utf-8"))["entities"]
+    assert not any(e.get("dependency_scope") == "transitive" for e in entities)

@@ -11,9 +11,17 @@
   Anything else — every other language, and any construct the regex rules do
   not name — is not analyzed at all.
 - Dependency manifests are parsed for PyPI, npm, Go, crates.io, Maven,
-  RubyGems, Packagist and NuGet. Lockfiles are not read, so transitive
-  dependencies are absent unless the manifest names them; `go.mod` is the
-  exception, since it lists resolved versions.
+  RubyGems, Packagist and NuGet. Lockfiles are read for **npm
+  (`package-lock.json`), PyPI (`Pipfile.lock`, `poetry.lock`, `uv.lock`,
+  hash-pinned `requirements*.txt`), crates.io, Packagist and RubyGems**, which
+  is where transitive components and artifact digests come from. Without one of
+  those lockfiles, transitive dependencies are absent — the emitted SBOM says
+  so in `cisa:coverage` rather than implying completeness. `yarn.lock` and
+  `pnpm-lock.yaml` need a YAML parser this project does not depend on;
+  `go.sum` records module-tree hashes rather than artifact digests, so it is
+  not used (`go.mod` already lists resolved versions).
+- Dependencies are never resolved over the network: what is not in the
+  repository is not in the BOM.
 - Maven version resolution follows a single `${property}` indirection in the
   same POM. Parent POMs, `dependencyManagement`, BOM imports and Gradle version
   catalogs are not resolved, so some versions stay unknown.

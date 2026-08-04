@@ -32,7 +32,14 @@ evidence-backed risk findings and revision drift.
    author.
 3. **Extended AIBOM generation:** CycloneDX 1.6 JSON (ML-BOM component types)
    as the base format; tool-specific fields via the CycloneDX `properties`
-   namespace `aibom:*`. Never a proprietary-only format.
+   namespace `aibom:*`. Never a proprietary-only format. The document targets
+   the **CISA 2026 SBOM minimum elements** (which replaced the 2021 NTIA
+   elements and explicitly cover AI software): document authorship and
+   generation context, a primary component, per-component producers,
+   identifiers, licenses and artifact digests, and an explicit dependency entry
+   for every component. Data static analysis cannot know is *declared* as a
+   `cisa:known-unknown` with a reason, never left silently blank —
+   see [docs/cisa-2026-minimum-elements.md](docs/cisa-2026-minimum-elements.md).
 4. **Exposure, impact, and dependency graph:** entities + relationships plus
    confirmed, privacy-preserving untrusted-input paths through prompt sinks,
    models, directly bound tools, and tool-parameter-controlled operations,
@@ -43,8 +50,8 @@ evidence-backed risk findings and revision drift.
    finding changes. Prompt bodies and tool argument values are never serialized.
 6. **Risk findings:** rule-based checks (§6) with severity + evidence +
    remediation.
-7. **Outputs:** CLI → JSON / CycloneDX / SARIF / drift JSON / self-contained
-   HTML report; FastAPI + web UI on top.
+7. **Outputs:** CLI → JSON / CycloneDX / SARIF / drift JSON / minimum-elements
+   conformance JSON / self-contained HTML report; FastAPI + web UI on top.
 
 ### 2.2 Non-goals
 
@@ -58,12 +65,13 @@ evidence-backed risk findings and revision drift.
 ```
 CLI (aibom scan / diff / serve)
         │
-Collectors (plugin interface)          repo, dependencies, huggingface
+Collectors (plugin interface)          repo, dependencies, lockfiles, huggingface
         ▼
 Normalizer → unified schema (§4), Pydantic models
         ▼
 Inventory (deduplicating store + typed relationship graph)
         ├─ AIBOM Engine   → CycloneDX 1.6 + aibom:* properties
+        ├─ Conformance    → CISA 2026 SBOM minimum elements (any CycloneDX doc)
         ├─ Exposure Engine → sanitized source → prompt sink → model paths
         ├─ Impact Engine  → direct tool binding + parameter → operation paths
         ├─ Drift Engine   → exposure/impact + component revision comparison
@@ -88,7 +96,7 @@ Core entities (all Pydantic, all with `source_evidence: list[Evidence]`):
 | `Prompt` | location, role/kind, hash, source/sink, trust boundary, model/tool refs, flow, bound capabilities |
 | `Agent` | framework, tools bound, model refs |
 | `Service` | MCP server, external API, endpoint |
-| `Package` | ecosystem, version, purl, AI flag |
+| `Package` | ecosystem, version, purl, AI flag, dependency scope (direct/transitive), artifact digest + algorithm, producing registry, license |
 
 Relationships (typed edges): `depends_on`, `fine_tuned_from`, `trained_on`,
 `served_by`, `invokes`, `uses_prompt`, `flows_to`, `licensed_under`.
@@ -157,8 +165,10 @@ e2e test producing a full CycloneDX doc validated against the official schema.
 
 Scan defaults are read from the scan target's `aibom.toml` (or
 `[tool.aibom]` in its `pyproject.toml`): `fail_on`, `min_confidence`,
-`disable_detectors`, `ignore_rules`. CLI flags always override config. This is
-how an organization pins one policy across many repositories.
+`disable_detectors`, `ignore_rules`, `lockfiles`, and the SBOM authorship keys
+`sbom_author`, `sbom_author_email`, `sbom_supplier`, `sbom_lifecycle`. CLI
+flags always override config. This is how an organization pins one policy
+across many repositories.
 
 ## 9. Success Metrics
 
@@ -166,6 +176,8 @@ how an organization pins one policy across many repositories.
 - Zero false-negatives on the golden fixture; precision/recall tracked by the
   reproducible benchmark harness (`benchmark/`).
 - Valid CycloneDX 1.6 (schema-validated) accepted by Dependency-Track.
+- No CISA 2026 minimum element silently missing from a generated AIBOM: every
+  gap is an explicit, reasoned known-unknown declaration.
 - Valid SARIF 2.1.0 accepted by GitHub Code Scanning.
 
 ## 10. Roadmap
