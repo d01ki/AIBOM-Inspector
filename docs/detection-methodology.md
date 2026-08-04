@@ -118,7 +118,7 @@ Static prompt text is never copied. `aibom diff` compares these paths across
 revisions; a safe static system instruction becoming user-controlled is
 reported even when the model and dependency inventories do not change.
 
-## Agent capability blast radius
+## Which agent tools untrusted input can reach
 
 For an OpenAI Agents SDK `Agent(...)` call, the detector reads
 `instructions=`, `model=`, and an explicit `tools=[...]` list.
@@ -146,7 +146,7 @@ sanitized qualified operation, and line—not argument values.
 `AIBOM-IMPACT-001` is emitted instead of the generic prompt-exposure finding
 for the same root path, avoiding duplicate score deductions. `aibom diff`
 compares stable prompt anchors and capability signatures; it emits
-`impact_path_added` when a revision creates the connected blast radius while
+`impact_path_added` when a revision connects that path while
 the component set remains unchanged.
 
 ## Usage classification

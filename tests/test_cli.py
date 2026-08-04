@@ -197,8 +197,8 @@ def test_menu_demo_scan(monkeypatch: Any) -> None:
     monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
     result = runner.invoke(app, [], input="1\n")
     assert result.exit_code == 0
-    assert "Impact demo" in result.stdout
-    assert "Potential blast radius" in result.stdout
+    assert "Bundled sample app" in result.stdout
+    assert "Untrusted input reaching a bound tool" in result.stdout
     assert "Security score" in result.stdout
     assert "AIBOM-IMPACT-001" in result.stdout
 
@@ -226,7 +226,7 @@ def test_scan_demo_flag() -> None:
 def test_demo_command_runs_impact_and_drift() -> None:
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == 0
-    assert "Potential blast radius" in result.stdout
+    assert "Untrusted input reaching a bound tool" in result.stdout
     assert "Behavioral drift demo" in result.stdout
     assert "impact_path_added" in result.stdout
 

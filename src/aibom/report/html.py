@@ -306,7 +306,8 @@ def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
         )
         impact_markup.append(
             "<div class='impact-path'>"
-            f"<strong>Potential blast radius &middot; {escape(path['severity'])}</strong>"
+            f"<strong>Untrusted input reaches a bound tool &middot; "
+            f"{escape(path['severity'])}</strong>"
             f"<span class='route'>{escape(route)}</span>"
             f"Could {escape(consequences)}."
             f"<span class='meta'> Direct binding + tool-parameter flow &middot; "

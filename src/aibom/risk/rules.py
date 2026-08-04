@@ -477,7 +477,7 @@ def aibom_impact_001_bound_tool_blast_radius(inv: Inventory) -> list[Finding]:
         out.append(
             Finding(
                 rule_id="AIBOM-IMPACT-001",
-                title="Untrusted instructions can steer a high-impact agent tool",
+                title="Untrusted instructions can steer a privileged agent tool",
                 severity=path.severity,
                 category=RiskCategory.CONFIGURATION,
                 description=(
@@ -490,7 +490,7 @@ def aibom_impact_001_bound_tool_blast_radius(inv: Inventory) -> list[Finding]:
                 remediation=(
                     "Keep untrusted content out of agent instructions; expose only narrowly "
                     "scoped tools, validate tool arguments, and require approval or sandboxing "
-                    "for high-impact operations."
+                    "for privileged operations."
                 ),
                 entity_id=path.prompt_id,
                 entity_name=path.prompt_name,
