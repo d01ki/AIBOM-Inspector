@@ -15,23 +15,61 @@ supply-chain risk analysis.
 Every entity it reports is pinned to a concrete `file:line` with the pattern that
 matched. **No evidence, no claim** — that is the trust contract of the tool.
 
-The differentiator is a **behavioral AIBOM** with **Agent Capability
-Blast-Radius Drift**. It connects a bounded chain of evidence:
-untrusted input → privileged instructions → model → directly bound tool →
-tool-parameter-controlled operation. It can show that a revision newly enables
-command execution, file mutation, or external actions even when the model,
-tool, SDK, packages, and ordinary component BOM are unchanged. Prompt bodies
-and tool argument values are never retained.
+## What makes it different
 
-That analysis runs on **Python and TypeScript/JavaScript alike** — including
-the Vercel AI SDK, OpenAI Agents, MCP TypeScript servers, and Next.js/Express
-route handlers, where most agent code now lives.
+Most SBOM tools answer *"which parts are in this project?"*. AIBOM Inspector
+also answers **"what could an attacker make those parts do?"** — by following a
+chain through the code and demanding evidence at every step:
 
-**Two tiers, stated plainly.** Python and JS/TS get syntax-aware behavioral
-analysis, because every claim is backed by a parse tree. Go, Java, Rust, Ruby,
-C# and PHP get *inventory* coverage — dependencies, model ids, provider SDKs,
-prompt constants and secrets — from the pattern layer. Those languages never
-produce impact paths or drift verdicts, and the tool does not pretend otherwise.
+```
+untrusted input          HTTP request, CLI argument, environment, file, retrieval
+   ↓
+system / developer prompt        the instructions the model is told to trust
+   ↓
+model call
+   ↓
+a tool bound to that agent
+   ↓
+what the tool actually does      shell command, file write, network call
+```
+
+**Why that matters in review.** A pull request edits one line of a prompt
+template. The model, the SDK, the packages and the component list are all
+identical, so a conventional SBOM diff reports *no change*. AIBOM Inspector
+reports that user-controlled text now reaches the system prompt of an agent
+whose bound tool runs a shell command — a blast radius that did not exist in
+the previous revision. That is what `aibom diff` gates on in CI.
+
+Prompt text and tool arguments are never stored: only hashes and sanitized
+paths leave the scanner.
+
+The same analysis runs on **Python and TypeScript/JavaScript** — including the
+Vercel AI SDK, OpenAI Agents, MCP TypeScript servers, and Next.js/Express route
+handlers, where most agent code now lives.
+
+## Standards it lines up with
+
+- **[CISA 2026 SBOM minimum elements][cisa2026]** — the July 2026 baseline that
+  replaced the 2021 NTIA minimum elements and now **explicitly covers AI
+  software**. The AIBOM this tool emits targets it field by field: component
+  hashes and algorithms, licenses, producers, identifiers, SBOM authorship,
+  generation context, and transitive coverage from lockfiles. Anything static
+  analysis genuinely cannot know is *declared with a reason* rather than left
+  blank — which is exactly what the baseline asks for. `aibom conformance`
+  scores **any** CycloneDX SBOM against it, including ones other tools
+  produced. → [gap analysis](docs/cisa-2026-minimum-elements.md)
+- **[OWASP CycloneDX 1.6][cyclonedx]** — the output format (ML-BOM component
+  types), validated against the official schema and ingestible by
+  Dependency-Track.
+- **[OWASP Top 10 for LLM Applications v2.0][owasp-llm]** — every risk rule
+  maps to a category, mostly LLM01 (Prompt Injection), LLM03 (Supply Chain) and
+  LLM06 (Excessive Agency). The mapping is in the
+  [risk rule table](#risk-rules--scoring).
+- **SARIF 2.1.0** — findings upload straight into GitHub Code Scanning.
+
+[cisa2026]: https://www.cisa.gov/resources-tools/resources/2026-minimum-elements-software-bill-materials-sbom
+[cyclonedx]: https://cyclonedx.org/
+[owasp-llm]: https://genai.owasp.org/llm-top-10/
 
 ## Demo
 
@@ -136,17 +174,12 @@ The dated, source-linked competitive analysis and claim boundaries are in
   `uv.lock`, hash-pinned `requirements*.txt`, `Cargo.lock`, `composer.lock` and
   `Gemfile.lock` add the **transitive** graph, exact versions, the supplying
   registry, and the **artifact digest** of every locked component
-- **CISA 2026 SBOM minimum-elements conformance** — the emitted CycloneDX
-  targets the [2026 baseline][cisa2026] that replaced the 2021 NTIA elements
-  and now explicitly covers AI software: SBOM author, generation context
-  (lifecycle phase), primary component, component hashes + algorithms,
-  licenses, producers, identifiers, and a dependency entry for every component.
-  What static analysis cannot know is **declared** as a known unknown with a
-  reason instead of left blank. `aibom conformance <bom.json>` scores any
-  CycloneDX SBOM, not only the ones this tool produces —
-  [gap analysis](docs/cisa-2026-minimum-elements.md)
-
-[cisa2026]: https://www.cisa.gov/resources-tools/resources/2026-minimum-elements-software-bill-materials-sbom
+- **SBOM minimum-elements conformance** ([CISA 2026][cisa2026]) — SBOM author,
+  generation context, primary component, component hashes + algorithms,
+  licenses, producers, identifiers, and a dependency entry for every component;
+  every remaining gap declared as a reasoned known unknown. `aibom conformance
+  <bom.json>` scores any CycloneDX SBOM against the baseline, with
+  `--fail-on-missing` as a CI gate
 - **Hugging Face resolver** — license, model card, serialization formats,
   author, downloads, gated status (network-optional, cache-backed,
   offline-friendly; **never downloads or loads weights**)
@@ -310,23 +343,34 @@ a third-party repo can't silence its own findings.
 Findings are **deterministic and rule-based** (no LLM in the loop). Each carries a
 severity, a `file:line` evidence trail, and a remediation.
 
-| ID | Check | Default severity | Needs `--resolve` |
-|---|---|---|---|
-| TDR-001 | Pickle-based weight format (arbitrary code exec on load) | High | — |
-| TDR-002 | Model reference without a pinned revision | Medium | — |
-| TDR-003 | Name impersonates a popular model family (typosquat) | High | — |
-| TDR-004 | Missing model card | Low | ✔ |
-| TDR-005 | License missing / non-SPDX / unrecognized | Medium–Low | ✔ |
-| TDR-006 | Very low adoption (verify author) | Medium | ✔ |
-| TDR-007 | Hardcoded secret near an AI call | Critical | — |
-| TDR-008 | Dataset with no provenance metadata | Low | — |
-| TDR-009 | `trust_remote_code=True` | High | — |
-| TDR-010 | Deprecated / superseded model referenced | Medium | — |
-| TDR-011 | MCP server exposes an LLM-invokable tool surface | Low | — |
-| TDR-012 | AI package declared without a pinned version | Low | — |
-| AIBOM-PROMPT-004 | Untrusted input flows into system/developer instructions | High | — |
-| AIBOM-IMPACT-001 | Untrusted privileged instructions reach a directly bound tool whose model-controlled parameter flows into a high-impact operation | Critical–Medium | — |
-| OSV-* | Known vulnerability in a pinned AI package (OSV.dev) | per advisory | ✔ (network) |
+The `OWASP` column maps each rule to a category of the
+[OWASP Top 10 for LLM Applications v2.0][owasp-llm]. It says which risk the
+finding belongs to — it is not a claim of certification.
+
+| ID | Check | OWASP | Default severity | Needs `--resolve` |
+|---|---|---|---|---|
+| TDR-001 | Pickle-based weight format (arbitrary code exec on load) | LLM03 | High | — |
+| TDR-002 | Model reference without a pinned revision | LLM03 | Medium | — |
+| TDR-003 | Name impersonates a popular model family (typosquat) | LLM03 | High | — |
+| TDR-004 | Missing model card | LLM03 | Low | ✔ |
+| TDR-005 | License missing / non-SPDX / unrecognized | LLM03 | Medium–Low | ✔ |
+| TDR-006 | Very low adoption (verify author) | LLM03 | Medium | ✔ |
+| TDR-007 | Hardcoded secret near an AI call | LLM02 | Critical | — |
+| TDR-008 | Dataset with no provenance metadata | LLM04 | Low | — |
+| TDR-009 | `trust_remote_code=True` | LLM03 | High | — |
+| TDR-010 | Deprecated / superseded model referenced | LLM03 | Medium | — |
+| TDR-011 | MCP server exposes an LLM-invokable tool surface | LLM06 | Low | — |
+| TDR-012 | AI package declared without a pinned version | LLM03 | Low | — |
+| AIBOM-PROMPT-004 | Untrusted input flows into system/developer instructions | LLM01 | High | — |
+| AIBOM-IMPACT-001 | Untrusted privileged instructions reach a directly bound tool whose model-controlled parameter flows into a high-impact operation | LLM01 + LLM06 | Critical–Medium | — |
+| OSV-* | Known vulnerability in a pinned AI package (OSV.dev) | LLM03 | per advisory | ✔ (network) |
+
+LLM01 Prompt Injection · LLM02 Sensitive Information Disclosure ·
+LLM03 Supply Chain · LLM04 Data and Model Poisoning · LLM06 Excessive Agency.
+The categories this tool does **not** cover are as informative as the ones it
+does: LLM05 (Improper Output Handling), LLM07 (System Prompt Leakage), LLM08
+(Vector and Embedding Weaknesses), LLM09 (Misinformation) and LLM10 (Unbounded
+Consumption) need runtime behavior, which a static scanner never observes.
 
 **Security score (0–100):** each of the four categories {integrity, provenance,
 licensing, configuration} starts at 100 and loses points per finding
