@@ -7,6 +7,22 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
+> [!IMPORTANT]
+> **Conforms to the [CISA 2026 SBOM minimum elements][cisa2026]** — the July 2026
+> baseline that replaced the 2021 NTIA minimum elements and now **explicitly
+> covers AI software**. The AIBOM this tool emits carries every required field
+> it can determine — component hashes and algorithms, licenses, producers,
+> identifiers, SBOM authorship, generation context, and transitive coverage from
+> lockfiles — and *declares with a reason* anything static analysis cannot know,
+> which is what the baseline asks for. Verify it yourself, on this tool's output
+> or on any other CycloneDX SBOM:
+>
+> ```bash
+> aibom conformance your-sbom.json --fail-on-missing
+> ```
+>
+> → [element-by-element gap analysis](docs/cisa-2026-minimum-elements.md)
+
 `aibom` scans a repository and produces an **evidence-backed inventory** of the AI
 components it depends on — models, datasets, prompts, agents, and external AI
 services — as a first step toward a full **AIBOM** (AI Bill of Materials) and
@@ -49,15 +65,12 @@ handlers, where most agent code now lives.
 
 ## Standards it lines up with
 
-- **[CISA 2026 SBOM minimum elements][cisa2026]** — the July 2026 baseline that
-  replaced the 2021 NTIA minimum elements and now **explicitly covers AI
-  software**. The AIBOM this tool emits targets it field by field: component
-  hashes and algorithms, licenses, producers, identifiers, SBOM authorship,
-  generation context, and transitive coverage from lockfiles. Anything static
-  analysis genuinely cannot know is *declared with a reason* rather than left
-  blank — which is exactly what the baseline asks for. `aibom conformance`
-  scores **any** CycloneDX SBOM against it, including ones other tools
-  produced. → [gap analysis](docs/cisa-2026-minimum-elements.md)
+- **[CISA 2026 SBOM minimum elements][cisa2026]** — see the note at the top.
+  The conformance checker reads a *document*, so `aibom conformance` scores any
+  CycloneDX SBOM, including ones other tools produced, and
+  `--fail-on-missing` turns a silently missing element into a CI failure. A
+  declared known unknown is not a failure — that distinction is the point of
+  the 2026 baseline. → [gap analysis](docs/cisa-2026-minimum-elements.md)
 - **[OWASP CycloneDX 1.6][cyclonedx]** — the output format (ML-BOM component
   types), validated against the official schema and ingestible by
   Dependency-Track.
@@ -396,6 +409,13 @@ normal scan, or two refs to compare revisions. Without Docker:
 pip install -e ".[server]"         # in the venv from "Install without Docker"
 aibom serve                        # then open http://localhost:8000
 ```
+
+**The page is only the interface; the analysis runs on the backend.** Served by
+`aibom serve` they are the same origin and it just works. If you host `web/`
+somewhere static (GitHub Pages, a CDN), the page checks for a backend on load
+and asks for its address — the **Analysis backend** field, remembered in the
+browser, or `?api=https://backend.example.com` for a shareable link. Point it at
+a backend reachable over HTTPS whose `AIBOM_CORS_ORIGINS` allows your page.
 
 The backend shallow-clones the URL into a throwaway temp dir, runs the same
 static pipeline as the CLI, and returns JSON — it **never executes the cloned

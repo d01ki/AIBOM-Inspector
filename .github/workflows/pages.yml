@@ -2,8 +2,14 @@ name: Deploy web UI to GitHub Pages
 
 # Optional manual publication of the static single-page UI to GitHub Pages.
 # One-time setup: repo Settings → Pages → Build and deployment → Source =
-# "GitHub Actions". The deployed page has an editable "API endpoint" field —
-# point it at your running backend (see the Dockerfile / README).
+# "GitHub Actions".
+#
+# Pages serves static files only, so the deployed page has no API of its own:
+# it checks for a backend on load and asks for one ("Analysis backend" field,
+# remembered in the browser) when there is none. Run that backend with
+# `aibom serve` or the Docker image, reachable over HTTPS with CORS allowing
+# the Pages origin (AIBOM_CORS_ORIGINS). `?api=https://backend.example.com`
+# preselects it in a shareable link.
 
 on:
   workflow_dispatch:
