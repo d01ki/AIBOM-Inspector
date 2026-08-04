@@ -18,8 +18,10 @@ htmlcov/
 coverage.xml
 benchmark/checkouts/
 
-# uv
+# uv — this project's own lock is not checked in, but test fixtures that a
+# collector must parse are source, not build output.
 uv.lock
+!tests/fixtures/**/uv.lock
 
 # Editor / OS
 .idea/

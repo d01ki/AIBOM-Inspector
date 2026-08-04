@@ -1,0 +1,16 @@
+version = 1
+requires-python = ">=3.10"
+
+[[package]]
+name = "anthropic"
+version = "0.30.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/anthropic-0.30.1.tar.gz", hash = "sha256:7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e", size = 100 }
+
+[[package]]
+name = "httpx"
+version = "0.27.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/httpx-0.27.0-py3-none-any.whl", hash = "sha256:8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f" },
+]
