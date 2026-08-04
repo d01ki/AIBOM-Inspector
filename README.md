@@ -410,6 +410,13 @@ pip install -e ".[server]"         # in the venv from "Install without Docker"
 aibom serve                        # then open http://localhost:8000
 ```
 
+**The page is only the interface; the analysis runs on the backend.** Served by
+`aibom serve` they are the same origin and it just works. If you host `web/`
+somewhere static (GitHub Pages, a CDN), the page checks for a backend on load
+and asks for its address — the **Analysis backend** field, remembered in the
+browser, or `?api=https://backend.example.com` for a shareable link. Point it at
+a backend reachable over HTTPS whose `AIBOM_CORS_ORIGINS` allows your page.
+
 The backend shallow-clones the URL into a throwaway temp dir, runs the same
 static pipeline as the CLI, and returns JSON — it **never executes the cloned
 code**. Clone URLs are validated against a host allowlist (github.com,

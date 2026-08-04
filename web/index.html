@@ -383,6 +383,12 @@
     margin-top: 9px; color: var(--muted); font-size: 11px; }
   .status-block { min-height: 0; border-radius: 8px; background: var(--surface); }
   .status-block:has(#status:empty) { display: none; }
+  .api-endpoint { margin-top: 14px; padding: 12px; border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 5px; background: var(--surface); }
+  .api-endpoint label { display: block; margin-bottom: 7px; font-weight: 600; font-size: 12px; }
+  .api-endpoint .field-help { display: block; line-height: 1.55; }
+  .api-line { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 0;
+    color: var(--muted); font-size: 11px; }
   #status { padding: 11px 12px; background: transparent; color: var(--fg); }
   #status.err { color: #8d2633; background: #fbf0f1; }
   .scan-progress { display: none; grid-template-columns: 16px 1fr; gap: 10px; align-items: start;
@@ -956,7 +962,8 @@
           </div>
           <div class="demo-launch">
             <button id="runDemo" type="button">Run built-in impact demo</button>
-            <span>No repository URL, API key, or network access required.</span>
+            <span>No repository URL, API key, or internet access needed — it runs offline on
+              the analysis backend below.</span>
           </div>
         </div>
 
@@ -987,6 +994,19 @@
           </div>
         </div>
 
+        <div class="api-endpoint" id="apiEndpointBlock" hidden>
+          <label for="apiEndpoint">Analysis backend</label>
+          <div class="scan-row">
+            <input type="url" id="apiEndpoint" placeholder="https://your-backend.example.com"
+                   autocomplete="off" spellcheck="false" aria-describedby="apiEndpointHelp">
+            <button id="saveApiEndpoint" type="button">Use this backend</button>
+          </div>
+          <p class="field-help" id="apiEndpointHelp">This page is only the interface — the
+            analysis runs on an AIBOM Inspector backend. Start one with
+            <code>aibom serve</code> or the Docker image, then paste its address here. It is
+            remembered in this browser.</p>
+        </div>
+
         <div class="status-block">
           <p id="status" role="status" aria-live="polite"></p>
           <div class="scan-progress" aria-hidden="true">
@@ -994,6 +1014,10 @@
             <span id="progressHint">Cloning repository, reading supported files, and resolving advisories.</span>
           </div>
         </div>
+
+        <!-- Outside .status-block, which collapses when there is no status text. -->
+        <p class="api-line"><span id="apiLine"></span>
+          <button class="text-action" id="toggleApiEndpoint" type="button">change</button></p>
       </div>
     </section>
 
@@ -1238,12 +1262,37 @@ const $ = (id) => document.getElementById(id);
 
 // The backend serves this page, so the API lives at this page's origin.
 // Static hosting (e.g. GitHub Pages) can point elsewhere via ?api=https://host.
+const API_BASE_KEY = "aibom.apiBase";
+
+// localStorage throws in some privacy modes; a saved backend is a convenience,
+// never a requirement.
+function storedApiBase() {
+  try {
+    return localStorage.getItem(API_BASE_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function storeApiBase(value) {
+  try {
+    if (value) localStorage.setItem(API_BASE_KEY, value);
+    else localStorage.removeItem(API_BASE_KEY);
+  } catch (_) { /* nothing to do: the address still applies to this page load */ }
+}
+
+let apiOverride = new URLSearchParams(location.search).get("api") || storedApiBase();
+
 function apiBase() {
-  const override = new URLSearchParams(location.search).get("api");
-  if (override) return override.replace(/\/$/, "");
+  if (apiOverride) return apiOverride.replace(/\/$/, "");
   return /^https?:$/.test(location.protocol) && location.host
     ? location.origin : "http://localhost:8000";
 }
+
+// Raised when the address we are talking to is not an AIBOM Inspector backend
+// (a static host answering with HTML, or nothing listening at all). The UI
+// reacts by asking for a backend address instead of printing "HTTP 404".
+class BackendUnavailable extends Error {}
 
 let lastRequest = null;
 let lastResult = null;
@@ -1366,9 +1415,14 @@ async function runAnalysis(button, busyLabel, spec) {
     $("results").scrollIntoView({ behavior, block: "start" });
     $("results").focus({ preventScroll: true });
   } catch (e) {
+    const missing = e instanceof BackendUnavailable;
     setStatus(spec.failure + ": " + e.message, true);
-    showWorkspaceState("NO RESULT", spec.failure,
-      "Review the error above, adjust the input if needed, and try again.");
+    showWorkspaceState("NO RESULT", missing ? "No analysis backend" : spec.failure,
+      missing
+        ? "This page is only the interface. Start a backend with `aibom serve` (or the "
+          + "Docker image) and enter its address above — nothing was analyzed."
+        : "Review the error above, adjust the input if needed, and try again.");
+    if (missing) showApiEndpointField();
     setWorkflowStep(1);
   } finally {
     ACTION_BUTTONS.forEach((id) => { $(id).disabled = false; });
@@ -1708,16 +1762,91 @@ async function downloadSarif() {
 // Drift shares the scan panel's status line, workflow steps, and results area;
 // only the result body and the export button differ.
 
-function postJson(url, body) {
+async function postJson(url, body) {
   const options = body
     ? { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body) }
     : { method: "POST" };
-  return fetch(url, options).then(async (resp) => {
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-    return data;
-  });
+  let resp;
+  try {
+    resp = await fetch(url, options);
+  } catch (e) {
+    // Network-level failure: wrong address, backend down, CORS, offline.
+    throw new BackendUnavailable("cannot reach " + apiBase() + " (" + e.message + ")");
+  }
+  const text = await resp.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    // Not JSON. A static host (GitHub Pages, a CDN) answers every POST with
+    // HTML, which is exactly the "nothing happens" case.
+    throw new BackendUnavailable(
+      "no analysis backend at " + apiBase() + " (HTTP " + resp.status
+      + ", and the reply was not JSON)");
+  }
+  if (!resp.ok) {
+    // 404/405 on an API path means this origin serves the page but not the API.
+    if (resp.status === 404 || resp.status === 405) {
+      throw new BackendUnavailable(
+        "no analysis backend at " + apiBase() + " (HTTP " + resp.status + ")");
+    }
+    throw new Error(data.detail || ("HTTP " + resp.status));
+  }
+  return data;
+}
+
+// --- backend address -------------------------------------------------------
+
+function renderApiLine() {
+  const base = apiBase();
+  const sameOrigin = base === location.origin;
+  $("apiLine").textContent = sameOrigin
+    ? "Analysis backend: this server"
+    : "Analysis backend: " + base;
+}
+
+function showApiEndpointField(message) {
+  const block = $("apiEndpointBlock");
+  block.hidden = false;
+  $("apiEndpoint").value = apiOverride || "";
+  if (message) setStatus(message, true);
+  block.scrollIntoView({ block: "nearest" });
+  $("apiEndpoint").focus();
+}
+
+function saveApiEndpoint() {
+  const value = $("apiEndpoint").value.trim().replace(/\/$/, "");
+  if (value && !isRepositoryUrl(value)) {
+    $("apiEndpoint").setAttribute("aria-invalid", "true");
+    setStatus("Enter the backend address, including https://.", true);
+    return;
+  }
+  $("apiEndpoint").removeAttribute("aria-invalid");
+  apiOverride = value;
+  storeApiBase(value);
+  renderApiLine();
+  checkBackend({ announce: true });
+}
+
+// Ask the backend whether it is there *before* the user clicks anything, so a
+// missing backend reads as a setup step rather than a failed analysis.
+async function checkBackend(options) {
+  const announce = options && options.announce;
+  const base = apiBase();
+  try {
+    const resp = await fetch(base + "/api/health");
+    const data = await resp.json();
+    if (!resp.ok || data.status !== "ok") throw new Error("HTTP " + resp.status);
+    $("apiEndpointBlock").hidden = true;
+    if (announce) setStatus("Backend reachable (aibom " + (data.version || "?") + ").", false);
+    return true;
+  } catch (_) {
+    showApiEndpointField(
+      "No analysis backend at " + base + ". This page is only the interface — "
+      + "point it at a running backend to analyze anything.");
+    return false;
+  }
 }
 
 function runDriftDemo(language) {
@@ -2164,6 +2293,15 @@ function setMode(mode) {
 
 $("scan").addEventListener("click", scan);
 $("loadExample").addEventListener("click", loadExample);
+$("saveApiEndpoint").addEventListener("click", saveApiEndpoint);
+$("apiEndpoint").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveApiEndpoint();
+});
+$("toggleApiEndpoint").addEventListener("click", () => {
+  const block = $("apiEndpointBlock");
+  if (block.hidden) showApiEndpointField();
+  else block.hidden = true;
+});
 $("runDemo").addEventListener("click", runDemo);
 $("download").addEventListener("click", download);
 $("downloadCdx").addEventListener("click", downloadCycloneDX);
@@ -2187,15 +2325,23 @@ $("severityFilter").addEventListener("change", filterFindings);
 $("inventorySearch").addEventListener("input", filterInventory);
 $("typeFilter").addEventListener("change", filterInventory);
 
+renderApiLine();
+
 // Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
 const params = new URLSearchParams(location.search);
 const preset = params.get("repo");
 const driftPreset = params.get("drift");   // 'python' | 'typescript'
-if (driftPreset) {
-  setMode("drift");
-  runDriftDemo(driftPreset === "typescript" ? "typescript" : "python");
-} else if (params.get("demo") === "1") runDemo();
-else if (preset) { $("repo").value = preset; scan(); }
+
+// Confirm the backend first: an autostarted analysis against a static host
+// would otherwise fail with an error the visitor never asked for.
+checkBackend().then((ready) => {
+  if (!ready) return;
+  if (driftPreset) {
+    setMode("drift");
+    runDriftDemo(driftPreset === "typescript" ? "typescript" : "python");
+  } else if (params.get("demo") === "1") runDemo();
+  else if (preset) { $("repo").value = preset; scan(); }
+});
 </script>
 </body>
 </html>
