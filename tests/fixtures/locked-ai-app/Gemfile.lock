@@ -1,0 +1,17 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    ruby-openai (7.1.0)
+      event_stream_parser (>= 0.3.0)
+      faraday (>= 1)
+    event_stream_parser (1.0.0)
+    faraday (2.9.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  ruby-openai (~> 7.1)
+
+BUNDLED WITH
+   2.5.9

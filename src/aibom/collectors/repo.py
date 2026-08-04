@@ -990,7 +990,12 @@ class RepoCollector(Collector):
 
 
 def _sha(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    """Full SHA-256 of prompt text.
+
+    The digest is the prompt's *Component Hash* in the emitted SBOM, so it must
+    be a complete digest a consumer can recompute — never a truncation.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _redact_secret_literals(text: str) -> str:

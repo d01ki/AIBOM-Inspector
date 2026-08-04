@@ -1,0 +1,17 @@
+{
+    "_readme": ["This file locks the dependencies of your project to a known state"],
+    "content-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "packages": [
+        {
+            "name": "openai-php/client",
+            "version": "v0.10.1",
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/openai-php/client/zipball/abc",
+                "shasum": "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a"
+            },
+            "license": ["MIT"]
+        }
+    ],
+    "packages-dev": []
+}

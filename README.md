@@ -132,6 +132,21 @@ The dated, source-linked competitive analysis and claim boundaries are in
   `pom.xml`, `build.gradle`, `Gemfile`, `composer.json` and `*.csproj` with
   versions and purls across **PyPI, npm, Go, crates.io, Maven, RubyGems,
   Packagist and NuGet**; the AI/ML layer is flagged and drives the risk analysis
+- **Lockfile resolution** — `package-lock.json`, `Pipfile.lock`, `poetry.lock`,
+  `uv.lock`, hash-pinned `requirements*.txt`, `Cargo.lock`, `composer.lock` and
+  `Gemfile.lock` add the **transitive** graph, exact versions, the supplying
+  registry, and the **artifact digest** of every locked component
+- **CISA 2026 SBOM minimum-elements conformance** — the emitted CycloneDX
+  targets the [2026 baseline][cisa2026] that replaced the 2021 NTIA elements
+  and now explicitly covers AI software: SBOM author, generation context
+  (lifecycle phase), primary component, component hashes + algorithms,
+  licenses, producers, identifiers, and a dependency entry for every component.
+  What static analysis cannot know is **declared** as a known unknown with a
+  reason instead of left blank. `aibom conformance <bom.json>` scores any
+  CycloneDX SBOM, not only the ones this tool produces —
+  [gap analysis](docs/cisa-2026-minimum-elements.md)
+
+[cisa2026]: https://www.cisa.gov/resources-tools/resources/2026-minimum-elements-software-bill-materials-sbom
 - **Hugging Face resolver** — license, model card, serialization formats,
   author, downloads, gated status (network-optional, cache-backed,
   offline-friendly; **never downloads or loads weights**)
@@ -234,6 +249,13 @@ aibom scan . -o inv.json -c aibom.cdx.json --sarif findings.sarif -r report.html
 # online enrichment (HF metadata + OSV vulnerabilities) and a CI severity gate
 aibom scan . --resolve --fail-on high
 
+# CISA 2026 SBOM minimum elements: supply the facts a scanner cannot know,
+# write the conformance report, and check any CycloneDX SBOM (including
+# someone else's) with a CI gate on silently missing elements
+aibom scan . --sbom-author "Acme Security" --sbom-supplier "Acme Inc" \
+  --sbom-lifecycle build -c aibom.cdx.json --minimum-elements elements.json
+aibom conformance aibom.cdx.json --fail-on-missing
+
 # compare two revisions; fail when a new high-risk behavior appears
 aibom diff ./baseline ./candidate --output drift.json --fail-on high
 
@@ -257,6 +279,12 @@ fail_on = "high"
 min_confidence = 0.6
 disable_detectors = ["python.openai.ast"]
 ignore_rules = ["TDR-004", "OSV-*"]     # exact IDs or 'PREFIX-*' families
+lockfiles = true                        # resolve transitive deps + artifact digests
+
+# CISA 2026 minimum elements about the SBOM document itself
+sbom_author = "Acme Security"
+sbom_supplier = "Acme Inc"
+sbom_lifecycle = "pre-build"            # design|pre-build|build|post-build|operations|…
 ```
 
 Detector IDs: `python.openai.ast`, `python.anthropic.ast`,

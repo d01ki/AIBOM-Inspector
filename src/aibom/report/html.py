@@ -9,6 +9,12 @@ from __future__ import annotations
 from html import escape
 from math import cos, pi, sin
 
+from aibom.compliance.minimum_elements import (
+    ElementOrigin,
+    ElementStatus,
+    evaluate_cyclonedx,
+)
+from aibom.export.cyclonedx import SbomContext, to_cyclonedx
 from aibom.graph import build_graph
 from aibom.inventory import Inventory
 from aibom.models.findings import Finding, SecurityScore, Severity
@@ -22,6 +28,24 @@ _SEVERITY_COLOR = {
     Severity.INFO: "#5a6472",
 }
 _GRADE_COLOR = {"A": "#2e8b57", "B": "#6a9c3a", "C": "#b8860b", "D": "#d64500", "F": "#b3123b"}
+
+_ELEMENT_COLOR = {
+    ElementStatus.SATISFIED: "#2e8b57",
+    ElementStatus.PARTIAL: "#b8860b",
+    ElementStatus.DECLARED_UNKNOWN: "#556070",
+    ElementStatus.MISSING: "#b3123b",
+}
+_ELEMENT_LABEL = {
+    ElementStatus.SATISFIED: "ok",
+    ElementStatus.PARTIAL: "partial",
+    ElementStatus.DECLARED_UNKNOWN: "declared",
+    ElementStatus.MISSING: "missing",
+}
+_ORIGIN_LABEL = {
+    ElementOrigin.CARRIED_OVER: "2021",
+    ElementOrigin.UPDATED_2026: "2026 updated",
+    ElementOrigin.NEW_2026: "2026 new",
+}
 
 _CSS = """
 :root { color-scheme: light; }
@@ -95,7 +119,13 @@ _TYPE_COLOR = {
 }
 
 
-def render_html(inventory: Inventory, findings: list[Finding], score: SecurityScore) -> str:
+def render_html(
+    inventory: Inventory,
+    findings: list[Finding],
+    score: SecurityScore,
+    *,
+    sbom_context: SbomContext | None = None,
+) -> str:
     meta = inventory.metadata
     parts: list[str] = [
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>",
@@ -118,6 +148,7 @@ def render_html(inventory: Inventory, findings: list[Finding], score: SecuritySc
         _findings_section(findings),
         _graph_section(inventory, findings),
         _inventory_section(inventory),
+        _minimum_elements_section(inventory, sbom_context),
         "<footer>Static, evidence-backed analysis. Scores are computed from deterministic "
         "rules only (no LLM). Each category starts at 100 and loses points per finding "
         "(critical 40 / high 20 / medium 10 / low 3, max 3 findings per rule); overall = "
@@ -403,6 +434,61 @@ def _inventory_section(inventory: Inventory) -> str:
         f"<h2>Inventory <span style='font-size:13px;color:#5a6472'>({escape(summary)})</span></h2>"
         "<table><thead><tr><th>Type</th><th>Name</th><th>Provider/Source</th>"
         "<th>Usage</th><th>Context</th><th>Confidence</th><th>Evidence / Detector</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _minimum_elements_section(inventory: Inventory, context: SbomContext | None) -> str:
+    """Score the SBOM this report is about against the CISA 2026 baseline."""
+    report = evaluate_cyclonedx(to_cyclonedx(inventory, context=context))
+    rows: list[str] = []
+    for element in report.elements:
+        coverage = (
+            f"{element.present}/{element.applicable}"
+            if element.applicable > 1
+            else ("yes" if element.present else "no")
+        )
+        if element.declared_unknown:
+            coverage += (
+                f" <span style='color:#5a6472'>+{element.declared_unknown} declared</span>"
+            )
+        detail = (
+            escape(element.remediation)
+            if element.status is not ElementStatus.SATISFIED
+            else escape(element.description)
+        )
+        gaps = (
+            f"<div class='rem'>undeclared: {escape(', '.join(element.undeclared_gaps[:5]))}</div>"
+            if element.undeclared_gaps
+            else ""
+        )
+        rows.append(
+            "<tr>"
+            f"<td><span class='sev' style='background:{_ELEMENT_COLOR[element.status]}'>"
+            f"{escape(_ELEMENT_LABEL[element.status])}</span></td>"
+            f"<td>{escape(element.name)}<div class='rem'>{detail}</div>{gaps}</td>"
+            f"<td>{escape(_ORIGIN_LABEL[element.origin])}</td>"
+            f"<td>{coverage}</td>"
+            f"<td><code>{escape(element.cyclonedx_path)}</code></td>"
+            "</tr>"
+        )
+    verdict = (
+        "conformant — every gap is explicitly declared"
+        if report.conformant
+        else f"{report.missing} element(s) silently missing"
+    )
+    return (
+        "<h2>SBOM minimum elements "
+        "<span style='font-size:13px;color:#5a6472'>(CISA 2026)</span></h2>"
+        f"<p class='scope-note'><strong>{escape(verdict)}.</strong> "
+        f"{report.satisfied} satisfied · {report.partial} partial · "
+        f"{report.declared_unknown} declared unknown · {report.missing} missing "
+        f"of {len(report.elements)} elements · {report.components} components "
+        f"({report.transitive_components} transitive) · "
+        f"{escape(report.document_format)}. Data static analysis cannot know is declared "
+        "as a known unknown rather than left blank.</p>"
+        "<table><thead><tr><th>Status</th><th>Element</th><th>Since</th>"
+        "<th>Coverage</th><th>CycloneDX field</th>"
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
     )
 

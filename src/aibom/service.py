@@ -13,6 +13,7 @@ from pathlib import Path
 
 from aibom import __version__
 from aibom.collectors.dependencies import DependencyCollector
+from aibom.collectors.lockfiles import LockfileCollector
 from aibom.collectors.repo import RepoCollector
 from aibom.config import ignored
 from aibom.inventory import Inventory, ScanMetadata
@@ -44,6 +45,7 @@ def run_scan(
     display_target: str | None = None,
     disabled_detectors: set[str] | None = None,
     ignore_rules: list[str] | None = None,
+    lockfiles: bool = True,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
@@ -56,6 +58,8 @@ def run_scan(
     suppressed findings are excluded from the score as well. The caller decides
     the policy — this function never reads config from the scanned repo, so a
     scanned third-party repository cannot silence its own findings.
+    ``lockfiles`` resolves lockfiles for transitive components and artifact
+    digests; turn it off for a manifest-only (top-level) inventory.
     """
     if vulns is None:
         vulns = resolve
@@ -68,6 +72,11 @@ def run_scan(
     )
     RepoCollector(target, disabled_detectors=disabled_detectors).collect(inventory)
     DependencyCollector(target).collect(inventory)
+    if lockfiles:
+        # After the manifests: a lockfile resolves what a manifest constrains,
+        # adding transitive components, exact versions and artifact digests
+        # (CISA 2026 coverage + Component Hash).
+        LockfileCollector(target).collect(inventory)
 
     if resolve or hf_cache is not None:
         client = HFClient(cache_dir=hf_cache, offline=not resolve)

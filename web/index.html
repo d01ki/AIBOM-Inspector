@@ -1063,6 +1063,7 @@
         <a href="#findingsSection">Findings</a>
         <a href="#graphSection">Dependencies</a>
         <a href="#inventorySection">Inventory</a>
+        <a href="#elementsSection">SBOM elements</a>
       </nav>
 
       <section id="overview" aria-labelledby="overview-title">
@@ -1171,6 +1172,23 @@
         <div class="tablewrap"><table id="inventory">
           <thead><tr><th>Type</th><th>Name</th><th>Provider / source</th><th>Usage</th>
             <th>Context</th><th>Evidence / detector</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </section>
+
+      <section class="section-block" id="elementsSection" aria-labelledby="elements-title">
+        <div class="section-head">
+          <div>
+            <h2 id="elements-title">SBOM minimum elements
+              <span class="grade" id="elementsSummary"></span></h2>
+            <p class="section-description">Conformance of the generated CycloneDX AIBOM with the
+              CISA 2026 minimum elements, which apply to AI software as well. Data static
+              analysis cannot know is declared as a known unknown rather than left blank.</p>
+          </div>
+        </div>
+        <div class="tablewrap"><table id="elements">
+          <thead><tr><th>Status</th><th>Element</th><th>Since</th><th>Coverage</th>
+            <th>CycloneDX field</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </section>
@@ -1543,11 +1561,56 @@ function renderScan(d) {
     typeFilter.appendChild(option);
   });
 
+  renderMinimumElements(d.minimum_elements);
+
   $("resultState").textContent = "Analysis complete";
   $("resultState").dataset.state = "complete";
   setWorkflowStep(3);
   filterFindings();
   filterInventory();
+}
+
+const ELEMENT_STATUS = {
+  satisfied: { label: "ok", color: "#39745b" },
+  partial: { label: "partial", color: "#9b701c" },
+  declared_unknown: { label: "declared", color: "#64716a" },
+  missing: { label: "missing", color: "#a7333f" },
+};
+const ELEMENT_ORIGIN = {
+  carried_over: "2021", updated_2026: "2026 updated", new_2026: "2026 new",
+};
+
+// CISA 2026 SBOM minimum elements: a declared known unknown is conformance,
+// a silent gap is not — so the summary counts them separately.
+function renderMinimumElements(report) {
+  const body = document.querySelector("#elements tbody");
+  if (!body) return;
+  if (!report || !report.elements) {
+    $("elementsSummary").textContent = "";
+    body.innerHTML = `<tr><td colspan="5" class="empty empty-state">`
+      + `No conformance report was returned.</td></tr>`;
+    return;
+  }
+  const s = report.summary || {};
+  $("elementsSummary").textContent = `(${report.conformant ? "conformant" : s.missing
+    + " missing"} · ${s.satisfied} satisfied · ${s.partial} partial · `
+    + `${s.declared_unknown} declared unknown of ${s.total})`;
+  body.innerHTML = report.elements.map(el => {
+    const status = ELEMENT_STATUS[el.status] || ELEMENT_STATUS.missing;
+    let coverage = el.applicable > 1 ? `${el.present}/${el.applicable}`
+      : (el.present ? "yes" : "no");
+    if (el.declared_unknown) coverage += ` <span class="muted">+${el.declared_unknown} declared</span>`;
+    const detail = el.status === "satisfied" ? el.description : el.remediation;
+    const gaps = (el.undeclared_gaps || []).length
+      ? `<br><span class="muted">undeclared: ${esc(el.undeclared_gaps.slice(0, 5).join(", "))}</span>`
+      : "";
+    // .sev renders as an outline chip: the status reads through `color`.
+    return `<tr><td><span class="sev" style="color:${status.color}">`
+      + `${esc(status.label)}</span></td>`
+      + `<td>${esc(el.name)}<br><span class="muted">${esc(detail)}</span>${gaps}</td>`
+      + `<td>${esc(ELEMENT_ORIGIN[el.origin] || el.origin)}</td>`
+      + `<td>${coverage}</td><td><code>${esc(el.cyclonedx_path)}</code></td></tr>`;
+  }).join("");
 }
 
 async function download() {
