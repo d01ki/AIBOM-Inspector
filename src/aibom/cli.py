@@ -321,7 +321,7 @@ def scan(
     if not quiet:
         _render(inventory)
         if production_view(inventory).has_ai_components():
-            # Same ordering as the web UI: blast radius first, then findings.
+            # Same ordering as the web UI: reachable tools first, then findings.
             _render_impacts(build_impact_paths(inventory), empty_note=False)
             _render_risk(findings, score)
         else:
@@ -421,7 +421,10 @@ def _menu() -> None:
         "[bold]AIBOM Inspector[/bold] - AI supply-chain scanner (static, evidence-backed)"
     )
     console.print()
-    console.print("  [bold]1[/bold]) Impact demo - input to agent tool blast radius (offline)")
+    console.print(
+        "  [bold]1[/bold]) Scan the bundled sample app - untrusted input reaching "
+        "an agent tool (offline)"
+    )
     console.print("  [bold]2[/bold]) Scan a public repository URL")
     console.print("  [bold]3[/bold]) Scan a local directory")
     console.print("  [bold]4[/bold]) Compare two revisions (behavioral drift)")
@@ -467,13 +470,16 @@ def demo() -> None:
     """Run the offline impact + behavioral-drift talk demo."""
     impact_dir = impact_demo_path()
     if impact_dir is None:
-        console.print("[red]error:[/red] the impact demo is not bundled in this installation")
+        console.print("[red]error:[/red] the sample app is not bundled in this installation")
         raise typer.Exit(code=2)
 
     console.print(
-        "\n[bold]Impact demo[/bold] - code-proven input -> instructions -> bound tool -> operation"
+        "\n[bold]Bundled sample app[/bold] (FastAPI + OpenAI Agents fixture) - "
+        "code-proven input -> instructions -> bound tool -> operation"
     )
-    console.print("[dim]Static analysis only; the fixture is never imported or executed.[/dim]")
+    console.print(
+        "[dim]Static analysis only; the fixture is never imported or executed.[/dim]"
+    )
     result = run_scan(impact_dir, display_target="built-in://impact-demo")
     paths = build_impact_paths(result.inventory)
     _render_impacts(paths)
@@ -488,7 +494,7 @@ def demo() -> None:
         baseline, candidate = revisions
         console.print(
             f"\n[bold]Behavioral drift demo ({language})[/bold] - same model and tool, "
-            "new command-execution blast radius"
+            "a tool that now runs commands is newly reachable"
         )
         slug = language.lower()
         drift_report = compare_scan_results(
@@ -895,7 +901,10 @@ def _render_impacts(paths: list[ImpactPath], *, empty_note: bool = True) -> None
         if empty_note:
             console.print("[yellow]No strongly linked agent capability path detected.[/yellow]")
         return
-    table = Table(title="Potential blast radius (direct bindings only)", show_lines=True)
+    table = Table(
+        title="Untrusted input reaching a bound tool (direct bindings only)",
+        show_lines=True,
+    )
     table.add_column("Sev", style="bold")
     table.add_column("Proven path")
     table.add_column("Potential consequence")

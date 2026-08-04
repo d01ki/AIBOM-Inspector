@@ -68,7 +68,7 @@ def test_directly_bound_command_tool_creates_critical_impact_path(
     graph = build_graph(result.inventory, result.findings)
     assert graph["impact_paths"][0]["tool_names"] == ["diagnose"]
     html = render_html(result.inventory, result.findings, result.score)
-    assert "Potential blast radius" in html
+    assert "Untrusted input reaches a bound tool" in html
     assert "subprocess.run" in html
 
     document = to_cyclonedx(result.inventory)

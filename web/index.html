@@ -584,13 +584,6 @@
   .tool-sidebar .scan-progress { padding: 0 10px 10px; font-size: 12px; }
   .tool-sidebar .spinner { width: 12px; height: 12px; }
   .side-section { padding: 18px 0; border-top: 1px solid var(--border); }
-  .configuration { display: grid; gap: 0; margin: 10px 0 0; }
-  .configuration > div { display: grid; grid-template-columns: 1fr auto; gap: 14px;
-    padding: 6px 0; border-top: 1px solid #e4e7e8; }
-  .configuration > div:first-child { border-top: 0; }
-  .configuration dt, .configuration dd { margin: 0; font-size: 12px; }
-  .configuration dt { color: var(--muted); }
-  .configuration dd { color: #344149; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
   .side-details { padding: 15px 0; border-top: 1px solid var(--border); color: var(--muted);
     font-size: 12px; }
   .side-details summary { color: #44515a; cursor: pointer; font-weight: 650; }
@@ -781,11 +774,6 @@
   .collapsible-panel[open] > summary span:last-child { transform: rotate(45deg); }
   .collapsible-content { padding: 18px; border-top: 1px solid var(--border); }
   .collapsible-content > p { margin: 14px 0 0; color: var(--muted); font-size: 15px; }
-  .configuration { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
-  .configuration > div { display: block; padding: 11px; border: 1px solid #e0e4ec !important;
-    border-radius: 5px; background: #fafbfc; }
-  .configuration dt, .configuration dd { font-size: 14px; }
-  .configuration dd { margin-top: 4px; color: #29354d; font-weight: 650; }
   .results-area { margin-top: 22px; }
   .result-state[data-state="running"] { border-color: #c7b77c; background: #fff8df; color: #7a6413; }
   .result-state[data-state="complete"] { border-color: #a9c8ba; background: #edf8f2; color: #2f6b50; }
@@ -847,7 +835,6 @@
     .scan-steps { grid-template-columns: 1fr; }
     .scan-steps li { min-height: 0; border-right: 0; border-bottom: 1px solid var(--border); }
     .scan-steps li:last-child { border-bottom: 0; }
-    .configuration { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .evidence-grid.is-sparse { grid-template-columns: 1fr; gap: 0; }
     .help-grid { grid-template-columns: 1fr; gap: 24px; }
   }
@@ -863,7 +850,6 @@
     .scan-row { grid-template-columns: 1fr; }
     .scan-row button { width: 100%; }
     .field-help { align-items: flex-start; flex-direction: column; }
-    .configuration { grid-template-columns: 1fr; }
     .results { padding: 16px 13px 22px; }
     .page-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
   }
@@ -932,17 +918,24 @@
           <label for="repo">Repository URL</label>
           <div class="scan-row">
             <input type="url" id="repo" placeholder="https://github.com/owner/repository"
-                   autocomplete="off" spellcheck="false" aria-describedby="repo-help status">
+                   autocomplete="off" spellcheck="false" aria-describedby="status">
             <button id="scan" type="button">Start analysis</button>
           </div>
           <div class="field-help">
             <button class="text-action" id="loadExample" type="button">Load a public example URL</button>
           </div>
           <div class="demo-launch">
-            <button id="runDemo" type="button">Run built-in impact demo</button>
-            <span>No repository URL, API key, or internet access needed — it runs offline on
-              the analysis backend below.</span>
+            <button id="runDemo" type="button">Scan the bundled sample app</button>
+            <span><strong>What it scans:</strong> a two-file FastAPI + OpenAI Agents app
+              shipped inside AIBOM Inspector as a test fixture — deliberately vulnerable, and
+              never executed. An HTTP request body is concatenated into the agent's
+              instructions, and that agent is bound to a tool that runs shell commands. No
+              repository URL, API key, or internet access needed.</span>
           </div>
+          <p class="field-help">Static analysis only: files and manifests are read as text.
+            Repository code is never run and model weights are never loaded. Package
+            advisories come from OSV; every finding comes from a deterministic rule, not a
+            model.</p>
         </div>
 
         <div class="api-endpoint" id="apiEndpointBlock" hidden>
@@ -972,22 +965,6 @@
       </div>
     </section>
 
-    <details class="collapsible-panel" id="repo-help">
-      <summary>
-        <span><strong>Scan scope and configuration</strong><small>What the analysis reads and checks</small></span>
-        <span aria-hidden="true">＋</span>
-      </summary>
-      <div class="collapsible-content">
-        <dl class="configuration">
-          <div><dt>Analysis mode</dt><dd>Static</dd></div>
-          <div><dt>Detection</dt><dd>Deterministic rules</dd></div>
-          <div><dt>Package advisories</dt><dd>OSV</dd></div>
-          <div><dt>Code execution</dt><dd>Disabled</dd></div>
-        </dl>
-        <p>The scanner reads text files and package manifests. It does not run repository code,
-          load model weights, or replace a general application security assessment.</p>
-      </div>
-    </details>
 
     <section class="results-area" id="resultsArea" aria-labelledby="results-area-title">
       <header class="section-titlebar">
@@ -1070,7 +1047,7 @@
         <div class="section-head">
           <div>
             <h2 id="findings-title">Findings <span class="grade" id="findingCount"></span></h2>
-            <p class="section-description">Review high-impact items first. Search across rules,
+            <p class="section-description">Review the most severe items first. Search across rules,
               descriptions, remediation, entities, and source locations.</p>
           </div>
           <div class="toolbar" aria-label="Filter findings">
@@ -1095,9 +1072,8 @@
         <div class="section-head">
           <div>
             <h2 id="graph-title">Trust-boundary and dependency context</h2>
-            <p class="section-description">Impact paths answer what a steered agent could do;
-              confirmed exposure paths show how untrusted input reaches it. Prompt bodies are
-              never retained.</p>
+            <p class="section-description">The paths below show which tools a steered agent could
+              reach, and how untrusted input gets to it. Prompt bodies are never retained.</p>
           </div>
         </div>
         <div id="impactPaths" class="impact-paths" hidden></div>
@@ -1287,6 +1263,10 @@ function setWorkflowStep(activeStep) {
 }
 
 function repoLabel(repo) {
+  // "built-in://impact-demo" is a bundled fixture, not somebody's repository.
+  if (typeof repo === "string" && repo.startsWith("built-in://")) {
+    return "Bundled sample app (FastAPI + OpenAI Agents fixture)";
+  }
   try {
     const url = new URL(repo);
     const parts = url.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
@@ -1368,15 +1348,15 @@ async function runAnalysis(button, busyLabel, spec) {
 function runDemo() {
   lastRequest = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
   lastResult = null;
-  return runAnalysis($("runDemo"), "Running impact demo…", {
-    status: "Running the offline built-in impact demo…",
-    running: ["Built-in impact demo in progress",
+  return runAnalysis($("runDemo"), "Scanning the sample app…", {
+    status: "Scanning the bundled sample app (offline)…",
+    running: ["Scanning the bundled sample app",
       "Tracing external input through agent instructions to directly bound tool capabilities."],
-    failure: "The built-in demo could not be completed",
+    failure: "The bundled sample scan could not be completed",
     request: () => postJson(apiBase() + "/api/demo"),
     render: (data) => {
       renderScan(data);
-      setStatus("Impact demo complete. Review Potential blast radius first.", false);
+      setStatus("Sample app scanned. Start with the path from untrusted input to the bound tool.", false);
     },
   });
 }
@@ -1496,7 +1476,19 @@ function renderScan(d) {
   $("findingCount").textContent = d.findings.length ? "(" + d.findings.length + ")" : "";
   $("evidenceGrid").classList.toggle("is-sparse", !d.findings.length);
   if (!d.findings.length) {
-    fb.innerHTML = `<tr><td colspan="4" class="empty empty-state">No covered risk rules were triggered.</td></tr>`;
+    // "No findings" has two very different meanings. Say which one this is,
+    // so an empty table is not mistaken for a broken scan.
+    const why = !riskEntities
+      ? (totalEntities
+        ? `This repository's ${totalEntities} AI component(s) were all found in test, `
+          + "example, or documentation files, which are deliberately excluded from risk "
+          + "rules so a fixture cannot score its own repository. They are listed in the "
+          + "Inventory below."
+        : "No AI components were detected in this repository, so no AI risk rule applies. "
+          + "Ordinary dependencies are still listed in the Inventory below.")
+      : `The ${riskEntities} AI component(s) in production code matched none of the risk `
+        + "rules. This covers the rules listed in the README — not every possible risk.";
+    fb.innerHTML = `<tr><td colspan="4" class="empty empty-state">No findings. ${esc(why)}</td></tr>`;
   } else {
     const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
     const orderedFindings = d.findings.slice().sort((a, b) =>
@@ -1874,7 +1866,7 @@ function renderImpactPaths(paths) {
     const route = `${path.source_kind} \u2192 privileged instructions \u2192 ${models} \u2192 ${tools}`;
     const operations = (path.capabilities || []).map(item =>
       `${item.operation}(${(item.controlled_parameters || []).join(", ")})`).join(", ");
-    return `<div class="impact-path"><strong>Potential blast radius \u00b7 ${esc(path.severity)}</strong>`
+    return `<div class="impact-path"><strong>Untrusted input reaches a bound tool \u00b7 ${esc(path.severity)}</strong>`
       + `<span class="impact-route">${esc(route)}</span>`
       + `<span>Could ${esc(consequences)}.</span>`
       + `<span class="muted"> Direct binding + tool-parameter flow \u00b7 ${esc(operations)}`

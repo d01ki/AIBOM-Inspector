@@ -53,8 +53,8 @@ what the tool actually does      shell command, file write, network call
 template. The model, the SDK, the packages and the component list are all
 identical, so a conventional SBOM diff reports *no change*. AIBOM Inspector
 reports that user-controlled text now reaches the system prompt of an agent
-whose bound tool runs a shell command — a blast radius that did not exist in
-the previous revision. That is what `aibom diff` gates on in CI.
+whose bound tool runs a shell command — a path that did not exist in the
+previous revision. That is what `aibom diff` gates on in CI.
 
 Prompt text and tool arguments are never stored: only hashes and sanitized
 paths leave the scanner.
@@ -105,7 +105,7 @@ git clone https://github.com/d01ki/AIBOM-Inspector && cd AIBOM-Inspector
 That opens a guided menu. Or go straight to what you want:
 
 ```bash
-./aibom demo             # offline blast-radius + drift demo (no URL, no network)
+./aibom demo             # offline sample scan + drift demo (no URL, no network)
 ./aibom ui               # web UI at http://localhost:8000
 ./aibom scan .           # scan this directory
 ./aibom scan https://github.com/owner/repo
@@ -116,7 +116,7 @@ On Windows PowerShell use `.\aibom.ps1` with the same arguments. Local paths are
 mounted read-only and rewritten automatically; reports land in `./aibom-out`.
 
 The UI and the CLI run the same pipeline and expose the same capabilities —
-scan, behavioral drift, impact paths, and every export. Shareable scan links
+scan, behavioral drift, tool-reachability paths, and every export. Shareable scan links
 work too: `http://localhost:8000/?repo=https://github.com/owner/repo` pre-fills
 the form and starts the scan on load.
 
@@ -151,7 +151,7 @@ The dated, source-linked competitive analysis and claim boundaries are in
   plus JS/TS AI usage, MCP clients/servers, notebooks, prompts, datasets, and
   LangChain/LangGraph agents
 - **Syntax-aware TypeScript/JavaScript analysis** — the same role-aware prompt
-  lineage and blast-radius analysis for the stacks agents are actually written
+  lineage and tool-reachability analysis for the stacks agents are actually written
   in: Vercel AI SDK (`generateText`/`streamText`/`generateObject`), OpenAI
   Agents (`new Agent({ instructions, tools })`), the OpenAI and Anthropic Node
   SDKs, MCP TypeScript servers, Next.js route handlers, and Express. Uses a
@@ -170,12 +170,12 @@ The dated, source-linked competitive analysis and claim boundaries are in
   exposure, prompt target/content changes, usage escalation, component drift,
   and new findings across revisions; JSON output and severity gates make it
   usable in CI
-- **Agent Capability Blast Radius** — for OpenAI Agents SDK constructions,
+- **Which tools untrusted input can reach** — for OpenAI Agents SDK constructions,
   correlates untrusted privileged instructions with explicit `tools=[...]`
   bindings and follows model-controlled tool parameters into command execution,
   filesystem mutation, network egress, or external actions. Fixed operations,
-  unbound helpers, and undecorated functions are not promoted to impact paths
-- **Blast-Radius Drift** — emits a critical `impact_path_added` when the
+  unbound helpers, and undecorated functions are never reported as reachable
+- **Reachability drift** — emits a critical `impact_path_added` when the
   component BOM is unchanged but a new trust-boundary path makes a powerful
   bound capability steerable
 - **Complete dependency BOM** — every package in `requirements*.txt`,
@@ -274,7 +274,7 @@ New here? Just run `aibom` — a guided menu walks you through everything:
 ```text
 AIBOM Inspector - AI supply-chain scanner (static, evidence-backed)
 
-  1) Impact demo - input to agent tool blast radius (offline)
+  1) Scan the bundled sample app - untrusted input reaching an agent tool (offline)
   2) Scan a public repository URL
   3) Scan a local directory
   4) Compare two revisions (behavioral drift)
@@ -402,7 +402,10 @@ aibom demo
 
 ## Web app
 
-`./aibom ui`, open the printed URL, then click **Run built-in impact demo**.
+`./aibom ui`, open the printed URL, then click **Scan the bundled sample app**
+(a two-file FastAPI + OpenAI Agents fixture shipped with the tool: a request
+body reaches the agent's instructions, and the agent is bound to a tool that
+runs shell commands).
 After that, paste a repository URL for a normal scan. The UI scans one revision;
 comparing two revisions is a CLI and API capability (`aibom diff`,
 `POST /api/diff`). Without Docker:
@@ -442,7 +445,7 @@ shallow fetch. Refs are validated before they reach git and passed as argv, so a
 ref can neither inject a flag nor name a revision range.
 
 The UI renders `impact_paths` and `exposure_paths` above the interactive
-dependency graph. Impact paths state the potential consequence first, while
+dependency graph. Reachable-tool paths state the potential consequence first, while
 retaining the direct binding, controlled parameter, operation, confidence, and
 evidence needed to audit the claim.
 
@@ -462,7 +465,7 @@ that fixture directory directly (as `aibom demo` does).
 | **Services** | provider SDK imports in Python **and JS/TS** (`openai`, `anthropic`, `@anthropic-ai/sdk`, …), explicit `base_url`, MCP client configs (`mcpServers`), **MCP server implementations** (Python `mcp`/`FastMCP`, TS `@modelcontextprotocol/sdk`) |
 | **TypeScript / JavaScript prompts & tools** | syntax-aware sinks (`generateText`/`streamText`/`generateObject` from `ai`, `new Agent({instructions})` from `@openai/agents`, `chat.completions.create`, `responses.create`, `messages.create`), sources (Next.js `request.json()`, Express `req.body`/`query`/`params`, MCP tool parameters, `process.argv`/`env`, `searchParams`), direct tool bindings (`tools: { name: tool({ execute }) }`, `tools: [boundTool]`), and operations inside them (`child_process`, `fs` writes/deletes, `eval`/`vm`, state-changing `fetch`/`axios`) |
 | **Packages** | **every** dependency declared in `requirements*.txt`, `pyproject.toml`, `Pipfile`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `Gemfile`, `composer.json`, `*.csproj` — PyPI, npm, Go, crates.io, Maven, RubyGems, Packagist, NuGet — with version + purl. AI/ML-ecosystem packages are flagged `ai`, and that AI layer is what the risk rules, graph, and score focus on |
-| **Other languages** (Go, Java, Kotlin, Rust, Ruby, C#, PHP, Swift, Scala) | pattern-tier only: model ids, provider SDK imports, prompt constants (`static final String SYSTEM_PROMPT = …`, `const SYSTEM_PROMPT: &str = …`, `systemPrompt := …`), MCP configs, secrets. **No** impact paths or drift verdicts — those need a parse tree |
+| **Other languages** (Go, Java, Kotlin, Rust, Ruby, C#, PHP, Swift, Scala) | pattern-tier only: model ids, provider SDK imports, prompt constants (`static final String SYSTEM_PROMPT = …`, `const SYSTEM_PROMPT: &str = …`, `systemPrompt := …`), MCP configs, secrets. **No** tool-reachability or drift verdicts — those need a parse tree |
 
 ## Design principles
 

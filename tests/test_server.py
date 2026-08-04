@@ -105,7 +105,7 @@ def test_built_in_demo_is_offline_and_shows_blast_radius(client: TestClient) -> 
 
     report = client.post("/api/demo/report")
     assert report.status_code == 200
-    assert "Potential blast radius" in report.text
+    assert "Untrusted input reaches a bound tool" in report.text
 
 
 def test_invalid_url_is_rejected(client: TestClient) -> None:
