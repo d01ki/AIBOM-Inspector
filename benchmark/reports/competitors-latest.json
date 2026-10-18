@@ -1,0 +1,214 @@
+{
+  "tools": {
+    "aibom": "this checkout",
+    "agent-audit": "0.20.0",
+    "cisco-aibom": "1.10.0"
+  },
+  "gate": "high+",
+  "drift": [
+    {
+      "name": "same-file Python",
+      "baseline": "examples/trust-boundary-drift/baseline",
+      "candidate": "examples/trust-boundary-drift/candidate",
+      "change": "message moved from the user turn into the system prompt",
+      "runs": [
+        {
+          "tool": "aibom",
+          "flagged": true,
+          "detail": "BOM identical; high exposure_added",
+          "baseline_findings": 0,
+          "candidate_findings": 1
+        },
+        {
+          "tool": "agent-audit",
+          "flagged": false,
+          "detail": "--baseline/--fail-on-new exit 0; 0 new high+ finding(s); rules before [], after []",
+          "baseline_findings": 0,
+          "candidate_findings": 0
+        }
+      ]
+    },
+    {
+      "name": "same-file Python, bound tool",
+      "baseline": "tests/fixtures/impact-demo-baseline",
+      "candidate": "tests/fixtures/impact-demo",
+      "change": "untrusted input reaches Agent.instructions; tool unchanged",
+      "runs": [
+        {
+          "tool": "aibom",
+          "flagged": true,
+          "detail": "BOM identical; critical impact_path_added, high exposure_added",
+          "baseline_findings": 0,
+          "candidate_findings": 1
+        },
+        {
+          "tool": "agent-audit",
+          "flagged": false,
+          "detail": "--baseline/--fail-on-new exit 0; 0 new high+ finding(s); rules before [AGENT-001, AGENT-022, AGENT-026, AGENT-034, AGENT-035, AGENT-037], after [AGENT-001, AGENT-022, AGENT-026, AGENT-034, AGENT-035, AGENT-037]",
+          "baseline_findings": 4,
+          "candidate_findings": 4
+        }
+      ]
+    },
+    {
+      "name": "same-file TypeScript, bound tool",
+      "baseline": "tests/fixtures/impact-demo-ts-baseline",
+      "candidate": "tests/fixtures/impact-demo-ts",
+      "change": "untrusted input reaches generateText({ system }); tool unchanged",
+      "runs": [
+        {
+          "tool": "aibom",
+          "flagged": true,
+          "detail": "BOM identical; critical impact_path_added, high exposure_added",
+          "baseline_findings": 0,
+          "candidate_findings": 1
+        },
+        {
+          "tool": "agent-audit",
+          "flagged": true,
+          "detail": "--baseline/--fail-on-new exit 1; 1 new high+ finding(s); rules before [AGENT-034, AGENT-110], after [AGENT-034, AGENT-110]; every new finding repeats a baseline rule in the same file (AGENT-034 app/api/support/route.ts): line-shift artifact",
+          "baseline_findings": 1,
+          "candidate_findings": 1
+        }
+      ]
+    },
+    {
+      "name": "cross-file Python (4 files)",
+      "baseline": "tests/fixtures/xfile-py-baseline",
+      "candidate": "tests/fixtures/xfile-py-candidate",
+      "change": "prompt builder appends the request parameter",
+      "runs": [
+        {
+          "tool": "aibom",
+          "flagged": true,
+          "detail": "BOM identical; critical impact_path_added, high exposure_added",
+          "baseline_findings": 0,
+          "candidate_findings": 1
+        },
+        {
+          "tool": "agent-audit",
+          "flagged": false,
+          "detail": "--baseline/--fail-on-new exit 0; 0 new high+ finding(s); rules before [AGENT-001, AGENT-037], after [AGENT-001, AGENT-037]",
+          "baseline_findings": 1,
+          "candidate_findings": 1
+        }
+      ]
+    },
+    {
+      "name": "cross-file TypeScript (4 files)",
+      "baseline": "tests/fixtures/xfile-ts-baseline",
+      "candidate": "tests/fixtures/xfile-ts-candidate",
+      "change": "prompt builder appends the request parameter",
+      "runs": [
+        {
+          "tool": "aibom",
+          "flagged": true,
+          "detail": "BOM identical; critical impact_path_added, high exposure_added",
+          "baseline_findings": 0,
+          "candidate_findings": 1
+        },
+        {
+          "tool": "agent-audit",
+          "flagged": false,
+          "detail": "--baseline/--fail-on-new exit 0; 0 new high+ finding(s); rules before [AGENT-110], after [AGENT-110]",
+          "baseline_findings": 0,
+          "candidate_findings": 0
+        }
+      ]
+    }
+  ],
+  "negative_controls": [
+    {
+      "repository": "pallets/click",
+      "commit": "2247b35ea1c47c727d7a06e51fa280e12a863ff6",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 13
+      }
+    },
+    {
+      "repository": "expressjs/cors",
+      "commit": "5317ebe670db2aaebc1d496eb5d33493deefb3ed",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 0
+      }
+    },
+    {
+      "repository": "expressjs/express",
+      "commit": "a3714473feb3d2908add734d340e7755fd85e0a3",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 0
+      }
+    },
+    {
+      "repository": "pallets/flask",
+      "commit": "36e4a824f340fdee7ed50937ba8e7f6bc7d17f81",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 8
+      }
+    },
+    {
+      "repository": "gin-gonic/gin",
+      "commit": "34dac209ffb6ef85cc78c5d217bbb7ad001d68fd",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 4
+      }
+    },
+    {
+      "repository": "encode/httpx",
+      "commit": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 26
+      }
+    },
+    {
+      "repository": "pallets/jinja",
+      "commit": "5ef70112a1ff19c05324ff889dd30405b1002044",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 6
+      }
+    },
+    {
+      "repository": "sindresorhus/ky",
+      "commit": "3541888878c4d303a8bc2ad61815f4e048f55a5d",
+      "counts": {
+        "aibom": 1,
+        "agent-audit": 1
+      }
+    },
+    {
+      "repository": "pallets/markupsafe",
+      "commit": "4e111271b1494995708a9e878a10829b5e10c7ba",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 1
+      }
+    },
+    {
+      "repository": "psf/requests",
+      "commit": "414f0513c33883adf6f2b46901d4f0b38a455851",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 12
+      }
+    },
+    {
+      "repository": "fastapi/typer",
+      "commit": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+      "counts": {
+        "aibom": 0,
+        "agent-audit": 332
+      }
+    }
+  ],
+  "cisco_aibom_without_llm": "exit 1: Error: --llm-model (or AIBOM_LLM_MODEL env var) is required.",
+  "not_run_reason": {
+    "cisco-aibom": "refused (LLM required)"
+  }
+}
