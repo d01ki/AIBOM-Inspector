@@ -16,6 +16,7 @@ from aibom.detectors.python.common import (
     safe_endpoint,
     service_entity,
 )
+from aibom.detectors.python.prompt_flow import imported_client_provider
 from aibom.detectors.python.value_resolver import ValueResolver
 from aibom.detectors.result import Detection
 
@@ -30,7 +31,11 @@ _CONSTRUCTORS = {
 }
 _API_SUFFIXES = (
     ".responses.create",
+    ".responses.parse",
+    ".responses.stream",
     ".chat.completions.create",
+    ".chat.completions.parse",
+    ".chat.completions.stream",
     ".completions.create",
     ".embeddings.create",
     ".images.generate",
@@ -122,7 +127,10 @@ class OpenAIPythonDetector:
             client_call = root in clients and qualified.endswith(_API_SUFFIXES)
             direct_call = qualified.startswith("openai.") and qualified.endswith(_API_SUFFIXES)
             factory_call = module.has_import(*_ROOTS) and qualified.endswith(_API_SUFFIXES)
-            if not (client_call or direct_call or factory_call):
+            imported_call = qualified.endswith(_API_SUFFIXES) and (
+                imported_client_provider(module, call.func, context.project) == "openai"
+            )
+            if not (client_call or direct_call or factory_call or imported_call):
                 continue
             yield Detection(
                 service_entity(

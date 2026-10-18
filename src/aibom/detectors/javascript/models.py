@@ -135,6 +135,12 @@ class ModelCatalogJavaScriptDetector:
         if module is None:
             return
         for call in module.calls:
+            vendor = _provider_factory(module, call)
+            if vendor is not None and call.args:
+                resolved = _static(context.project, module, call.args[0], 0, ())
+                if resolved is not None and _plausible_model_id(resolved.value):
+                    yield Detection(self._model(context, call, resolved, provider=vendor))
+                continue
             if not _is_gateway_call(module, call):
                 continue
             yield Detection(self._service(context, call))
@@ -166,7 +172,14 @@ class ModelCatalogJavaScriptDetector:
             value_resolution=ValueResolution.NOT_APPLICABLE,
         )
 
-    def _model(self, context: ScanContext, call: CallExpr, resolved: _Resolved) -> Model:
+    def _model(
+        self,
+        context: ScanContext,
+        call: CallExpr,
+        resolved: _Resolved,
+        *,
+        provider: str | None = None,
+    ) -> Model:
         value = str(resolved.value).strip()
         evidence = [
             _evidence(context.relative_path, call, self.detector_id, "ai-gateway-model", 0.92)
@@ -187,7 +200,7 @@ class ModelCatalogJavaScriptDetector:
             )
         return Model(
             name=value,
-            provider=gateway_model_id(value),
+            provider=provider or gateway_model_id(value),
             source_evidence=evidence,
             detector_ids=[self.detector_id],
             usage=UsageState(
@@ -230,6 +243,44 @@ class ModelCatalogJavaScriptDetector:
             source_contexts=[context.source_context],
             value_resolution=ValueResolution.RESOLVED,
         )
+
+
+_FACTORY_METHODS = frozenset(
+    {"chat", "responses", "completion", "languageModel", "textEmbeddingModel", "embedding", "image"}
+)
+
+
+def _provider_factory(module: JsModule, call: CallExpr) -> str | None:
+    """``google('gemini-2.5-pro')`` / ``openai.chat('gpt-4o')`` from ``@ai-sdk/<vendor>``.
+
+    Only the provider instance the package exports by the vendor's own name
+    counts (``@ai-sdk/google`` -> ``google``), so an unrelated function that
+    happens to take a string is never read as a model factory.
+    """
+    qualified = module.qualified_name(call.callee) or ""
+    if not qualified.startswith("@ai-sdk/"):
+        return None
+    package, _, member = qualified[len("@ai-sdk/"):].partition(".")
+    vendor = package.split("/", 1)[0]
+    if vendor in {"gateway", "provider", "provider-utils", "react", "rsc", "ui-utils", "otel"}:
+        return None
+    if member == vendor or (
+        member.startswith(f"{vendor}.") and member.split(".", 1)[1] in _FACTORY_METHODS
+    ):
+        return vendor
+    return None
+
+
+def _plausible_model_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    lowered = text.lower()
+    if not text or len(text) > 120 or " " in text:
+        return False
+    if lowered.startswith("sk-") or (len(text) >= 48 and text.isalnum()):
+        return False
+    return any(character.isalpha() for character in text)
 
 
 def _is_gateway_call(module: JsModule, call: CallExpr) -> bool:

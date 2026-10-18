@@ -9,7 +9,8 @@
     "The function tool get_weather is a schema-only definition; tools are not scored.",
     "The thread message (threads.messages.create, role user) carries request content",
     "to the model and is expected as a prompt even though that SDK call is not a",
-    "modeled sink; it is a known false negative, kept on purpose."
+    "modeled sink; it is a known false negative, kept on purpose.",
+    "Correction after the first run (2026-10-18): prompt names must carry the line of the prompt *expression*, as every other case does; these names used the key/call line. 0 name(s) fixed, no expectation added or removed. The first run is frozen in reports/external-20-unseen.*."
   ],
   "components": [
     {
@@ -40,7 +41,7 @@
     },
     {
       "type": "prompt",
-      "name": "user-prompt@app/api/assistants/threads/[threadId]/messages/route.ts:10",
+      "name": "user-prompt@app/api/assistants/threads/[threadId]/messages/route.ts:12",
       "file": "app/api/assistants/threads/[threadId]/messages/route.ts",
       "status": "invoked"
     }

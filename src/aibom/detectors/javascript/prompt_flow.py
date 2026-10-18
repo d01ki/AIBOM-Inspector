@@ -74,11 +74,20 @@ _SUPPORTED_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".c
 _AI_SDK_CALLS = frozenset(
     {"generateText", "streamText", "generateObject", "streamObject"}
 )
-_OPENAI_SUFFIXES = (
-    ".responses.create",
+# `parse` and `stream` (also under `beta.`) take the same prompt arguments.
+_RESPONSES_SUFFIXES = (".responses.create", ".responses.parse", ".responses.stream")
+_CHAT_SUFFIXES = (
     ".chat.completions.create",
+    ".chat.completions.parse",
+    ".chat.completions.stream",
+)
+_OPENAI_SUFFIXES = (
+    *_RESPONSES_SUFFIXES,
+    *_CHAT_SUFFIXES,
     ".completions.create",
     ".beta.assistants.create",
+    # Assistants API: a thread message is a prompt the next run sends.
+    ".beta.threads.messages.create",
 )
 _ANTHROPIC_SUFFIXES = (".messages.create", ".messages.stream")
 
@@ -132,7 +141,7 @@ class PromptFlowJavaScriptDetector:
         if module is None:
             return
         for call in module.calls:
-            provider = _provider_for_call(module, call)
+            provider = _provider_for_call(module, call, context.project)
             if provider is None:
                 continue
             options = _options_object(module, call)
@@ -230,16 +239,23 @@ class PromptFlowJavaScriptDetector:
 # ---------------------------------------------------------------------------
 
 
-def _provider_for_call(module: JsModule, call: CallExpr) -> str | None:
+def _provider_for_call(
+    module: JsModule, call: CallExpr, project: ProjectIndex | None = None
+) -> str | None:
     qualified = module.qualified_name(call.callee) or ""
     local = module.local_name(call.callee) or ""
 
     if (
         call.is_new
         and module.has_import("@openai/agents")
-        and local.rsplit(".", 1)[-1] == "Agent"
+        and local.rsplit(".", 1)[-1] in {"Agent", "RealtimeAgent"}
     ):
         return "openai-agents"
+    imported = _imported_client_provider(project, module, call.callee)
+    if imported == "openai" and qualified.endswith(_OPENAI_SUFFIXES):
+        return "openai"
+    if imported == "anthropic" and qualified.endswith(_ANTHROPIC_SUFFIXES):
+        return "anthropic"
     if (
         module.has_import("ai")
         and qualified.startswith("ai.")
@@ -249,6 +265,31 @@ def _provider_for_call(module: JsModule, call: CallExpr) -> str | None:
     if module.has_import(*_OPENAI_MODULES) and qualified.endswith(_OPENAI_SUFFIXES):
         return "openai"
     if module.has_import(*_ANTHROPIC_MODULES) and qualified.endswith(_ANTHROPIC_SUFFIXES):
+        return "anthropic"
+    return None
+
+
+def _imported_client_provider(
+    project: ProjectIndex | None, module: JsModule, callee: Node
+) -> str | None:
+    """Provider of an SDK client created in another module (``new OpenAI()``)."""
+    if project is None:
+        return None
+    root = callee
+    while isinstance(root, MemberExpr):
+        root = root.obj
+    if not isinstance(root, Identifier) or root.name not in module.aliases:
+        return None
+    symbol = project.js_symbol(module, root.name)
+    value = symbol.value if symbol is not None else None
+    if isinstance(value, AwaitExpr):
+        value = value.argument
+    if symbol is None or not isinstance(value, CallExpr) or not value.is_new:
+        return None
+    constructor = symbol.module.qualified_name(value.callee) or ""
+    if constructor.startswith(_OPENAI_MODULES):
+        return "openai"
+    if constructor.startswith(_ANTHROPIC_MODULES):
         return "anthropic"
     return None
 
@@ -298,6 +339,11 @@ def _prompt_inputs(
 
     if provider == "openai":
         qualified = module.qualified_name(call.callee) or ""
+        if qualified.endswith(".beta.threads.messages.create"):
+            role = _static_value(module, _prop(options, "role"))
+            kind = role if role in {"user", "assistant"} else "template"
+            add(_prop(options, "content"), str(kind), "openai.beta.threads.messages.content")
+            return found
         if qualified.endswith(".beta.assistants.create"):
             add(
                 _prop(options, "instructions"),
@@ -305,17 +351,23 @@ def _prompt_inputs(
                 "openai.beta.assistants.create.instructions",
             )
             return found
-        if qualified.endswith(".responses.create"):
+        if qualified.endswith(_RESPONSES_SUFFIXES):
             add(
                 _prop(options, "instructions"),
                 "system",
                 "openai.responses.create.instructions",
             )
             add(_prop(options, "input"), "user", "openai.responses.create.input")
+            if not found:
+                # A proxy that forwards `{ ...body }`: the prompt is whatever the
+                # spread carries - a real sink with unresolved content.
+                add(_spread(options), "template", "openai.responses.create.input")
             return found
         found.extend(
             _split_messages(module, _prop(options, "messages"), "openai.messages")
         )
+        if not found:
+            add(_spread(options), "template", "openai.messages")
         return found
 
     if provider == "anthropic":
@@ -1194,6 +1246,16 @@ def _call_source(name: str) -> tuple[str, str, str, bool | None] | None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _spread(node: ObjectExpr | None) -> Node | None:
+    """The argument of the first ``...spread`` in an object literal."""
+    if node is None:
+        return None
+    for prop in node.properties:
+        if prop.key is None and prop.computed:
+            return prop.value
+    return None
 
 
 def _prop(node: ObjectExpr | None, key: str) -> Node | None:

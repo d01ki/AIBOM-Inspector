@@ -12,7 +12,8 @@
     "into fetch() bodies have no SDK sink in the same call and are not counted",
     "separately; the proxy sink stands for them.",
     "Models in fetch() JSON bodies and RealtimeSession options are real model",
-    "selections and are expected."
+    "selections and are expected.",
+    "Correction after the first run (2026-10-18): prompt names must carry the line of the prompt *expression*, as every other case does; these names used the key/call line. 0 name(s) fixed, no expectation added or removed. The first run is frozen in reports/external-20-unseen.*."
   ],
   "components": [
     {
@@ -90,37 +91,37 @@
     },
     {
       "type": "prompt",
-      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/sales.ts:9",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/sales.ts:10",
       "file": "src/app/agentConfigs/customerServiceRetail/sales.ts",
       "status": "declared"
     },
     {
       "type": "prompt",
-      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/simulatedHuman.ts:8",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/simulatedHuman.ts:9",
       "file": "src/app/agentConfigs/customerServiceRetail/simulatedHuman.ts",
       "status": "declared"
     },
     {
       "type": "prompt",
-      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:8",
+      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:9",
       "file": "src/app/agentConfigs/simpleHandoff.ts",
       "status": "declared"
     },
     {
       "type": "prompt",
-      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:18",
+      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:19",
       "file": "src/app/agentConfigs/simpleHandoff.ts",
       "status": "declared"
     },
     {
       "type": "prompt",
-      "name": "template-prompt@src/app/api/responses/route.ts:19",
+      "name": "template-prompt@src/app/api/responses/route.ts:20",
       "file": "src/app/api/responses/route.ts",
       "status": "invoked"
     },
     {
       "type": "prompt",
-      "name": "template-prompt@src/app/api/responses/route.ts:33",
+      "name": "template-prompt@src/app/api/responses/route.ts:34",
       "file": "src/app/api/responses/route.ts",
       "status": "invoked"
     }

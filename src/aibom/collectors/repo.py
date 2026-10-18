@@ -195,12 +195,22 @@ _RE_MCP = re.compile(r"""['"]mcpServers['"]\s*:""")
 # MCP *server* implementations (the supply-chain surface an AI client consumes):
 # Python mcp / fastmcp usage, or the TS server SDK.
 _RE_MCP_SERVER_PY = re.compile(
-    r"""(?:^\s*from\s+(?:mcp|fastmcp)(?:[.\w]*)\s+import\b"""
-    r"""|^\s*import\s+(?:mcp|fastmcp)\b"""
-    r"""|\bFastMCP\s*\()"""
+    r"""(?:^\s*from\s+mcp\.server(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+mcp\.server\b"""
+    r"""|^\s*from\s+fastmcp(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+fastmcp\b"""
+    r"""|\b(?:FastMCP|MCPServer)\s*\()"""
 )
+# Server entry points only: `@modelcontextprotocol/sdk/client/...` and
+# `@modelcontextprotocol/client` are MCP *clients*.
 _RE_MCP_SERVER_JS = re.compile(
-    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:sdk|server)[^'"]*['"]"""
+    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:server|sdk/server)[^'"]*['"]"""
+)
+# Pattern-tier languages: the official SDKs' server constructors.
+_RE_MCP_SERVER_OTHER = re.compile(
+    r"""\bmcp\.NewServer\s*\("""  # Go (modelcontextprotocol/go-sdk)
+    r"""|\bMCP::Server\.new\b"""  # Ruby (mcp gem)
+    r"""|\bimpl\s+(?:rmcp::)?ServerHandler\s+for\b"""  # Rust (rmcp)
 )
 
 # JS/TS provider SDK imports (ESM import-from or CJS require of an AI SDK).
@@ -866,7 +876,11 @@ class RepoCollector(Collector):
                     source_evidence=[ev("mcp-config", line, 0.8)],
                 )
             )
-        if _RE_MCP_SERVER_PY.search(line) or _RE_MCP_SERVER_JS.search(line):
+        if (
+            _RE_MCP_SERVER_PY.search(line)
+            or _RE_MCP_SERVER_JS.search(line)
+            or _RE_MCP_SERVER_OTHER.search(line)
+        ):
             found.append(
                 Service(
                     name=f"mcp-server@{rel}",

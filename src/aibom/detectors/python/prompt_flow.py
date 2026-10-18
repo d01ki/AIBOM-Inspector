@@ -47,11 +47,20 @@ from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
 _MAX_HELPER_DEPTH = 3
-_OPENAI_SUFFIXES = (
-    ".responses.create",
+# `parse` and `stream` (also under `beta.`) take the same prompt arguments.
+_RESPONSES_SUFFIXES = (".responses.create", ".responses.parse", ".responses.stream")
+_CHAT_SUFFIXES = (
     ".chat.completions.create",
+    ".chat.completions.parse",
+    ".chat.completions.stream",
+)
+_OPENAI_SUFFIXES = (
+    *_RESPONSES_SUFFIXES,
+    *_CHAT_SUFFIXES,
     ".completions.create",
     ".beta.assistants.create",
+    # Assistants API: a thread message is a prompt the next run sends.
+    ".beta.threads.messages.create",
 )
 _ANTHROPIC_SUFFIXES = (
     ".messages.create",
@@ -97,7 +106,7 @@ class PromptFlowPythonDetector:
         module = require_python(context)
         resolver = ValueResolver(module)
         for call in module.calls:
-            provider = _provider_for_call(module, call)
+            provider = _provider_for_call(module, call, context.project)
             if provider is None:
                 continue
             model_refs = _model_refs(call, resolver)
@@ -548,19 +557,60 @@ def _argument_for(
     return None
 
 
-def _provider_for_call(module: PythonModule, call: ast.Call) -> str | None:
+def _provider_for_call(
+    module: PythonModule, call: ast.Call, project: ProjectIndex | None = None
+) -> str | None:
     qualified = module.qualified_name(call.func) or ""
     if module.has_import("agents") and qualified in _OPENAI_AGENT_CONSTRUCTORS:
         return "openai-agents"
-    if module.has_import("openai", "langchain_openai") and qualified.endswith(
-        _OPENAI_SUFFIXES
-    ):
+    imported = imported_client_provider(module, call.func, project)
+    if (
+        module.has_import("openai", "langchain_openai") or imported == "openai"
+    ) and qualified.endswith(_OPENAI_SUFFIXES):
         return "openai"
-    if module.has_import("anthropic", "langchain_anthropic") and qualified.endswith(
-        _ANTHROPIC_SUFFIXES
-    ):
+    if (
+        module.has_import("anthropic", "langchain_anthropic") or imported == "anthropic"
+    ) and qualified.endswith(_ANTHROPIC_SUFFIXES):
         return "anthropic"
     return None
+
+
+_CLIENT_CONSTRUCTORS = {
+    "openai.OpenAI": "openai",
+    "openai.AsyncOpenAI": "openai",
+    "openai.AzureOpenAI": "openai",
+    "openai.AsyncAzureOpenAI": "openai",
+    "anthropic.Anthropic": "anthropic",
+    "anthropic.AsyncAnthropic": "anthropic",
+}
+
+
+def imported_client_provider(
+    module: PythonModule, func: ast.AST, project: ProjectIndex | None
+) -> str | None:
+    """The provider of an SDK client created in *another* module and imported here.
+
+    ``from app.clients import client; client.chat.completions.create(...)``:
+    this file never imports ``openai``, but the binding it calls was created
+    with ``openai.OpenAI()`` where it is defined.
+    """
+    if project is None:
+        return None
+    root = func
+    while isinstance(root, ast.Attribute):
+        root = root.value
+    if not isinstance(root, ast.Name) or root.id not in module.aliases:
+        return None
+    symbol = project.python_symbol(module, root.id)
+    if symbol is None:
+        return None
+    bindings = symbol.module.assignments.get((None, symbol.name))
+    if not bindings:
+        return None
+    value = max(bindings, key=lambda item: item.line).value
+    if not isinstance(value, ast.Call):
+        return None
+    return _CLIENT_CONSTRUCTORS.get(symbol.module.qualified_name(value.func) or "")
 
 
 def _prompt_inputs(
@@ -585,6 +635,27 @@ def _prompt_inputs(
             )
         ]
 
+    if qualified.endswith(".beta.threads.messages.create"):
+        content = argument_node(call, ("content",))
+        if content is None:
+            return []
+        role_node = argument_node(call, ("role",))
+        role = resolver.resolve(role_node) if role_node is not None else None
+        kind = (
+            str(role.value).lower()
+            if role is not None and role.resolved and isinstance(role.value, str)
+            else "user"
+        )
+        kind = kind if kind in {"user", "assistant"} else "template"
+        return [
+            PromptInput(
+                content,
+                kind,
+                f"{kind}-prompt@{rel}:{getattr(content, 'lineno', call.lineno)}",
+                "openai.beta.threads.messages.content",
+            )
+        ]
+
     if qualified.endswith(".beta.assistants.create"):
         expression = argument_node(call, ("instructions",))
         if expression is None:
@@ -598,7 +669,7 @@ def _prompt_inputs(
             )
         ]
 
-    if qualified.endswith(".responses.create"):
+    if qualified.endswith(_RESPONSES_SUFFIXES):
         found: list[PromptInput] = []
         instructions = argument_node(call, ("instructions",))
         if instructions is not None:
@@ -623,9 +694,7 @@ def _prompt_inputs(
             )
         return found
 
-    if qualified.endswith(".chat.completions.create") or qualified.endswith(
-        ".messages.create"
-    ) or qualified.endswith(".messages.stream"):
+    if qualified.endswith((*_CHAT_SUFFIXES, ".messages.create", ".messages.stream")):
         system = argument_node(call, ("system",))
         messages = argument_node(call, ("messages",))
         found = []

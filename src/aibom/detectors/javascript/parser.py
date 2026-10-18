@@ -48,6 +48,15 @@ from aibom.detectors.javascript.tokenizer import Token, tokenize
 _OPEN_BRACKETS = frozenset({"(", "[", "{"})
 _CLOSE_BRACKETS = frozenset({")", "]", "}"})
 _DECLARATION_KEYWORDS = frozenset({"const", "let", "var"})
+_STATEMENT_KEYWORDS = frozenset(
+    {"import", "export", "function", "class", "async", "return", "if", "for", "while",
+     "try", "throw", "switch", "type", "interface", "enum", "declare", "await"}
+)
+# Tokens after which a TypeScript type continues on the next line.
+_TYPE_CONTINUATIONS = frozenset(
+    {"|", "&", ".", "<", ",", "=>", ":", "?", "(", "[", "{", "=",
+     "as", "satisfies", "keyof", "typeof", "readonly", "extends", "infer", "is", "new"}
+)
 _SKIPPED_DECLARATIONS = frozenset({"interface", "enum", "namespace", "module", "declare"})
 _PARAM_MODIFIERS = frozenset({"public", "private", "protected", "readonly", "override"})
 _MEMBER_MODIFIERS = frozenset(
@@ -181,6 +190,17 @@ class Parser:
             # A stop wins over bracket bookkeeping: '{' both opens a function
             # body and nests an object type, and the caller decides which.
             if depth == 0 and value in stops:
+                return
+            # ASI: in code without semicolons, `x as T[]` followed by a new
+            # line ends the type, unless the line ended on a type operator.
+            previous = self.tokens[self.i - 1] if self.i > 0 else None
+            if (
+                depth == 0
+                and previous is not None
+                and token.line > previous.end_line
+                and previous.value not in _TYPE_CONTINUATIONS
+                and token.value not in {"|", "&", ".", "?", "=>", "extends"}
+            ):
                 return
             if token.type == "punct":
                 if value in _OPEN_BRACKETS or value == "<":
@@ -738,10 +758,32 @@ class Parser:
         return ExpressionStmt(expression=expression, **self._position(start))
 
     def _skip_to_statement_end(self) -> None:
-        while not self.at_end() and not self.at_punct(";"):
+        """Skip the rest of an import/export statement.
+
+        Code without semicolons relies on ASI: a statement keyword on a later
+        line, outside brackets, starts the next statement.  Without this, every
+        `import` after the first in a semicolon-free file was swallowed.
+        """
+        # The line the current statement reached so far (the token just consumed).
+        previous = self.tokens[self.i - 1] if 0 < self.i <= len(self.tokens) else None
+        start_line = previous.line if previous is not None else 0
+        depth = 0
+        while not self.at_end() and not (depth == 0 and self.at_punct(";")):
             token = self.peek()
             if token is not None and token.is_name and token.value in _DECLARATION_KEYWORDS:
                 return
+            if (
+                token is not None
+                and depth == 0
+                and token.line > start_line
+                and token.is_name
+                and token.value in _STATEMENT_KEYWORDS
+            ):
+                return
+            if token is not None and token.is_punct("(", "{", "["):
+                depth += 1
+            elif token is not None and token.is_punct(")", "}", "]") and depth:
+                depth -= 1
             self.i += 1
         self.eat_punct(";")
 
