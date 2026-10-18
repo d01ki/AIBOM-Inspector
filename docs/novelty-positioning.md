@@ -3,6 +3,7 @@
 **Landscape review date:** 2026-07-28
 **Capability update:** 2026-07-31 (syntax-aware TypeScript/JavaScript analysis)
 **Capability update:** 2026-10-18 (bounded cross-file flow, evidence levels, identical-BOM scope, compare view)
+**Experiment:** 2026-10-18 (agent-audit and Cisco AI BOM run on the drift fixtures and negative controls)
 
 ## Executive conclusion
 
@@ -99,10 +100,28 @@ integrated, auditable workflow.
 
 ## Competitive landscape
 
+### Measured (2026-10-18)
+
+Produced by `benchmark/competitors/compare.py`; full output in
+`benchmark/reports/competitors-latest.md`.
+
+| Tool | What was run | Result |
+|---|---|---|
+| agent-audit 0.20.0 | `scan` (static) and `--baseline --fail-on-new` on 5 identical-BOM pairs | Candidate not flagged in 4 of 5; flagged in 1 only by a line-shift fingerprint change of a finding already present in the baseline. Reports the command-running tool as critical in both revisions. |
+| Cisco AI BOM (`cisco-aibom`) 1.10.0 | `analyze <dir> --output-format json`, no LLM configured | Exits 1: an LLM (`--llm-model`) is required. Not run with an LLM; no result claimed. |
+| Snyk Agent Scan / Snyk AI-BOM | — | Not run: both send data to Snyk and need an account. |
+
+What this supports: *"On these five identical-BOM pairs, a finding-diff
+baseline of a static agent scanner did not surface the new prompt-to-tool
+path."* What it does not support: any detection rate, any claim about the
+tools not run, or "cannot". The pairs are this project's own fixtures.
+
+### Documentation review (2026-07-28)
+
 This table compares publicly documented capabilities, not private roadmaps or
-undocumented implementation details. It is a documentation review dated
-2026-07-28; none of these tools has yet been run against the pinned corpus, so
-no row states that a tool *cannot* do something. Present it that way.
+undocumented implementation details. Apart from the measured rows above, none
+of these tools has been run, so no row states that a tool *cannot* do
+something. Present it that way.
 
 | Project | Publicly documented strength | AIBOM Inspector positioning |
 |---|---|---|
@@ -200,13 +219,14 @@ Demo sequence:
   now-overfit corpus; a fresh corpus is needed to measure it independently).
 - ~~Cross-file flow~~ — shipped 2026-10-18 for Python and TypeScript, bounded.
 - Re-verify the competitive table by running each tool against the same pinned
-  corpus; the table below the line is a documentation review (2026-07-28),
-  not an experiment.
+  corpus — agent-audit done and Cisco AI BOM probed (2026-10-18, *Measured*
+  above); Cisco with an LLM and the Snyk tools still need an account/key and
+  explicit approval to upload code.
 - ~~Add JavaScript/TypeScript syntax-aware prompt-flow analysis~~ — shipped
   2026-07-31 (`javascript.prompt-flow.ast`).
 - ~~Measure JS/TS precision separately from Python~~ — shipped 2026-07-31
   (`## By language` in the benchmark report).
 - Measure drift precision on real pull requests, not only synthetic revisions.
-- Publish a pinned comparison corpus and commands so competitors and reviewers
-  can reproduce the capability matrix.
+- ~~Publish a pinned comparison corpus and commands~~ —
+  `benchmark/competitors/compare.py` with the pinned corpus (2026-10-18).
 - Keep the novelty claim dated. This market changes quickly.

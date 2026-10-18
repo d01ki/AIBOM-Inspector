@@ -35,7 +35,7 @@ tool capability graph (see `git log`).
 ```bash
 uv run ruff check .   # All checks passed!
 uv run mypy           # Success: no issues found in 64 source files
-uv run pytest         # 419 passed, 1 skipped
+uv run pytest         # 427 passed, 1 skipped
 ```
 
 Before: 340 passed. The skipped test checks that the scanner does not follow
@@ -90,6 +90,45 @@ a regression test that fails before the fix. Remaining misses are documented
 in [limitations](limitations.md) (plugin-registered models, `**kwargs`
 prompts, cassette-only model evidence).
 
+### Competitor comparison — experiment (P1)
+
+```bash
+python benchmark/competitors/compare.py   --agent-audit <path>/agent-audit --cisco-aibom <path>/cisco-aibom
+# -> benchmark/reports/competitors-latest.{json,md}
+```
+
+Each tool was installed from PyPI into its own venv and run in its static
+mode on the same inputs. Identical-BOM drift, gate high+, using each tool's own
+revision-comparison mode (agent-audit: `--save-baseline` then
+`--baseline --fail-on-new`, both revisions copied to the same path):
+
+| Pair (author-built fixtures) | aibom | agent-audit 0.20.0 | cisco-aibom 1.10.0 |
+|---|---|---|---|
+| same-file Python, prompt role change | flagged | not flagged | refused (LLM required) |
+| same-file Python, bound tool | flagged | not flagged | refused |
+| same-file TypeScript, bound tool | flagged | flagged — line-shift artifact¹ | refused |
+| cross-file Python (4 files) | flagged | not flagged | refused |
+| cross-file TypeScript (4 files) | flagged | not flagged | refused |
+
+¹ The "new" finding is the same AGENT-034 shell-execution finding in the same
+file, moved from line 25 to 24 because the baseline has one more comment
+line; its fingerprint changed. The harness detects and labels this.
+
+Read this narrowly. The five pairs were written by this project to exhibit
+the identical-BOM case, so they show that the scenario exists and that a
+finding-diff tool does not surface it — not a detection rate. agent-audit
+reports the command-running tool itself (AGENT-001/034, critical) in **both**
+revisions, which is consistent with its tool-boundary scope. `cisco-aibom
+analyze` exits 1 without `--llm-model` (*"--llm-model … is required. The LLM
+agent classifies every scanner candidate"*); it was not run with an LLM, so
+nothing is claimed about its results.
+
+High+ findings on the 11 negative-control repositories: aibom 1 (a
+hardcoded-secret regex hit on a placeholder inside a JSDoc example in
+`sindresorhus/ky`, a false positive), agent-audit 403 (332 of them in
+`fastapi/typer`). These are counts, not false-positive rates: agent-audit
+also reports non-AI issues outside AIBOM's scope.
+
 ### Path behavior — fixtures
 
 Path accuracy is not measured on a public corpus. It is pinned by fixtures:
@@ -126,9 +165,10 @@ Overhead of the project index and cross-file tracing: within ~8%.
 
 ## Not done (explicitly)
 
-- **P1 — competitor comparison.** Not done. The competitive table in
-  [novelty-positioning](novelty-positioning.md) is a documentation review,
-  not an experiment; no competitor tool was run against the corpus.
+- **P1 — competitor comparison, partially.** agent-audit was run; Cisco AI
+  BOM requires an LLM and was not run with one; Snyk Agent Scan / Snyk AI-BOM
+  were not run (account and upload to Snyk required). The component-inventory
+  P/R of competitors was not measured: agent-audit is not an inventory tool.
 - **P2 — runtime evidence.** Design only: [runtime-evidence-design](runtime-evidence-design.md).
 - Docker image build was not re-run in this environment (Docker daemon
   unavailable). The equivalent install path was verified: the wheel built

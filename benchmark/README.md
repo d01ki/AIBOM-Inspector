@@ -122,3 +122,21 @@ subprocess.run(["git", "-C", path, "checkout", "-q", "FETCH_HEAD"], check=True)
 PY
 done
 ```
+
+## Competitor comparison
+
+`competitors/compare.py` runs other scanners next to AIBOM Inspector on the
+same inputs: the identical-BOM drift pairs (each tool's own revision-diff mode)
+and the negative-control repositories above. Competitors are not dependencies;
+install each into its own environment and pass the executable:
+
+```bash
+uv venv .venv-agent-audit && VIRTUAL_ENV=.venv-agent-audit uv pip install agent-audit==0.20.0
+python benchmark/competitors/compare.py --agent-audit .venv-agent-audit/Scripts/agent-audit
+```
+
+Output: `reports/competitors-latest.{json,md}`. A tool not passed is reported
+as *not run*. LLM credentials are stripped from the environment of every tool
+run, so a tool that requires an LLM is recorded as refusing rather than being
+silently given one. Negative-control numbers are finding counts, not
+false-positive rates.

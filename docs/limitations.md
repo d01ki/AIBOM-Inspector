@@ -124,7 +124,13 @@
   precision 0.913, recall 0.661 (frozen in `reports/external-20-unseen.md`).
   The defects it exposed were fixed, after which the same corpus scores 0.966 /
   0.869 — regression evidence, not generalization. All 11 negative
-  repositories produced no false positive in either run.
+  repositories produced no false-positive *component* in either run.
+- Risk findings are not component-free on those repositories: the
+  hardcoded-secret rule (TDR-007, regex tier) fires on a placeholder token
+  inside a JSDoc usage example in `sindresorhus/ky`
+  (`source/types/options.ts:409`). Comments are scanned on purpose, since a
+  real credential in a comment is still a leak, so such examples remain a
+  known false-positive source (found by `benchmark/competitors/compare.py`).
 - Still missed on that corpus (by design or not yet supported): model ids
   registered with a plugin framework rather than passed to an SDK call (the
   `llm` plugin in simonw/llm-claude-3), prompts passed to a sink only through
