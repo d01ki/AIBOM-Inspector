@@ -1,0 +1,11 @@
+{
+  "repository": "sindresorhus/ky",
+  "commit": "3541888878c4d303a8bc2ad61815f4e048f55a5d",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/ky",
+  "notes": [
+    "Curated 2026-10-18. HTTP client; no AI SDK, model id, LLM prompt or AI package.",
+    "Adversarial for network egress: fetch/POST code everywhere, no agent or tool."
+  ],
+  "components": []
+}

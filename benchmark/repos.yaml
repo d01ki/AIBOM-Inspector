@@ -4,8 +4,8 @@ version: 2
 # immutable commit. The candidate lists below are NOT counted until curation is
 # complete - they record intent, not evidence.
 #
-# Status 2026-10-18: 7 public cases curated (2 positive, 5 negative) across
-# Python, TypeScript/JavaScript and Go. The documented target is 20; this is not there yet, and
+# Status 2026-10-18: 20 public cases curated (9 positive, 11 negative) across
+# Python, TypeScript/JavaScript, Go and one mixed five-language repository. The documented target is 20; this is not there yet, and
 # the shortfall is stated in docs/limitations.md rather than papered over.
 repositories:
   - repository: local/vulnerable-ai-app
@@ -60,6 +60,85 @@ public_repositories:
     commit: 34dac209ffb6ef85cc78c5d217bbb7ad001d68fd
     language: go
     ground_truth: ground_truth_public/gin.json
+    role: negative
+    enabled_by_default: false
+
+  - repository: modelcontextprotocol/quickstart-resources
+    commit: 38e14ca4ce362d27dfaaa498f3b4592bea4c6710
+    language: mixed
+    ground_truth: ground_truth_public/quickstart-resources.json
+    role: positive
+    enabled_by_default: false
+  - repository: openai/openai-assistants-quickstart
+    commit: 06fc2d444a5d41b574082080f4c7b2e48156b84f
+    language: typescript
+    ground_truth: ground_truth_public/openai-assistants-quickstart.json
+    role: positive
+    enabled_by_default: false
+  - repository: vercel-labs/ai-sdk-preview-roundtrips
+    commit: 9242a902cb7ba9df4d7d8eda296199a1a1102f79
+    language: typescript
+    ground_truth: ground_truth_public/ai-sdk-preview-roundtrips.json
+    role: positive
+    enabled_by_default: false
+  - repository: vercel-labs/gemini-chatbot
+    commit: 7034ce9c6cd7b0218f298fdbe3ae4d7a3a5c6f58
+    language: typescript
+    ground_truth: ground_truth_public/gemini-chatbot.json
+    role: positive
+    enabled_by_default: false
+  - repository: openai/openai-realtime-agents
+    commit: 94c9e9116b581052655cff7b756cc5e02771cda1
+    language: typescript
+    ground_truth: ground_truth_public/openai-realtime-agents.json
+    role: positive
+    enabled_by_default: false
+  - repository: openai/openai-structured-outputs-samples
+    commit: 7f4e3446ac9a081b2686314d028ce539b6f286f9
+    language: typescript
+    ground_truth: ground_truth_public/openai-structured-outputs-samples.json
+    role: positive
+    enabled_by_default: false
+  - repository: simonw/llm-claude-3
+    commit: 5b42bfc3e5140e0849895fc4802190ae67c8f1bf
+    language: python
+    ground_truth: ground_truth_public/llm-claude-3.json
+    role: positive
+    enabled_by_default: false
+  - repository: pallets/click
+    commit: 2247b35ea1c47c727d7a06e51fa280e12a863ff6
+    language: python
+    ground_truth: ground_truth_public/click.json
+    role: negative
+    enabled_by_default: false
+  - repository: fastapi/typer
+    commit: a5882dedf0bc7a46cd861fdfca020f88519e0f21
+    language: python
+    ground_truth: ground_truth_public/typer.json
+    role: negative
+    enabled_by_default: false
+  - repository: pallets/markupsafe
+    commit: 4e111271b1494995708a9e878a10829b5e10c7ba
+    language: python
+    ground_truth: ground_truth_public/markupsafe.json
+    role: negative
+    enabled_by_default: false
+  - repository: pallets/jinja
+    commit: 5ef70112a1ff19c05324ff889dd30405b1002044
+    language: python
+    ground_truth: ground_truth_public/jinja.json
+    role: negative
+    enabled_by_default: false
+  - repository: sindresorhus/ky
+    commit: 3541888878c4d303a8bc2ad61815f4e048f55a5d
+    language: typescript
+    ground_truth: ground_truth_public/ky.json
+    role: negative
+    enabled_by_default: false
+  - repository: expressjs/cors
+    commit: 5317ebe670db2aaebc1d496eb5d33493deefb3ed
+    language: typescript
+    ground_truth: ground_truth_public/cors.json
     role: negative
     enabled_by_default: false
 

@@ -1,0 +1,15 @@
+{
+  "repository": "fastapi/typer",
+  "commit": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+  "language": "python",
+  "local_path": "benchmark/checkouts/typer",
+  "notes": [
+    "Curated 2026-10-18. CLI framework (776 files); no AI SDK, model id, or AI package.",
+    "Adversarial for prompts: docs_src/prompt/ and docs_src/options/prompt/ are",
+    "directories of *terminal prompt* tutorials (typer.prompt), not LLM prompts.",
+    "typer/.agents/skills/typer/SKILL.md is shipped instruction text for external",
+    "coding agents; Typer itself never sends it to a model, so it is not counted",
+    "as an application prompt. A reviewer may reasonably disagree; recorded here."
+  ],
+  "components": []
+}

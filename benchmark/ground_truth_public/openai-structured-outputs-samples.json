@@ -1,0 +1,73 @@
+{
+  "repository": "openai/openai-structured-outputs-samples",
+  "commit": "7f4e3446ac9a081b2686314d028ce539b6f286f9",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/openai-structured-outputs-samples",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file before running the scanner.",
+    "Three Next.js apps. All model calls are openai.beta.chat.completions.stream(...).",
+    "The model id comes from an imported constant (gpt-5.2 in two apps, gpt-4o-mini in one).",
+    "conversational-assistant forwards client-built messages (its system prompt is assembled",
+    "in the browser, lib/assistant.ts); the prompt is counted at the server sink.",
+    "The same npm package `openai` in three package.json files is one component."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "openai",
+      "file": "conversational-assistant/package.json",
+      "line": 19,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "openai",
+      "file": "conversational-assistant/app/api/turn_response/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-5.2",
+      "file": "conversational-assistant/config/constants.ts",
+      "line": 1,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o-mini",
+      "file": "resume-extraction/lib/constants.ts",
+      "line": 1,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@conversational-assistant/app/api/turn_response/route.ts:19",
+      "file": "conversational-assistant/app/api/turn_response/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@generative-ui/app/api/generate_ui/route.ts:35",
+      "file": "generative-ui/app/api/generate_ui/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@generative-ui/app/api/generate_ui/route.ts:39:1",
+      "file": "generative-ui/app/api/generate_ui/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@resume-extraction/app/api/extract_resume/route.ts:18",
+      "file": "resume-extraction/app/api/extract_resume/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@resume-extraction/app/api/extract_resume/route.ts:19:1",
+      "file": "resume-extraction/app/api/extract_resume/route.ts",
+      "status": "invoked"
+    }
+  ]
+}

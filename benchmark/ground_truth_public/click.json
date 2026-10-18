@@ -1,0 +1,13 @@
+{
+  "repository": "pallets/click",
+  "commit": "2247b35ea1c47c727d7a06e51fa280e12a863ff6",
+  "language": "python",
+  "local_path": "benchmark/checkouts/click",
+  "notes": [
+    "Curated 2026-10-18. No AI SDK, model id, LLM prompt or AI package anywhere.",
+    "Adversarial for prompts: docs/prompts.md, tests/test_utils/test_prompt.py and",
+    "click.prompt() are terminal input prompts, not model prompts.",
+    "AGENTS.md is guidance for external coding agents, not an application component."
+  ],
+  "components": []
+}

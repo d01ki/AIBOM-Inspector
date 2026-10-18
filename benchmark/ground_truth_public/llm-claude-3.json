@@ -1,0 +1,143 @@
+{
+  "repository": "simonw/llm-claude-3",
+  "commit": "5b42bfc3e5140e0849895fc4802190ae67c8f1bf",
+  "language": "python",
+  "local_path": "benchmark/checkouts/llm-claude-3",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file before running the scanner.",
+    "Plugin for the `llm` CLI. The eight model ids are passed to plugin model classes in",
+    "register_models() and only reach the SDK when a user selects one at runtime, so they",
+    "are expected as declared. Aliases (claude-3-opus, ...) are not model ids.",
+    "Prompts reach messages.create / messages.stream (lines 251, 257, 273, 278) only via",
+    "**kwargs built in build_kwargs(): a system prompt and the conversation messages per",
+    "sink. Named with the project's role@file:sink-line convention.",
+    "`llm` is an LLM framework absent from the AI-package allowlist; it is expected anyway.",
+    "tests/ cassettes are recorded HTTP fixtures, not components."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "llm",
+      "file": "pyproject.toml",
+      "line": 12,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "anthropic",
+      "file": "pyproject.toml",
+      "line": 13,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "anthropic",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-opus-20240229",
+      "file": "llm_claude_3.py",
+      "line": 11,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-opus-latest",
+      "file": "llm_claude_3.py",
+      "line": 15,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-sonnet-20240229",
+      "file": "llm_claude_3.py",
+      "line": 20,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-haiku-20240307",
+      "file": "llm_claude_3.py",
+      "line": 25,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-5-sonnet-20240620",
+      "file": "llm_claude_3.py",
+      "line": 31,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-5-sonnet-20241022",
+      "file": "llm_claude_3.py",
+      "line": 35,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-5-sonnet-latest",
+      "file": "llm_claude_3.py",
+      "line": 39,
+      "status": "declared"
+    },
+    {
+      "type": "model",
+      "name": "claude-3-5-haiku-latest",
+      "file": "llm_claude_3.py",
+      "line": 44,
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@llm_claude_3.py:251",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@llm_claude_3.py:251",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@llm_claude_3.py:257",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@llm_claude_3.py:257",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@llm_claude_3.py:273",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@llm_claude_3.py:273",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@llm_claude_3.py:278",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@llm_claude_3.py:278",
+      "file": "llm_claude_3.py",
+      "status": "invoked"
+    }
+  ]
+}
