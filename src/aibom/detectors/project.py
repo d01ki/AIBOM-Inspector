@@ -269,7 +269,7 @@ class ProjectIndex:
             for prefix, star, targets in self.ts_paths:
                 if star and specifier.startswith(prefix):
                     rest = specifier[len(prefix):]
-                    bases.extend(f"{target}{rest}" for target in targets)
+                    bases.extend(_join(target, rest) for target in targets)
                     break
                 if not star and specifier == prefix:
                     bases.extend(targets)
