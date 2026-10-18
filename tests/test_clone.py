@@ -73,3 +73,49 @@ def test_invalid_url_rejected_before_subprocess(monkeypatch: Any) -> None:
     with pytest.raises(CloneError), clone_repo("ftp://evil/owner/repo"):
         pass
     assert called is False  # validation happens before git runs
+
+
+def test_git_never_materializes_symlinks(monkeypatch: Any) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(cmd)
+        Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(clone_mod.subprocess, "run", fake_run)
+    with clone_repo(URL):
+        pass
+    assert "core.symlinks=false" in commands[0]
+    assert "protocol.file.allow=never" in commands[0]
+
+
+def test_oversized_checkout_is_rejected(monkeypatch: Any) -> None:
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        dest = Path(cmd[-1])
+        dest.mkdir(parents=True, exist_ok=True)
+        for index in range(5):
+            (dest / f"f{index}.txt").write_text("x", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(clone_mod.subprocess, "run", fake_run)
+    monkeypatch.setenv("AIBOM_MAX_CLONE_FILES", "3")
+    with pytest.raises(CloneError, match="too large"), clone_repo(URL):
+        pass
+
+
+def test_scanner_skips_symlinks_leaving_the_root(tmp_path: Path) -> None:
+    from aibom.service import run_scan
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_text('MODEL = "gpt-4.1"\n', encoding="utf-8")
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    try:
+        (root / "link.py").symlink_to(outside / "secret.py")
+    except OSError:
+        pytest.skip("symlinks are not available on this platform")
+    inventory = run_scan(root).inventory
+    assert inventory.stats.files_scanned == 1  # app.py only; link.py is not followed

@@ -63,10 +63,26 @@ def test_every_element_id_used_by_the_script_exists_in_the_markup(page: str) -> 
     assert not missing, f"script references ids that are not in the markup: {missing}"
 
 
-def test_the_revision_comparison_ui_is_gone(page: str) -> None:
-    """Revision comparison lives in the CLI and the API, not in the page."""
+def test_revision_comparison_is_its_own_section(page: str) -> None:
+    """Baseline vs candidate is a separate panel over the same diff API.
+
+    An earlier version made drift a *mode* of the scan panel and shared its
+    result container; keeping the two apart is what this guards.
+    """
     for leftover in ("modeDrift", "driftFields", "driftResult", "runDriftDemo", "downloadDrift"):
-        assert leftover not in page, f"leftover drift UI reference: {leftover}"
+        assert leftover not in page, f"leftover mode-based drift UI reference: {leftover}"
+    compare = page.index('id="compareSection"')
+    results_start = page.index('id="results" tabindex="-1" hidden')
+    results_end = page.index('id="helpPanel"')
+    assert not results_start < compare < page.index('id="scanResult"'), (
+        "the comparison must not live inside the scan result container"
+    )
+    assert compare < results_end
+    assert 'id="compareResult" tabindex="-1" hidden' in page
+    assert '$("compareResult").hidden = false;' in page
+    # The page renders the engine's verdicts; it does not compute its own.
+    assert "/api/diff/demo?" in page and '"/api/diff"' in page
+    assert "drift.bom" in page and "security_boundary_changed" in page
 
 
 def test_the_page_can_be_pointed_at_a_backend(page: str) -> None:

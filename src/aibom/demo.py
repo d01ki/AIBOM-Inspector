@@ -49,6 +49,29 @@ def ts_drift_demo_paths() -> tuple[Path, Path] | None:
     )
 
 
+def crossfile_drift_demo_paths(language: str = "python") -> tuple[Path, Path] | None:
+    """Return the identical-BOM, cross-file baseline/candidate pair for ``language``.
+
+    The baseline doubles as the *fixed* revision in the five-step demo: going
+    candidate -> baseline must remove the path again.
+    """
+    if language == "typescript":
+        return _first_pair(
+            [
+                ("xfile_ts_baseline", "xfile_ts_candidate"),
+                ("xfile-ts-baseline", "xfile-ts-candidate"),
+            ],
+            "lib/agent.ts",
+        )
+    return _first_pair(
+        [
+            ("xfile_py_baseline", "xfile_py_candidate"),
+            ("xfile-py-baseline", "xfile-py-candidate"),
+        ],
+        "assistant/main.py",
+    )
+
+
 def _first_pair(names: list[tuple[str, str]], marker: str) -> tuple[Path, Path] | None:
     here = Path(__file__).resolve()
     roots = [here.parent, here.parents[2] / "tests" / "fixtures"]

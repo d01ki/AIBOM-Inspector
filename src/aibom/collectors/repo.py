@@ -422,6 +422,10 @@ class RepoCollector(Collector):
             rel_parts = path.relative_to(self.root).parts
             if any(part in _IGNORE_DIRS for part in rel_parts):
                 continue
+            if path.is_symlink() and not _inside(path, self.root):
+                # A link out of the scan root is not part of the repository,
+                # and following it would read arbitrary host files.
+                continue
             files.append(path)
         return sorted(files)
 
@@ -1048,6 +1052,14 @@ class RepoCollector(Collector):
                             ],
                         )
                     )
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _sha(text: str) -> str:

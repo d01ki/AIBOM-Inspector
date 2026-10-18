@@ -16,7 +16,12 @@ from pydantic import BaseModel, Field
 
 from aibom import __version__
 from aibom.compliance.minimum_elements import evaluate_cyclonedx
-from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
+from aibom.demo import (
+    crossfile_drift_demo_paths,
+    drift_demo_paths,
+    impact_demo_path,
+    ts_drift_demo_paths,
+)
 from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
 from aibom.export.sarif import to_sarif
@@ -161,19 +166,34 @@ def create_app() -> FastAPI:
         return _to_drift_payload(baseline, candidate)
 
     @app.post("/api/diff/demo")
-    def diff_demo(language: str = "python") -> dict[str, Any]:
-        pair = ts_drift_demo_paths() if language == "typescript" else drift_demo_paths()
+    def diff_demo(
+        language: str = "python", scenario: str = "cross-file", revision: str = "candidate"
+    ) -> dict[str, Any]:
+        """Offline drift demo.
+
+        ``scenario`` is ``cross-file`` (route, builder, agent and tool in four
+        files) or ``same-file``.  ``revision=fixed`` compares the candidate with
+        the fixed revision, the last step of the demo.
+        """
+        if language != "typescript":
+            language = "python"  # unknown languages fall back, as before
+        if scenario == "same-file":
+            pair = ts_drift_demo_paths() if language == "typescript" else drift_demo_paths()
+        elif scenario == "cross-file":
+            pair = crossfile_drift_demo_paths(language)
+        else:
+            raise HTTPException(status_code=400, detail="scenario must be cross-file or same-file")
         if pair is None:
             raise HTTPException(
                 status_code=503, detail=f"the built-in {language} drift demo is unavailable"
             )
         baseline_path, candidate_path = pair
-        baseline = run_scan(
-            baseline_path, display_target=f"built-in://drift/{language}/baseline"
-        )
-        candidate = run_scan(
-            candidate_path, display_target=f"built-in://drift/{language}/candidate"
-        )
+        prefix = f"built-in://{scenario}/{language}"
+        candidate = run_scan(candidate_path, display_target=f"{prefix}/candidate")
+        if revision == "fixed":
+            fixed = run_scan(baseline_path, display_target=f"{prefix}/fixed")
+            return _to_drift_payload(candidate, fixed)
+        baseline = run_scan(baseline_path, display_target=f"{prefix}/baseline")
         return _to_drift_payload(baseline, candidate)
 
     @app.post("/api/sarif")

@@ -25,7 +25,7 @@ from aibom.compliance.minimum_elements import (
     evaluate_cyclonedx,
 )
 from aibom.config import ConfigError, ScanConfig, load_config
-from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
+from aibom.demo import crossfile_drift_demo_paths, impact_demo_path
 from aibom.drift import DriftReport, compare_scan_results
 from aibom.export.cyclonedx import (
     DEFAULT_LIFECYCLE,
@@ -485,23 +485,49 @@ def demo() -> None:
     _render_impacts(paths)
     _render_risk(result.findings, result.score)
 
-    for language, revisions in (
-        ("Python", drift_demo_paths()),
-        ("TypeScript", ts_drift_demo_paths()),
-    ):
+    for language in ("python", "typescript"):
+        revisions = crossfile_drift_demo_paths(language)
         if revisions is None:
             continue
-        baseline, candidate = revisions
-        console.print(
-            f"\n[bold]Behavioral drift demo ({language})[/bold] - same model and tool, "
-            "a tool that now runs commands is newly reachable"
+        _five_step_demo(language, *revisions)
+
+
+def _five_step_demo(language: str, baseline: Path, candidate: Path) -> None:
+    """Baseline -> candidate -> same BOM -> new cross-file path -> fix removes it."""
+    title = "Python" if language == "python" else "TypeScript"
+    console.print(
+        f"\n[bold]Behavioral drift demo ({title}, cross-file)[/bold] - "
+        "same models, packages and tools; the attack surface changes"
+    )
+    before = run_scan(baseline, display_target=f"built-in://xfile/{language}/baseline")
+    after = run_scan(candidate, display_target=f"built-in://xfile/{language}/candidate")
+    counts = ", ".join(
+        f"{count} {kind}"
+        for kind, count in sorted(before.inventory.counts().items())
+        if count and kind != "prompt"
+    )
+    console.print(
+        f"[bold]1/5 Baseline[/bold] {counts}; "
+        f"{len(build_impact_paths(before.inventory))} impact path(s)"
+    )
+    console.print(
+        f"[bold]2/5 Candidate[/bold] {len(build_impact_paths(after.inventory))} impact path(s)"
+    )
+    report = compare_scan_results(before, after)
+    console.print("[bold]3/5 + 4/5 Same AIBOM, new path[/bold]")
+    _render_drift(report)
+    fixed = compare_scan_results(
+        after, run_scan(baseline, display_target=f"built-in://xfile/{language}/fixed")
+    )
+    removed = sum(1 for change in fixed.changes if change.kind.value == "impact_path_removed")
+    console.print(
+        f"[bold]5/5 Fix[/bold] rescanning the fixed revision: {removed} path(s) removed; "
+        + (
+            "security boundary unchanged."
+            if not fixed.security_boundary_changed
+            else "[red]security boundary still changed.[/red]"
         )
-        slug = language.lower()
-        drift_report = compare_scan_results(
-            run_scan(baseline, display_target=f"built-in://drift/{slug}/baseline"),
-            run_scan(candidate, display_target=f"built-in://drift/{slug}/candidate"),
-        )
-        _render_drift(drift_report)
+    )
 
 
 def _prompt_for_target() -> str:
