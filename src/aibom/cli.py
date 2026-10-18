@@ -926,7 +926,7 @@ def _render_drift(report: DriftReport) -> None:
 
     table = Table(title="Security-significant changes", show_lines=False)
     table.add_column("Sev", style="bold")
-    table.add_column("Kind")
+    table.add_column("Kind", no_wrap=True)
     table.add_column("Change")
     table.add_column("Evidence", style="dim")
     for change in report.changes:
