@@ -42,6 +42,7 @@ class DetectorRegistry:
 
 def default_registry(*, disabled: set[str] | None = None) -> DetectorRegistry:
     """Build the built-in registry lazily to avoid import cycles."""
+    from aibom.detectors.javascript.models import ModelCatalogJavaScriptDetector
     from aibom.detectors.javascript.prompt_flow import PromptFlowJavaScriptDetector
     from aibom.detectors.python.anthropic import AnthropicPythonDetector
     from aibom.detectors.python.huggingface import HuggingFacePythonDetector
@@ -55,6 +56,7 @@ def default_registry(*, disabled: set[str] | None = None) -> DetectorRegistry:
             HuggingFacePythonDetector(),
             PromptFlowPythonDetector(),
             PromptFlowJavaScriptDetector(),
+            ModelCatalogJavaScriptDetector(),
         ],
         disabled=disabled,
     )

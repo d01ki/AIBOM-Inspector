@@ -21,6 +21,7 @@ from aibom.detectors.javascript.nodes import (
     CallExpr,
     ClassDecl,
     ConditionalExpr,
+    ExportDecl,
     ExpressionStmt,
     FunctionNode,
     Identifier,
@@ -363,11 +364,44 @@ class Parser:
         return specifiers
 
     def _parse_export(self, *, exported: bool = False) -> Node | None:
+        start = self.peek()
         self.i += 1  # 'export'
-        if self.at_punct("{") or self.at_punct("*"):
+        if self.eat_name("type"):  # `export type { X }` carries no runtime binding
             self._skip_to_statement_end()
             return None
-        self.eat_name("default")
+        if self.at_punct("{") or self.at_punct("*"):
+            star = False
+            specifiers: dict[str, str] = {}
+            if self.eat_punct("*"):
+                star = True
+                if self.eat_name("as"):
+                    alias = self.advance()
+                    if alias is not None and alias.is_name:
+                        specifiers[alias.value] = "*"
+                        star = False
+            else:
+                specifiers = self._parse_named_import_specifiers()
+            source = ""
+            if self.eat_name("from"):
+                module = self.peek()
+                if module is not None and module.type == "string":
+                    source = module.value
+                    self.i += 1
+            self._skip_to_statement_end()
+            return ExportDecl(
+                source=source, specifiers=specifiers, star=star, **self._position(start)
+            )
+        if self.eat_name("default"):
+            token, following = self.peek(), self.peek(1)
+            if (
+                token is not None
+                and token.is_name
+                and token.value not in _DECLARATION_KEYWORDS
+                and (following is None or following.is_punct(";", "}"))
+            ):
+                self.i += 1
+                self.eat_punct(";")
+                return ExportDecl(specifiers={"default": token.value}, **self._position(start))
         if self.at_end():
             return None
         return self.parse_statement(exported=True)
@@ -515,8 +549,12 @@ class Parser:
         if not self.at_punct("("):
             return params
         self.i += 1
+        position = 0
         while not self.at_end() and not self.at_punct(")"):
-            if self.eat_punct(",") or self.eat_punct("..."):
+            if self.eat_punct(","):
+                position += 1
+                continue
+            if self.eat_punct("..."):
                 continue
             while self.at_punct("@"):
                 self.i += 1
@@ -537,7 +575,9 @@ class Parser:
             if self.eat_punct("="):
                 self._parse_assignment()
             for name in names:
-                params.append(Param(name=name, properties=list(properties), line=line))
+                params.append(
+                    Param(name=name, properties=list(properties), line=line, index=position)
+                )
         self.eat_punct(")")
         return params
 
@@ -1260,6 +1300,10 @@ class JsModule:
     functions_by_node: dict[int, JsFunctionInfo] = field(default_factory=dict)
     scopes: dict[int, str | None] = field(default_factory=dict)
     calls: list[CallExpr] = field(default_factory=list)
+    #: exported name -> (module specifier or '' for a local binding, name)
+    reexports: dict[str, tuple[str, str]] = field(default_factory=dict)
+    #: specifiers of ``export * from '...'``
+    star_exports: list[str] = field(default_factory=list)
 
     def qualified_name(self, node: Node) -> str | None:
         """Return a dotted symbol path, expanding import aliases at the root."""
@@ -1400,6 +1444,14 @@ class _Indexer:
 
         if isinstance(node, ImportDecl):
             self._record_import(node)
+            return
+        if isinstance(node, ExportDecl):
+            if node.star and node.source:
+                self.module.star_exports.append(node.source)
+            for exported, local in node.specifiers.items():
+                self.module.reexports[exported] = (node.source, local)
+            if node.source:
+                self.module.imports.add(node.source)
             return
         if isinstance(node, VarDecl):
             self._record_var(node, scope)
