@@ -1,0 +1,10 @@
+{
+  "repository": "expressjs/cors",
+  "commit": "5317ebe670db2aaebc1d496eb5d33493deefb3ed",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/cors",
+  "notes": [
+    "Curated 2026-10-18. Express middleware in plain JavaScript; no AI usage."
+  ],
+  "components": []
+}

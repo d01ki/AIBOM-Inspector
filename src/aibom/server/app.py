@@ -16,11 +16,17 @@ from pydantic import BaseModel, Field
 
 from aibom import __version__
 from aibom.compliance.minimum_elements import evaluate_cyclonedx
-from aibom.demo import drift_demo_paths, impact_demo_path, ts_drift_demo_paths
+from aibom.demo import (
+    crossfile_drift_demo_paths,
+    drift_demo_paths,
+    impact_demo_path,
+    ts_drift_demo_paths,
+)
 from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
 from aibom.export.sarif import to_sarif
 from aibom.graph import build_graph
+from aibom.impact import build_impact_paths, build_unresolved_impacts
 from aibom.policy import production_ai_component_count, production_view
 from aibom.report.html import render_html
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
@@ -160,19 +166,34 @@ def create_app() -> FastAPI:
         return _to_drift_payload(baseline, candidate)
 
     @app.post("/api/diff/demo")
-    def diff_demo(language: str = "python") -> dict[str, Any]:
-        pair = ts_drift_demo_paths() if language == "typescript" else drift_demo_paths()
+    def diff_demo(
+        language: str = "python", scenario: str = "cross-file", revision: str = "candidate"
+    ) -> dict[str, Any]:
+        """Offline drift demo.
+
+        ``scenario`` is ``cross-file`` (route, builder, agent and tool in four
+        files) or ``same-file``.  ``revision=fixed`` compares the candidate with
+        the fixed revision, the last step of the demo.
+        """
+        if language != "typescript":
+            language = "python"  # unknown languages fall back, as before
+        if scenario == "same-file":
+            pair = ts_drift_demo_paths() if language == "typescript" else drift_demo_paths()
+        elif scenario == "cross-file":
+            pair = crossfile_drift_demo_paths(language)
+        else:
+            raise HTTPException(status_code=400, detail="scenario must be cross-file or same-file")
         if pair is None:
             raise HTTPException(
                 status_code=503, detail=f"the built-in {language} drift demo is unavailable"
             )
         baseline_path, candidate_path = pair
-        baseline = run_scan(
-            baseline_path, display_target=f"built-in://drift/{language}/baseline"
-        )
-        candidate = run_scan(
-            candidate_path, display_target=f"built-in://drift/{language}/candidate"
-        )
+        prefix = f"built-in://{scenario}/{language}"
+        candidate = run_scan(candidate_path, display_target=f"{prefix}/candidate")
+        if revision == "fixed":
+            fixed = run_scan(baseline_path, display_target=f"{prefix}/fixed")
+            return _to_drift_payload(candidate, fixed)
+        baseline = run_scan(baseline_path, display_target=f"{prefix}/baseline")
         return _to_drift_payload(baseline, candidate)
 
     @app.post("/api/sarif")
@@ -203,8 +224,20 @@ def _to_drift_payload(baseline: ScanResult, candidate: ScanResult) -> dict[str, 
         "drift": report.model_dump(),
         "baseline": _revision_summary(baseline),
         "candidate": _revision_summary(candidate),
-        "components_identical": _component_signature(baseline)
-        == _component_signature(candidate),
+        # Kept for API compatibility; `drift.bom` states the compared scope.
+        "components_identical": report.bom.identical if report.bom else False,
+        "baseline_paths": _paths_payload(baseline),
+        "candidate_paths": _paths_payload(candidate),
+    }
+
+
+def _paths_payload(result: ScanResult) -> dict[str, Any]:
+    """Impact paths (proven and potential) plus unresolved candidates, for the graph."""
+    return {
+        "impact": [path.model_dump(mode="json") for path in build_impact_paths(result.inventory)],
+        "unresolved": [
+            path.model_dump(mode="json") for path in build_unresolved_impacts(result.inventory)
+        ],
     }
 
 
@@ -217,15 +250,6 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": len(result.findings),
     }
-
-
-def _component_signature(result: ScanResult) -> list[list[str]]:
-    """Every non-prompt component, so 'same parts, new behavior' is checkable."""
-    return sorted(
-        [entity.type.value, entity.name, str(getattr(entity, "version", "") or "")]
-        for entity in result.inventory.entities
-        if entity.type.value != "prompt"
-    )
 
 
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:

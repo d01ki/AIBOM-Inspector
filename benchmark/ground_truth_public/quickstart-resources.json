@@ -1,0 +1,155 @@
+{
+  "repository": "modelcontextprotocol/quickstart-resources",
+  "commit": "38e14ca4ce362d27dfaaa498f3b4592bea4c6710",
+  "language": "mixed",
+  "local_path": "benchmark/checkouts/quickstart-resources",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file and manifest before running the scanner.",
+    "MCP weather servers and Anthropic-backed MCP clients in Python, TypeScript, Go, Ruby, Rust.",
+    "Scope: Go/Ruby/Rust are expected only for packages, services and models, which the",
+    "pattern tier claims to cover; prompt analysis in those languages is documented as",
+    "out of scope and not scored.",
+    "AI packages: the documented allowlist plus official provider/protocol SDKs it does not",
+    "list (mcp-types, published by the official Python MCP SDK). Correction after the first",
+    "run: rmcp *is* on the allowlist; the note originally said otherwise. No expectation changed.",
+    "Same-named packages in different ecosystems are distinct components (pkg:pypi/mcp vs",
+    "pkg:gem/mcp; pkg:pypi/anthropic vs pkg:gem/anthropic) and are expected twice.",
+    "MCP servers are expected at each server implementation, including the test mock",
+    "server; the clients import the MCP SDK but are not servers.",
+    "claude-sonnet-5 is one model referenced by five clients (Go via an SDK constant)."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "anthropic",
+      "file": "mcp-client-python/pyproject.toml",
+      "line": 8,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "mcp",
+      "file": "mcp-client-python/pyproject.toml",
+      "line": 9,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "mcp-types",
+      "file": "mcp-client-python/pyproject.toml",
+      "line": 11,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "@anthropic-ai/sdk",
+      "file": "mcp-client-typescript/package.json",
+      "line": 14,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "@modelcontextprotocol/client",
+      "file": "mcp-client-typescript/package.json",
+      "line": 15,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "@modelcontextprotocol/server",
+      "file": "weather-server-typescript/package.json",
+      "line": 24,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "github.com/anthropics/anthropic-sdk-go",
+      "file": "mcp-client-go/go.mod",
+      "line": 6,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "github.com/modelcontextprotocol/go-sdk",
+      "file": "mcp-client-go/go.mod",
+      "line": 9,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "anthropic",
+      "file": "mcp-client-ruby/Gemfile",
+      "line": 5,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "mcp",
+      "file": "mcp-client-ruby/Gemfile",
+      "line": 7,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "rmcp",
+      "file": "mcp-client-rust/Cargo.toml",
+      "line": 10,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "anthropic",
+      "file": "mcp-client-python/client.py",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "claude-sonnet-5",
+      "file": "mcp-client-python/client.py",
+      "line": 13,
+      "status": "invoked"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@weather-server-python/weather.py",
+      "file": "weather-server-python/weather.py"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@weather-server-typescript/src/index.ts",
+      "file": "weather-server-typescript/src/index.ts"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@weather-server-go/main.go",
+      "file": "weather-server-go/main.go"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@weather-server-ruby/weather.rb",
+      "file": "weather-server-ruby/weather.rb"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@weather-server-rust/src/main.rs",
+      "file": "weather-server-rust/src/main.rs"
+    },
+    {
+      "type": "mcp",
+      "name": "mcp-server@tests/helpers/mock-mcp-server.ts",
+      "file": "tests/helpers/mock-mcp-server.ts"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@mcp-client-python/client.py:66:0",
+      "file": "mcp-client-python/client.py",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@mcp-client-typescript/index.ts:92:0",
+      "file": "mcp-client-typescript/index.ts",
+      "status": "invoked"
+    }
+  ]
+}

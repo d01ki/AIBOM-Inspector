@@ -16,6 +16,7 @@ from aibom.detectors.python.common import (
     safe_endpoint,
     service_entity,
 )
+from aibom.detectors.python.prompt_flow import imported_client_provider
 from aibom.detectors.python.value_resolver import ValueResolver
 from aibom.detectors.result import Detection
 
@@ -30,7 +31,11 @@ _CONSTRUCTORS = {
 }
 _API_SUFFIXES = (
     ".responses.create",
+    ".responses.parse",
+    ".responses.stream",
     ".chat.completions.create",
+    ".chat.completions.parse",
+    ".chat.completions.stream",
     ".completions.create",
     ".embeddings.create",
     ".images.generate",
@@ -113,13 +118,19 @@ class OpenAIPythonDetector:
                             )
                         )
 
+        if _uses_openai_agents_sdk(context):
+            yield from self._agents_sdk(context, resolver)
+
         for call in module.calls:
             qualified = module.qualified_name(call.func) or ""
             root = root_name(call.func)
             client_call = root in clients and qualified.endswith(_API_SUFFIXES)
             direct_call = qualified.startswith("openai.") and qualified.endswith(_API_SUFFIXES)
             factory_call = module.has_import(*_ROOTS) and qualified.endswith(_API_SUFFIXES)
-            if not (client_call or direct_call or factory_call):
+            imported_call = qualified.endswith(_API_SUFFIXES) and (
+                imported_client_provider(module, call.func, context.project) == "openai"
+            )
+            if not (client_call or direct_call or factory_call or imported_call):
                 continue
             yield Detection(
                 service_entity(
@@ -147,3 +158,49 @@ class OpenAIPythonDetector:
                         pattern="openai-model-argument",
                     )
                 )
+
+    def _agents_sdk(self, context: ScanContext, resolver: ValueResolver) -> Iterable[Detection]:
+        """OpenAI Agents SDK: ``Agent(model="gpt-4.1", ...)`` names an OpenAI model.
+
+        Constructing the agent is instantiation; the API is called when a runner
+        executes it, which is not tracked, so the service is not marked invoked.
+        """
+        module = require_python(context)
+        for call in module.calls:
+            if (module.qualified_name(call.func) or "") != "agents.Agent":
+                continue
+            model_arg = argument_node(call, ("model",))
+            if model_arg is None:
+                continue
+            yield Detection(
+                service_entity(
+                    context,
+                    call,
+                    detector_id=self.detector_id,
+                    name="openai",
+                    endpoint="https://api.openai.com",
+                    state="instantiated",
+                    pattern="openai-agents-agent",
+                    confidence=0.9,
+                )
+            )
+            for resolved in resolve_argument(module, call, model_arg, resolver):
+                yield Detection(
+                    model_entity(
+                        context,
+                        call,
+                        resolved,
+                        detector_id=self.detector_id,
+                        provider="openai",
+                        pattern="openai-agents-model-argument",
+                    )
+                )
+
+
+def _uses_openai_agents_sdk(context: ScanContext) -> bool:
+    """``from agents import Agent`` — unless ``agents`` is the project's own package."""
+    module = require_python(context)
+    if not module.has_import("agents"):
+        return False
+    project = context.project
+    return project is None or project.python_module(module, "agents", 0) is None

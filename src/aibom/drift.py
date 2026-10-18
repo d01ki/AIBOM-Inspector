@@ -14,9 +14,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from aibom.detectors.flow import is_potential
 from aibom.exposure import ExposurePath, build_exposure_paths, prompt_slots
-from aibom.impact import ImpactPath, build_impact_paths
-from aibom.models.entities import Agent, Entity, EntityType, Model, Package, Prompt, Service
+from aibom.impact import ImpactPath, build_impact_paths, build_unresolved_impacts
+from aibom.models.analysis import Reachability
+from aibom.models.entities import Agent, Entity, EntityType, Model, Package, Prompt, Service, Tool
 from aibom.models.evidence import Evidence
 from aibom.models.findings import Finding, Severity
 from aibom.service import ScanResult
@@ -29,6 +31,9 @@ class DriftKind(str, Enum):
     EXPOSURE_REMOVED = "exposure_removed"
     IMPACT_PATH_ADDED = "impact_path_added"
     IMPACT_PATH_REMOVED = "impact_path_removed"
+    IMPACT_PATH_CHANGED = "impact_path_changed"
+    IMPACT_PATH_UNRESOLVED = "impact_path_unresolved"
+    TOOL_REACHABILITY_ESCALATED = "tool_reachability_escalated"
     PROMPT_CONTENT_CHANGED = "prompt_content_changed"
     PROMPT_TARGET_CHANGED = "prompt_target_changed"
     TRUST_BOUNDARY_CHANGED = "trust_boundary_changed"
@@ -55,7 +60,37 @@ class DriftChange(BaseModel):
     after_name: str | None = None
     before_evidence: list[Evidence] = Field(default_factory=list)
     after_evidence: list[Evidence] = Field(default_factory=list)
+    evidence_level: str | None = Field(
+        default=None,
+        description=(
+            "For path changes: proven_static | potential | unknown. Independent of "
+            "severity; an unknown change never gates."
+        ),
+    )
     details: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def gates(self) -> bool:
+        """Whether this change may fail a ``--fail-on`` gate."""
+        return self.evidence_level != "unknown"
+
+
+class BomComparison(BaseModel):
+    """What "the AIBOM did not change" means for one comparison."""
+
+    identical: bool
+    compared_types: list[str] = Field(
+        default_factory=list,
+        description="Entity types compared (name, version and security metadata).",
+    )
+    excluded: list[str] = Field(
+        default_factory=lambda: ["prompt (behavior; compared as exposure/impact paths)"],
+    )
+    baseline_components: int = 0
+    candidate_components: int = 0
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    changed: list[str] = Field(default_factory=list)
 
 
 class DriftReport(BaseModel):
@@ -66,6 +101,11 @@ class DriftReport(BaseModel):
     changes: list[DriftChange] = Field(default_factory=list)
     severity_counts: dict[str, int] = Field(default_factory=dict)
     kind_counts: dict[str, int] = Field(default_factory=dict)
+    bom: BomComparison | None = None
+    security_boundary_changed: bool = Field(
+        default=False,
+        description="A proven or potential exposure/impact path was added or changed.",
+    )
 
 
 def compare_scan_results(baseline: ScanResult, candidate: ScanResult) -> DriftReport:
@@ -76,6 +116,7 @@ def compare_scan_results(baseline: ScanResult, candidate: ScanResult) -> DriftRe
     changes.extend(_compare_exposures(baseline, candidate))
     changes.extend(_compare_prompts(baseline, candidate))
     changes.extend(_compare_entities(baseline, candidate))
+    changes.extend(_compare_tools(baseline, candidate, changes))
     changes.extend(_compare_findings(baseline, candidate))
     changes.sort(key=lambda change: (-change.severity.rank, change.kind.value, change.id))
 
@@ -91,7 +132,20 @@ def compare_scan_results(baseline: ScanResult, candidate: ScanResult) -> DriftRe
         changes=changes,
         severity_counts=severity_counts,
         kind_counts=kind_counts,
+        bom=compare_boms(baseline, candidate),
+        security_boundary_changed=any(
+            change.kind in _BOUNDARY_KINDS and change.gates for change in changes
+        ),
     )
+
+
+_BOUNDARY_KINDS = {
+    DriftKind.EXPOSURE_ADDED,
+    DriftKind.IMPACT_PATH_ADDED,
+    DriftKind.IMPACT_PATH_CHANGED,
+    DriftKind.TRUST_BOUNDARY_CHANGED,
+    DriftKind.TOOL_REACHABILITY_ESCALATED,
+}
 
 
 def _compare_exposures(
@@ -99,7 +153,9 @@ def _compare_exposures(
     candidate: ScanResult,
 ) -> list[DriftChange]:
     before = {path.prompt_anchor: path for path in build_exposure_paths(baseline.inventory)}
-    after = {path.prompt_anchor: path for path in build_exposure_paths(candidate.inventory)}
+    after = _pair_relocated(
+        before, {path.prompt_anchor: path for path in build_exposure_paths(candidate.inventory)}
+    )
     changes: list[DriftChange] = []
 
     for anchor in sorted(after.keys() - before.keys()):
@@ -121,6 +177,7 @@ def _compare_exposures(
                 after_id=path.prompt_id,
                 after_name=path.prompt_name,
                 after_evidence=path.source_evidence,
+                evidence_level=_exposure_level(path),
                 details=_exposure_details(path),
             )
         )
@@ -167,21 +224,59 @@ def _compare_exposures(
     return changes
 
 
+def _pair_relocated(
+    before: dict[str, ExposurePath], after: dict[str, ExposurePath]
+) -> dict[str, ExposurePath]:
+    """Re-key a candidate exposure whose sink only moved (file, function, lines).
+
+    Two exposures with the same source kind, sink kind, trust boundary,
+    privilege and models are the same exposure when neither has a slot match.
+    """
+
+    def key(path: ExposurePath) -> tuple[object, ...]:
+        return (
+            path.source_kind,
+            path.sink_kind,
+            path.trust_boundary,
+            path.privileged,
+            tuple(path.model_names),
+        )
+
+    unmatched_before = [anchor for anchor in sorted(before) if anchor not in after]
+    rekeyed = dict(after)
+    for anchor in sorted(after.keys() - before.keys()):
+        match = next(
+            (old for old in unmatched_before if key(before[old]) == key(after[anchor])), None
+        )
+        if match is None:
+            continue
+        unmatched_before.remove(match)
+        rekeyed[match] = rekeyed.pop(anchor)
+    return rekeyed
+
+
 def _compare_impacts(
     baseline: ScanResult,
     candidate: ScanResult,
 ) -> list[DriftChange]:
-    before = {path.prompt_anchor: path for path in build_impact_paths(baseline.inventory)}
-    after = {path.prompt_anchor: path for path in build_impact_paths(candidate.inventory)}
+    """Compare impact paths, matching first by prompt slot, then semantically.
+
+    The prompt slot is line-insensitive; the semantic key additionally ignores
+    which file and function the sink lives in.  A path whose sink moved to
+    another file, or whose builder was renamed, is therefore the *same* path —
+    not one removal plus one addition.
+    """
+    before_paths = build_impact_paths(baseline.inventory)
+    after_paths = build_impact_paths(candidate.inventory)
+    pairs, added, removed = _match_paths(before_paths, after_paths)
     changes: list[DriftChange] = []
 
-    for anchor in sorted(after.keys() - before.keys()):
-        path = after[anchor]
+    for path in added:
         changes.append(
             _change(
                 DriftKind.IMPACT_PATH_ADDED,
                 path.severity,
-                "New agent capability blast radius",
+                _added_title(path),
                 (
                     f"Untrusted {path.source_kind} can now reach privileged instructions "
                     f"for directly bound tool(s) {', '.join(path.tool_names)}, with potential "
@@ -191,12 +286,12 @@ def _compare_impacts(
                 after_id=path.prompt_id,
                 after_name=path.prompt_name,
                 after_evidence=path.source_evidence,
+                evidence_level=path.evidence_level,
                 details=_impact_details(path),
             )
         )
 
-    for anchor in sorted(before.keys() - after.keys()):
-        path = before[anchor]
+    for path in removed:
         changes.append(
             _change(
                 DriftKind.IMPACT_PATH_REMOVED,
@@ -210,25 +305,32 @@ def _compare_impacts(
                 before_id=path.prompt_id,
                 before_name=path.prompt_name,
                 before_evidence=path.source_evidence,
+                evidence_level=path.evidence_level,
                 details=_impact_details(path),
             )
         )
 
-    for anchor in sorted(before.keys() & after.keys()):
-        old, new = before[anchor], after[anchor]
-        old_signature = _impact_signature(old)
-        new_signature = _impact_signature(new)
-        if old_signature == new_signature:
+    for old, new in pairs:
+        if _impact_signature(old) == _impact_signature(new) and (
+            old.evidence_level == new.evidence_level
+        ):
             continue
+        if _impact_signature(old) == _impact_signature(new):
+            description = (
+                f"The evidence for the path to {', '.join(new.tool_names)} changed from "
+                f"{old.evidence_level} to {new.evidence_level}."
+            )
+        else:
+            description = (
+                f"The directly bound impact surface changed from "
+                f"{', '.join(old.tool_names)} to {', '.join(new.tool_names)}."
+            )
         changes.append(
             _change(
-                DriftKind.IMPACT_PATH_ADDED,
+                DriftKind.IMPACT_PATH_CHANGED,
                 new.severity,
                 "Agent capability blast radius changed",
-                (
-                    f"The directly bound impact surface changed from "
-                    f"{', '.join(old.tool_names)} to {', '.join(new.tool_names)}."
-                ),
+                description,
                 entity_type=EntityType.PROMPT.value,
                 before_id=old.prompt_id,
                 after_id=new.prompt_id,
@@ -236,13 +338,118 @@ def _compare_impacts(
                 after_name=new.prompt_name,
                 before_evidence=old.source_evidence,
                 after_evidence=new.source_evidence,
+                evidence_level=new.evidence_level,
                 details={
                     "before": _impact_details(old),
                     "after": _impact_details(new),
                 },
             )
         )
+
+    # Unresolved candidates: shown so silence is not read as safety, never gated.
+    previous = [*before_paths, *build_unresolved_impacts(baseline.inventory)]
+    known_before = {path.prompt_anchor for path in previous}
+    known_semantic = {(path.sink_kind, _impact_signature(path)) for path in previous}
+    for path in build_unresolved_impacts(candidate.inventory):
+        if path.prompt_anchor in known_before or (
+            (path.sink_kind, _impact_signature(path)) in known_semantic
+        ):
+            continue
+        changes.append(
+            _change(
+                DriftKind.IMPACT_PATH_UNRESOLVED,
+                Severity.INFO,
+                "Unresolved input to a privileged prompt with a bound tool",
+                (
+                    f"{path.sink_kind} now drives bound tool(s) {', '.join(path.tool_names)} "
+                    "but its input could not be resolved statically. This is not a proven "
+                    "path and is not gated; review it manually."
+                ),
+                entity_type=EntityType.PROMPT.value,
+                after_id=path.prompt_id,
+                after_name=path.prompt_name,
+                after_evidence=path.source_evidence,
+                evidence_level=path.evidence_level,
+                details=_impact_details(path),
+            )
+        )
     return changes
+
+
+def _match_paths(
+    before: list[ImpactPath], after: list[ImpactPath]
+) -> tuple[list[tuple[ImpactPath, ImpactPath]], list[ImpactPath], list[ImpactPath]]:
+    pairs: list[tuple[ImpactPath, ImpactPath]] = []
+    after_by_anchor = {path.prompt_anchor: path for path in after}
+    remaining_before: list[ImpactPath] = []
+    used: set[str] = set()
+    for path in before:
+        match = after_by_anchor.get(path.prompt_anchor)
+        if match is not None and match.id not in used:
+            pairs.append((path, match))
+            used.add(match.id)
+        else:
+            remaining_before.append(path)
+    remaining_after = [path for path in after if path.id not in used]
+    removed: list[ImpactPath] = []
+    for path in remaining_before:
+        match = next(
+            (item for item in remaining_after if item.semantic_key == path.semantic_key), None
+        )
+        if match is None:
+            removed.append(path)
+            continue
+        pairs.append((path, match))
+        remaining_after.remove(match)
+    return pairs, remaining_after, removed
+
+
+def _added_title(path: ImpactPath) -> str:
+    if path.evidence_level == "proven_static":
+        return "New agent capability blast radius"
+    return "New potential agent capability blast radius"
+
+
+def compare_boms(baseline: ScanResult, candidate: ScanResult) -> BomComparison:
+    """Whether the two component inventories are identical, and over what scope.
+
+    Prompts are excluded on purpose: they are behavior, compared separately as
+    exposure and impact paths.  Packages count whether or not they are AI
+    packages, because a changed dependency is a changed BOM.
+    """
+    before = _component_signature(baseline)
+    after = _component_signature(candidate)
+    before_keys = {item[:2]: item for item in before}
+    after_keys = {item[:2]: item for item in after}
+    changed = sorted(
+        key for key in before_keys.keys() & after_keys.keys() if before_keys[key] != after_keys[key]
+    )
+    return BomComparison(
+        identical=before == after,
+        compared_types=sorted({item[0] for item in [*before, *after]}),
+        baseline_components=len(before),
+        candidate_components=len(after),
+        added=sorted(f"{kind}:{name}" for kind, name in after_keys.keys() - before_keys.keys()),
+        removed=sorted(f"{kind}:{name}" for kind, name in before_keys.keys() - after_keys.keys()),
+        changed=[f"{kind}:{name}" for kind, name in changed],
+    )
+
+
+def _component_signature(result: ScanResult) -> list[tuple[str, ...]]:
+    signature: set[tuple[str, ...]] = set()
+    for entity in result.inventory.entities:
+        if isinstance(entity, Prompt):
+            continue
+        fields = _security_fields(entity)
+        signature.add(
+            (
+                entity.type.value,
+                entity.name.strip().lower(),
+                str(getattr(entity, "version", "") or ""),
+                repr(sorted(fields.items())),
+            )
+        )
+    return sorted(signature)
 
 
 def _compare_prompts(
@@ -449,6 +656,12 @@ def _change(
     )
 
 
+def _exposure_level(path: ExposurePath) -> str:
+    if is_potential(path.data_flow_path) or path.reachable is not Reachability.TRUE:
+        return "potential"
+    return "proven_static"
+
+
 def _model_suffix(path: ExposurePath) -> str:
     return f" and model(s) {', '.join(path.model_names)}" if path.model_names else ""
 
@@ -470,6 +683,16 @@ def _exposure_details(path: ExposurePath) -> dict[str, Any]:
 
 def _impact_details(path: ImpactPath) -> dict[str, Any]:
     return {
+        "evidence_level": path.evidence_level,
+        "impact_severity": (path.impact_severity or path.severity).value,
+        "cross_file": path.cross_file,
+        "semantic_key": path.semantic_key,
+        "changed_boundary": (
+            f"untrusted {path.source_kind} -> {path.sink_kind} ({path.trust_boundary})"
+        ),
+        "potential_consequence": path.consequence,
+        "limitations": list(path.limitations),
+        "nodes": [node.model_dump() for node in path.nodes],
         "path_id": path.id,
         "exposure_path_id": path.exposure_path_id,
         "prompt_anchor": path.prompt_anchor,
@@ -554,7 +777,87 @@ def _security_fields(entity: Entity) -> dict[str, Any]:
             "tools": sorted(entity.tools),
             "model_refs": sorted(entity.model_refs),
         }
+    if isinstance(entity, Tool):
+        # The tool's code, not its reachability: state is behavior and is
+        # compared by `_compare_tools`, so an identical BOM stays identical.
+        return {"framework": entity.framework, "capabilities": _tool_signature(entity)}
     return {}
+
+
+def _tool_signature(tool: Tool) -> list[str]:
+    return sorted(
+        f"{item.kind}:{item.operation}:{','.join(item.controlled_parameters)}"
+        for item in tool.capabilities
+    )
+
+
+def _compare_tools(
+    baseline: ScanResult, candidate: ScanResult, earlier: list[DriftChange]
+) -> list[DriftChange]:
+    """A tool newly reachable from untrusted input, by registration or binding.
+
+    Tools are matched by name and file, then by name and capability signature
+    (so moving a tool is not a change).  A bound tool already reported as part
+    of a new impact path is not reported twice.
+    """
+    before = [e for e in baseline.inventory.entities if isinstance(e, Tool)]
+    after = [e for e in candidate.inventory.entities if isinstance(e, Tool)]
+    covered = {
+        name
+        for change in earlier
+        if change.kind is DriftKind.IMPACT_PATH_ADDED
+        for name in change.details.get("tools", [])
+    }
+    by_key = {tool.natural_key(): tool for tool in before}
+    by_shape = {(tool.tool_name, tuple(_tool_signature(tool))): tool for tool in before}
+    changes: list[DriftChange] = []
+    for tool in after:
+        old = by_key.get(tool.natural_key()) or by_shape.get(
+            (tool.tool_name, tuple(_tool_signature(tool)))
+        )
+        old_state = old.state if old is not None else "absent"
+        if tool.state != "potentially_reachable" or old_state == tool.state:
+            continue
+        if tool.tool_name in covered:
+            continue
+        worst = max(
+            (Severity(item.severity) for item in tool.capabilities),
+            key=lambda item: item.rank,
+            default=Severity.MEDIUM,
+        )
+        # Registration proves who chooses the arguments, not that an attack
+        # works, so this never reaches Critical on its own.
+        severity = Severity.HIGH if worst.rank >= Severity.HIGH.rank else Severity.MEDIUM
+        operations = ", ".join(dict.fromkeys(item.impact for item in tool.capabilities))
+        changes.append(
+            _change(
+                DriftKind.TOOL_REACHABILITY_ESCALATED,
+                severity,
+                "Tool newly reachable from untrusted input",
+                (
+                    f"{tool.framework or 'agent'} tool '{tool.tool_name}' moved from "
+                    f"{old_state} to {tool.state}; a caller-controlled parameter can "
+                    f"{operations or 'reach a recognized operation'}."
+                ),
+                entity_type=EntityType.TOOL.value,
+                before_id=old.id if old is not None else None,
+                after_id=tool.id,
+                before_name=old.name if old is not None else None,
+                after_name=tool.name,
+                after_evidence=[
+                    *tool.source_evidence,
+                    *(e for item in tool.capabilities for e in item.source_evidence),
+                ],
+                evidence_level="proven_static",
+                details={
+                    "before_state": old_state,
+                    "after_state": tool.state,
+                    "trust_boundary": tool.trust_boundary,
+                    "capabilities": _tool_signature(tool),
+                },
+            )
+        )
+    return changes
 
 
 def _finding_key(finding: Finding) -> tuple[str, str]:

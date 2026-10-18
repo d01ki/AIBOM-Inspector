@@ -7,12 +7,14 @@
     "Curated 2026-07-31 by reviewing every AI SDK call site plus lib/ai/models.ts.",
     "Prompts are recorded at their sink, not as separate constants in",
     "lib/ai/prompts.ts, so an instruction string is counted once.",
-    "Known gaps kept as expectations, not deleted:",
-    "- the five model ids are declared in a ChatModel[] literal and reached via",
-    "  gateway.languageModel(id); neither the data structure nor the indirection",
-    "  is resolved, so all five are false negatives.",
-    "- the Vercel AI Gateway is the external service every model call goes",
-    "  through; no provider SDK is imported, so it is not detected."
+    "The five model ids are declared in a ChatModel[] literal and reached via",
+    "gateway.languageModel(id). They are expected with status 'declared': only",
+    "moonshotai/kimi-k2.5 is statically proven to be invoked (getTitleModel ->",
+    "gateway.languageModel(titleModel.id)); the others reach the gateway through",
+    "a runtime-selected parameter, which a static scanner must not resolve.",
+    "These six expectations were false negatives until 2026-10-18 and are kept",
+    "unchanged; this case is therefore regression evidence for that fix, not an",
+    "independent accuracy measurement."
   ],
   "components": [
     {

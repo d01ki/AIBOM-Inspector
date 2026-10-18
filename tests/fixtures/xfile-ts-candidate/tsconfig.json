@@ -1,0 +1,7 @@
+{
+  // Next.js-style path alias; resolved statically by the scanner.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./*"] },
+  }
+}

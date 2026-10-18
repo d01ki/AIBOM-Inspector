@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from aibom.detectors.javascript.parser import JsModule
+    from aibom.detectors.project import ProjectIndex
     from aibom.detectors.python.parser import PythonModule
 
 
@@ -27,6 +28,8 @@ class ScanContext:
     source_context: SourceContext
     python: PythonModule | None = None
     javascript: JsModule | None = None
+    #: every module parsed in this scan, for bounded cross-file resolution
+    project: ProjectIndex | None = None
 
 
 class Detector(Protocol):

@@ -16,6 +16,7 @@ from aibom.detectors.python.common import (
     safe_endpoint,
     service_entity,
 )
+from aibom.detectors.python.prompt_flow import imported_client_provider
 from aibom.detectors.python.value_resolver import ValueResolver
 from aibom.detectors.result import Detection
 
@@ -110,7 +111,10 @@ class AnthropicPythonDetector:
             root = root_name(call.func)
             client_call = root in clients and qualified.endswith(_API_SUFFIXES)
             direct_call = qualified.startswith("anthropic.") and qualified.endswith(_API_SUFFIXES)
-            factory_call = module.has_import(*_ROOTS) and qualified.endswith(_API_SUFFIXES)
+            factory_call = (
+                module.has_import(*_ROOTS)
+                or imported_client_provider(module, call.func, context.project) == "anthropic"
+            ) and qualified.endswith(_API_SUFFIXES)
             if not (client_call or direct_call or factory_call):
                 continue
             yield Detection(

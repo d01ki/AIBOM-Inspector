@@ -10,6 +10,10 @@ Hardening:
 * **Shallow + capped.** ``--depth 1`` with a wall-clock timeout keeps a hostile
   or huge repository from exhausting the box.
 * **Isolated & cleaned.** Each clone lives in its own temp dir, removed on exit.
+* **Bounded checkout.** Symlinks are checked out as plain files (they can
+  never point the scanner outside the checkout), and a checkout larger than
+  ``AIBOM_MAX_CLONE_MB`` (default 300) or ``AIBOM_MAX_CLONE_FILES`` (default
+  60000) is rejected before any scanning.
 """
 
 from __future__ import annotations
@@ -95,14 +99,64 @@ def clone_repo(
         )
         for label, command in commands:
             _run_git(label, command, timeout=timeout)
+        enforce_checkout_limits(dest)
         yield dest
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+_SAFE_CONFIG = (
+    "-c", "credential.helper=",
+    "-c", "core.askPass=",
+    "-c", "core.symlinks=false",
+    "-c", "protocol.file.allow=never",
+)
+
+
+def _limit(name: str, default: int) -> int:
+    import os
+
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+def enforce_checkout_limits(root: Path) -> None:
+    """Reject a checkout too large to scan safely (resource exhaustion)."""
+    import os
+
+    max_bytes = _limit("AIBOM_MAX_CLONE_MB", 300) * 1024 * 1024
+    max_files = _limit("AIBOM_MAX_CLONE_FILES", 60_000)
+    total = files = 0
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name == ".git":
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(Path(entry.path))
+                continue
+            files += 1
+            try:
+                total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+            if files > max_files or total > max_bytes:
+                raise CloneError(
+                    "repository is too large to scan here "
+                    f"(limits: {max_files} files, {max_bytes // (1024 * 1024)} MB)"
+                )
+
+
 def _clone_command(url: str, dest: Path) -> list[str]:
     return [
-        "git", "-c", "credential.helper=", "-c", "core.askPass=",
+        "git", *_SAFE_CONFIG,
         "clone", "--depth", "1", "--single-branch",
         "--no-tags", "--config", "protocol.version=2",
         url, str(dest),
@@ -112,7 +166,7 @@ def _clone_command(url: str, dest: Path) -> list[str]:
 def _pinned_commands(url: str, dest: Path, ref: str) -> list[tuple[str, list[str]]]:
     """Fetch exactly one revision — works for branches, tags, and commit SHAs."""
     dest.mkdir(parents=True, exist_ok=True)
-    base = ["git", "-c", "credential.helper=", "-c", "core.askPass=", "-C", str(dest)]
+    base = ["git", *_SAFE_CONFIG, "-C", str(dest)]
     return [
         ("init", ["git", "init", "--quiet", str(dest)]),
         ("remote add", [*base, "remote", "add", "origin", url]),

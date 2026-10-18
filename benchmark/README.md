@@ -38,7 +38,9 @@ current scanner output. Where the two disagree, the mismatch is the finding:
 the `@ai-sdk/*` provider packages were added to the service map because this
 benchmark reported the missing OpenAI service as a false negative.
 
-Six pinned public cases have been manually reviewed:
+Twenty pinned public cases have been manually reviewed. The first seven
+predate 2026-10-18; the other thirteen were curated that day by reading every
+source file **before** running the scanner on them (see *Protocol* below):
 
 | Repository | Role | Language front end |
 |---|---|---|
@@ -48,6 +50,20 @@ Six pinned public cases have been manually reviewed:
 | `expressjs/express` | negative | JavaScript |
 | `psf/requests` | negative | Python |
 | `encode/httpx` | negative | Python |
+| `gin-gonic/gin` | negative | Go (pattern tier) |
+| `modelcontextprotocol/quickstart-resources` | positive | mixed (Python, TS, Go, Ruby, Rust) |
+| `openai/openai-assistants-quickstart` | positive | TypeScript |
+| `vercel-labs/ai-sdk-preview-roundtrips` | positive | TypeScript |
+| `vercel-labs/gemini-chatbot` | positive | TypeScript |
+| `openai/openai-realtime-agents` | positive | TypeScript |
+| `openai/openai-structured-outputs-samples` | positive | TypeScript |
+| `simonw/llm-claude-3` | positive | Python |
+| `pallets/click` | negative | Python |
+| `fastapi/typer` | negative | Python |
+| `pallets/markupsafe` | negative | Python |
+| `pallets/jinja` | negative | Python |
+| `sindresorhus/ky` | negative | TypeScript |
+| `expressjs/cors` | negative | JavaScript |
 
 Prepare their checkouts at the `local_path` values in
 `ground_truth_public/*.json` (clone, then check out the pinned commit), and run:
@@ -62,12 +78,65 @@ python benchmark/evaluate.py \
 The public cases are not part of the default command because the evaluator is
 offline-first and does not clone repositories implicitly.
 
-The checked-in `reports/external-latest.md` is the result for the pinned public
-cases: precision 1.00 with no false positives anywhere, and recall 0.85 overall
-(Python 1.00, TypeScript 0.79). The six recall misses are all in
-`vercel/ai-chatbot` and are listed in the report rather than removed from the
-ground truth — five model ids declared in a `ChatModel[]` literal and reached
-via `gateway.languageModel(id)`, plus the AI Gateway service itself.
+## Results (2026-10-18)
 
-Six repositories is regression evidence and must not be presented as broad
-external accuracy. The documented target is 20.
+| Run | Repos | Precision | Recall | F1 | TP | FP | FN |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| First run on 13 unseen cases + 7 earlier (frozen: `reports/external-20-unseen.md`) | 20 | 0.913 | 0.661 | 0.767 | 84 | 8 | 43 |
+| After fixing what that run exposed (`reports/external-latest.md`) | 20 | 0.966 | 0.869 | 0.915 | 113 | 4 | 17 |
+
+Only the first row measures generalization. The errors it listed were real
+scanner defects (semicolon-free JS imports, `as T[]` casts, MCP clients read
+as servers, unmodeled OpenAI call shapes, manifest line attribution, ...);
+each fix has a regression test in `tests/test_corpus_regressions.py` that
+fails on the pre-fix code.
+
+The seven-case corpus that preceded it scores 39 TP / 0 FP / 0 FN; its six
+former TypeScript misses were the target of the gateway/catalog fix, so it is
+regression evidence too.
+
+## Protocol for new cases
+
+1. Pin the full commit SHA; clone shallowly; never install or run anything.
+2. Read every source file and manifest; write the ground truth and its
+   `notes` (every judgment call) **before** scanning the checkout.
+3. Run the evaluator once and freeze that report.
+4. Fix scanner defects; add a regression test that fails before the fix.
+5. Correct the ground truth only for curation mistakes against a rule written
+   down beforehand (e.g. prompt names carry the prompt expression's line), and
+   say so in the case's `notes`. Never drop an expectation to raise a score.
+
+To prepare every checkout at its pinned SHA without executing anything:
+
+```bash
+for gt in benchmark/ground_truth_public/*.json; do
+  python - "$gt" <<'PY'
+import json, subprocess, sys
+d = json.load(open(sys.argv[1]))
+path, sha = d["local_path"], d["commit"]
+subprocess.run(["git", "init", "-q", path], check=True)
+subprocess.run(["git", "-C", path, "remote", "add", "origin",
+                f"https://github.com/{d['repository']}.git"], check=False)
+subprocess.run(["git", "-C", path, "fetch", "-q", "--depth", "1", "origin", sha], check=True)
+subprocess.run(["git", "-C", path, "checkout", "-q", "FETCH_HEAD"], check=True)
+PY
+done
+```
+
+## Competitor comparison
+
+`competitors/compare.py` runs other scanners next to AIBOM Inspector on the
+same inputs: the identical-BOM drift pairs (each tool's own revision-diff mode)
+and the negative-control repositories above. Competitors are not dependencies;
+install each into its own environment and pass the executable:
+
+```bash
+uv venv .venv-agent-audit && VIRTUAL_ENV=.venv-agent-audit uv pip install agent-audit==0.20.0
+python benchmark/competitors/compare.py --agent-audit .venv-agent-audit/Scripts/agent-audit
+```
+
+Output: `reports/competitors-latest.{json,md}`. A tool not passed is reported
+as *not run*. LLM credentials are stripped from the environment of every tool
+run, so a tool that requires an LLM is recorded as refusing rather than being
+silently given one. Negative-control numbers are finding counts, not
+false-positive rates.

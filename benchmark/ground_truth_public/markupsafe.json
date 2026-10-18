@@ -1,0 +1,10 @@
+{
+  "repository": "pallets/markupsafe",
+  "commit": "4e111271b1494995708a9e878a10829b5e10c7ba",
+  "language": "python",
+  "local_path": "benchmark/checkouts/markupsafe",
+  "notes": [
+    "Curated 2026-10-18. String escaping library; no AI usage."
+  ],
+  "components": []
+}

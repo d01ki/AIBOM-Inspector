@@ -1,0 +1,129 @@
+{
+  "repository": "openai/openai-realtime-agents",
+  "commit": "94c9e9116b581052655cff7b756cc5e02771cda1",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/openai-realtime-agents",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file before running the scanner.",
+    "AI packages follow the project's documented allowlist (collectors/dependencies.py).",
+    "Prompts are counted at model-call sinks: the seven RealtimeAgent instructions",
+    "(@openai/agents/realtime) and the two Responses API calls of the proxy route,",
+    "whose input arrives in a spread request body. Messages the browser assembles",
+    "into fetch() bodies have no SDK sink in the same call and are not counted",
+    "separately; the proxy sink stands for them.",
+    "Models in fetch() JSON bodies and RealtimeSession options are real model",
+    "selections and are expected.",
+    "Correction after the first run (2026-10-18): prompt names must carry the line of the prompt *expression*, as every other case does; these names used the key/call line. 0 name(s) fixed, no expectation added or removed. The first run is frozen in reports/external-20-unseen.*."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "@openai/agents",
+      "file": "package.json",
+      "line": 12,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "openai",
+      "file": "package.json",
+      "line": 16,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "openai",
+      "file": "src/app/api/responses/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4.1",
+      "file": "src/app/agentConfigs/chatSupervisor/supervisorAgent.ts",
+      "line": 285,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "o4-mini",
+      "file": "src/app/agentConfigs/customerServiceRetail/returns.ts",
+      "line": 278,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o-mini",
+      "file": "src/app/agentConfigs/guardrails.ts",
+      "line": 41,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o-realtime-preview-2025-06-03",
+      "file": "src/app/api/session/route.ts",
+      "line": 14,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o-mini-transcribe",
+      "file": "src/app/hooks/useRealtimeSession.ts",
+      "line": 140,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/chatSupervisor/index.ts:7",
+      "file": "src/app/agentConfigs/chatSupervisor/index.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/authentication.ts:9",
+      "file": "src/app/agentConfigs/customerServiceRetail/authentication.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/returns.ts:9",
+      "file": "src/app/agentConfigs/customerServiceRetail/returns.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/sales.ts:10",
+      "file": "src/app/agentConfigs/customerServiceRetail/sales.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/customerServiceRetail/simulatedHuman.ts:9",
+      "file": "src/app/agentConfigs/customerServiceRetail/simulatedHuman.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:9",
+      "file": "src/app/agentConfigs/simpleHandoff.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@src/app/agentConfigs/simpleHandoff.ts:19",
+      "file": "src/app/agentConfigs/simpleHandoff.ts",
+      "status": "declared"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@src/app/api/responses/route.ts:20",
+      "file": "src/app/api/responses/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@src/app/api/responses/route.ts:34",
+      "file": "src/app/api/responses/route.ts",
+      "status": "invoked"
+    }
+  ]
+}

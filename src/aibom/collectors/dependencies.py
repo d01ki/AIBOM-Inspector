@@ -99,8 +99,10 @@ _AI_PYPI = {
     "groq",
     "instructorai",
     "mcp",
+    "mcp-types",
     "fastmcp",
     "modelcontextprotocol",
+    "llm",
 }
 _AI_PYPI_PREFIXES = ("langchain", "llama-index", "llamaindex", "llama-cpp")
 
@@ -119,6 +121,7 @@ _AI_NPM = {
     "groq-sdk",
     "openai-edge",
     "fastmcp",
+    "@openai/agents",
 }
 _AI_NPM_PREFIXES = (
     "@langchain/",
@@ -127,6 +130,7 @@ _AI_NPM_PREFIXES = (
     "@ai-sdk/",
     "@anthropic-ai/",
     "@modelcontextprotocol/",
+    "@openai/agents-",
 )
 
 # Curated per-ecosystem AI allowlists. Exact names plus prefixes - the same
@@ -720,7 +724,20 @@ def _resolve_maven_version(version: str, properties: dict[str, str]) -> str:
 
 
 def _find_line(lines: list[str], needle: str) -> int:
+    """The line declaring ``needle`` as a whole package name, outside comments.
+
+    A plain substring search put `mcp` on `name = "mcp-client"` and `rmcp`
+    on a `# ... rmcp ...` comment.
+    """
+    if needle.startswith('"'):
+        pattern = re.compile(re.escape(needle))
+    else:
+        pattern = re.compile(r"(?<![\w.\-/])" + re.escape(needle) + r"(?![\w.\-/])")
     for i, line in enumerate(lines, 1):
-        if needle in line:
+        stripped = line.lstrip()
+        if stripped.startswith(("#", "//", ";")):
+            continue
+        code = re.split(r"\s#", line, maxsplit=1)[0]
+        if pattern.search(code):
             return i
     return 1

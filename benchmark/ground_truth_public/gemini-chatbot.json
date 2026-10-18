@@ -1,0 +1,84 @@
+{
+  "repository": "vercel-labs/gemini-chatbot",
+  "commit": "7034ce9c6cd7b0218f298fdbe3ae4d7a3a5c6f58",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/gemini-chatbot",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file before running the scanner.",
+    "AI packages follow the project's documented allowlist (collectors/dependencies.py).",
+    "Both Gemini models are wrapped with wrapLanguageModel and invoked through the",
+    "exported wrappers (geminiProModel in the chat route, geminiFlashModel in ai/actions.ts)."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "@ai-sdk/google",
+      "file": "package.json",
+      "line": 12,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "ai",
+      "file": "package.json",
+      "line": 24,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "google",
+      "file": "ai/index.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gemini-2.5-pro",
+      "file": "ai/index.ts",
+      "line": 7,
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gemini-2.5-flash",
+      "file": "ai/index.ts",
+      "line": 12,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@app/(chat)/api/chat/route.ts:37",
+      "file": "app/(chat)/api/chat/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@app/(chat)/api/chat/route.ts:56",
+      "file": "app/(chat)/api/chat/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@ai/actions.ts:15",
+      "file": "ai/actions.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@ai/actions.ts:52",
+      "file": "ai/actions.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@ai/actions.ts:86",
+      "file": "ai/actions.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "user-prompt@ai/actions.ts:125",
+      "file": "ai/actions.ts",
+      "status": "invoked"
+    }
+  ]
+}

@@ -70,6 +70,10 @@ packages = ["src/aibom"]
 "tests/fixtures/impact-demo-ts" = "aibom/impact_demo_ts"
 "tests/fixtures/impact-demo-ts-baseline" = "aibom/impact_demo_ts_baseline"
 "examples/trust-boundary-drift" = "aibom/drift_demo"
+"tests/fixtures/xfile-py-baseline" = "aibom/xfile_py_baseline"
+"tests/fixtures/xfile-py-candidate" = "aibom/xfile_py_candidate"
+"tests/fixtures/xfile-ts-baseline" = "aibom/xfile_ts_baseline"
+"tests/fixtures/xfile-ts-candidate" = "aibom/xfile_ts_candidate"
 
 [tool.ruff]
 line-length = 100

@@ -40,6 +40,7 @@ from aibom.detectors.javascript.nodes import (
     MemberExpr,
     Node,
     ObjectExpr,
+    Param,
     SpreadExpr,
     TemplateLiteral,
     UnaryExpr,
@@ -47,6 +48,13 @@ from aibom.detectors.javascript.nodes import (
     walk,
 )
 from aibom.detectors.javascript.parser import JsFunctionInfo, JsModule
+from aibom.detectors.project import (
+    MAX_CALL_DEPTH,
+    MAX_CALL_SITES,
+    Budget,
+    ProjectIndex,
+    js_returns,
+)
 from aibom.detectors.result import Detection
 from aibom.models.analysis import (
     ConfidenceFactors,
@@ -56,19 +64,30 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.entities import Prompt, ToolCapability
+from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
+_MAX_HELPER_DEPTH = 3
 _SUPPORTED_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
 
 # Vercel AI SDK core entrypoints; all take a single options object.
 _AI_SDK_CALLS = frozenset(
     {"generateText", "streamText", "generateObject", "streamObject"}
 )
-_OPENAI_SUFFIXES = (
-    ".responses.create",
+# `parse` and `stream` (also under `beta.`) take the same prompt arguments.
+_RESPONSES_SUFFIXES = (".responses.create", ".responses.parse", ".responses.stream")
+_CHAT_SUFFIXES = (
     ".chat.completions.create",
+    ".chat.completions.parse",
+    ".chat.completions.stream",
+)
+_OPENAI_SUFFIXES = (
+    *_RESPONSES_SUFFIXES,
+    *_CHAT_SUFFIXES,
     ".completions.create",
     ".beta.assistants.create",
+    # Assistants API: a thread message is a prompt the next run sends.
+    ".beta.threads.messages.create",
 )
 _ANTHROPIC_SUFFIXES = (".messages.create", ".messages.stream")
 
@@ -102,6 +121,8 @@ class PromptInput:
 class BoundTool:
     name: str
     execute: FunctionNode
+    #: module defining the executor (differs from the agent's for imported tools)
+    module: JsModule
 
 
 class PromptFlowJavaScriptDetector:
@@ -120,13 +141,13 @@ class PromptFlowJavaScriptDetector:
         if module is None:
             return
         for call in module.calls:
-            provider = _provider_for_call(module, call)
+            provider = _provider_for_call(module, call, context.project)
             if provider is None:
                 continue
             options = _options_object(module, call)
             model_refs = _model_refs(module, options)
-            tools = _bound_tools(module, options)
-            capabilities = _tool_capabilities(context, module, tools, self.detector_id)
+            tools = _bound_tools(context.project, module, options)
+            capabilities = _tool_capabilities(tools, self.detector_id, context.project)
             for prompt_input in _prompt_inputs(module, call, provider, options):
                 yield Detection(
                     self._entity(
@@ -151,9 +172,9 @@ class PromptFlowJavaScriptDetector:
         capabilities: list[ToolCapability],
     ) -> Prompt:
         expression = prompt_input.expression
-        trace = _FlowTracer(module).trace(expression)
+        trace = _FlowTracer(module, context.project).trace(expression)
         static_value = _static_value(module, expression)
-        reachable, reachability_path = _reachability(module, call)
+        reachable, reachability_path = _reachability(module, call, context.project)
 
         hashed = (
             content_hash(static_value)
@@ -218,16 +239,23 @@ class PromptFlowJavaScriptDetector:
 # ---------------------------------------------------------------------------
 
 
-def _provider_for_call(module: JsModule, call: CallExpr) -> str | None:
+def _provider_for_call(
+    module: JsModule, call: CallExpr, project: ProjectIndex | None = None
+) -> str | None:
     qualified = module.qualified_name(call.callee) or ""
     local = module.local_name(call.callee) or ""
 
     if (
         call.is_new
         and module.has_import("@openai/agents")
-        and local.rsplit(".", 1)[-1] == "Agent"
+        and local.rsplit(".", 1)[-1] in {"Agent", "RealtimeAgent"}
     ):
         return "openai-agents"
+    imported = _imported_client_provider(project, module, call.callee)
+    if imported == "openai" and qualified.endswith(_OPENAI_SUFFIXES):
+        return "openai"
+    if imported == "anthropic" and qualified.endswith(_ANTHROPIC_SUFFIXES):
+        return "anthropic"
     if (
         module.has_import("ai")
         and qualified.startswith("ai.")
@@ -237,6 +265,31 @@ def _provider_for_call(module: JsModule, call: CallExpr) -> str | None:
     if module.has_import(*_OPENAI_MODULES) and qualified.endswith(_OPENAI_SUFFIXES):
         return "openai"
     if module.has_import(*_ANTHROPIC_MODULES) and qualified.endswith(_ANTHROPIC_SUFFIXES):
+        return "anthropic"
+    return None
+
+
+def _imported_client_provider(
+    project: ProjectIndex | None, module: JsModule, callee: Node
+) -> str | None:
+    """Provider of an SDK client created in another module (``new OpenAI()``)."""
+    if project is None:
+        return None
+    root = callee
+    while isinstance(root, MemberExpr):
+        root = root.obj
+    if not isinstance(root, Identifier) or root.name not in module.aliases:
+        return None
+    symbol = project.js_symbol(module, root.name)
+    value = symbol.value if symbol is not None else None
+    if isinstance(value, AwaitExpr):
+        value = value.argument
+    if symbol is None or not isinstance(value, CallExpr) or not value.is_new:
+        return None
+    constructor = symbol.module.qualified_name(value.callee) or ""
+    if constructor.startswith(_OPENAI_MODULES):
+        return "openai"
+    if constructor.startswith(_ANTHROPIC_MODULES):
         return "anthropic"
     return None
 
@@ -286,6 +339,11 @@ def _prompt_inputs(
 
     if provider == "openai":
         qualified = module.qualified_name(call.callee) or ""
+        if qualified.endswith(".beta.threads.messages.create"):
+            role = _static_value(module, _prop(options, "role"))
+            kind = role if role in {"user", "assistant"} else "template"
+            add(_prop(options, "content"), str(kind), "openai.beta.threads.messages.content")
+            return found
         if qualified.endswith(".beta.assistants.create"):
             add(
                 _prop(options, "instructions"),
@@ -293,17 +351,23 @@ def _prompt_inputs(
                 "openai.beta.assistants.create.instructions",
             )
             return found
-        if qualified.endswith(".responses.create"):
+        if qualified.endswith(_RESPONSES_SUFFIXES):
             add(
                 _prop(options, "instructions"),
                 "system",
                 "openai.responses.create.instructions",
             )
             add(_prop(options, "input"), "user", "openai.responses.create.input")
+            if not found:
+                # A proxy that forwards `{ ...body }`: the prompt is whatever the
+                # spread carries - a real sink with unresolved content.
+                add(_spread(options), "template", "openai.responses.create.input")
             return found
         found.extend(
             _split_messages(module, _prop(options, "messages"), "openai.messages")
         )
+        if not found:
+            add(_spread(options), "template", "openai.messages")
         return found
 
     if provider == "anthropic":
@@ -400,89 +464,154 @@ def _plausible_model_name(value: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _bound_tools(module: JsModule, options: ObjectExpr | None) -> list[BoundTool]:
+def _bound_tools(
+    project: ProjectIndex | None, module: JsModule, options: ObjectExpr | None
+) -> list[BoundTool]:
     """Return tools explicitly bound by this call, with their executors.
 
     Only direct bindings count: an object map (Vercel AI SDK) or an array of
     tool bindings (OpenAI Agents).  A helper that merely sits in the same file
-    is never promoted to a bound tool.
+    is never promoted to a bound tool.  A binding may name a tool defined in
+    another module (``tools: { shell: shellTool }`` with ``shellTool``
+    imported); the executor is then analyzed in that module.
     """
     if options is None:
         return []
-    node = _resolve(module, _prop(options, "tools"))
+    owner, node = _resolve_anywhere(project, module, _prop(options, "tools"))
     found: list[BoundTool] = []
     if isinstance(node, ObjectExpr):
         for prop in node.properties:
             if prop.key is None:
                 continue
-            execute = _tool_executor(module, prop.value)
-            if execute is not None:
-                found.append(BoundTool(name=prop.key, execute=execute))
+            located = _tool_executor(project, owner, prop.value)
+            if located is not None:
+                found.append(BoundTool(name=prop.key, execute=located[1], module=located[0]))
     elif isinstance(node, ArrayExpr):
         for element in node.elements:
-            execute = _tool_executor(module, element)
-            if execute is None:
+            located = _tool_executor(project, owner, element)
+            if located is None:
                 continue
-            name = _tool_name(module, element) or (
+            name = _tool_name(project, owner, element) or (
                 element.name if isinstance(element, Identifier) else "tool"
             )
-            found.append(BoundTool(name=name, execute=execute))
+            found.append(BoundTool(name=name, execute=located[1], module=located[0]))
     return found
 
 
-def _tool_executor(module: JsModule, node: Node) -> FunctionNode | None:
+def _tool_definition(
+    project: ProjectIndex | None, module: JsModule, node: Node
+) -> tuple[JsModule, CallExpr] | None:
+    """The ``tool({...})`` call a binding refers to, possibly in another module.
+
+    A factory (``tools: { shell: createShellTool() }``) is followed one level
+    into its return value when the index resolves the factory.
+    """
+    owner, resolved = _resolve_anywhere(project, module, node)
+    if not isinstance(resolved, CallExpr):
+        return None
+    if project is not None:
+        target = project.js_function(owner, resolved.callee)
+        if target is not None:
+            returns = js_returns(target[1].node)
+            if len(returns) == 1:
+                inner_owner, inner = _resolve_anywhere(project, target[0], returns[0])
+                if isinstance(inner, CallExpr):
+                    return inner_owner, inner
+            return None
+    return owner, resolved
+
+
+def _tool_executor(
+    project: ProjectIndex | None, module: JsModule, node: Node
+) -> tuple[JsModule, FunctionNode] | None:
     """Find the function a tool binding will run when the model calls it."""
-    resolved = _resolve(module, node)
-    if isinstance(resolved, CallExpr):
-        for argument in resolved.args:
-            options = _resolve(module, argument)
-            if not isinstance(options, ObjectExpr):
-                continue
-            for key in ("execute", "handler", "func", "run"):
-                candidate = _resolve(module, _prop(options, key))
-                if isinstance(candidate, FunctionNode):
-                    return candidate
+    definition = _tool_definition(project, module, node)
+    if definition is None:
+        return None
+    owner, call = definition
+    for argument in call.args:
+        options_owner, options = _resolve_anywhere(project, owner, argument)
+        if not isinstance(options, ObjectExpr):
+            continue
+        for key in ("execute", "handler", "func", "run"):
+            candidate_owner, candidate = _resolve_anywhere(
+                project, options_owner, _prop(options, key)
+            )
+            if isinstance(candidate, FunctionNode):
+                return candidate_owner, candidate
     return None
 
 
-def _tool_name(module: JsModule, node: Node) -> str | None:
-    resolved = _resolve(module, node)
-    if not isinstance(resolved, CallExpr):
+def _tool_name(project: ProjectIndex | None, module: JsModule, node: Node) -> str | None:
+    definition = _tool_definition(project, module, node)
+    if definition is None:
         return None
-    for argument in resolved.args:
-        options = _resolve(module, argument)
+    owner, call = definition
+    for argument in call.args:
+        options = _resolve(owner, argument)
         if isinstance(options, ObjectExpr):
-            value = _static_value(module, _prop(options, "name"))
+            value = _static_value(owner, _prop(options, "name"))
             if isinstance(value, str) and value:
                 return value
     return None
 
 
 def _tool_capabilities(
-    context: ScanContext,
-    module: JsModule,
     tools: list[BoundTool],
     detector_id: str,
+    project: ProjectIndex | None,
 ) -> list[ToolCapability]:
-    """Classify high-impact operations reachable from a bound tool's parameters."""
+    """Classify high-impact operations reachable from a bound tool's parameters.
+
+    The executor body is searched first; calls into project helpers that
+    receive a tool parameter are followed (bounded), so an operation in
+    ``lib/tools/run.ts`` reached from an executor in ``lib/tools/index.ts`` is
+    still attributed to the tool, with both locations as evidence.
+    """
     found: list[ToolCapability] = []
     for tool in tools:
         parameters = _executor_parameters(tool.execute)
         if not parameters:
             continue
-        for node in walk(tool.execute):
-            if not isinstance(node, CallExpr):
-                continue
-            qualified = module.qualified_name(node.callee) or ""
-            classified = _classify_capability(module, node, qualified)
-            if classified is None:
-                continue
-            controlled = sorted(
-                parameter
-                for parameter in parameters
-                if _call_uses_parameter(module, node, parameter, set(), 0)
+        controlled = {parameter: {parameter} for parameter in parameters}
+        found.extend(
+            _capabilities_in(
+                tool, tool.module, tool.execute, controlled, detector_id, project, [], set()
             )
-            if not controlled:
+        )
+    return found
+
+
+def _capabilities_in(
+    tool: BoundTool,
+    module: JsModule,
+    function: FunctionNode,
+    controlled: dict[str, set[str]],
+    detector_id: str,
+    project: ProjectIndex | None,
+    chain: list[Evidence],
+    visited: set[tuple[str, int]],
+) -> list[ToolCapability]:
+    key = (module.relative_path, id(function))
+    if key in visited or len(chain) >= _MAX_HELPER_DEPTH:
+        return []
+    visited = {*visited, key}
+    found: list[ToolCapability] = []
+    for node in walk(function):
+        if not isinstance(node, CallExpr):
+            continue
+        qualified = module.qualified_name(node.callee) or ""
+        classified = _classify_capability(module, node, qualified)
+        if classified is not None:
+            reached = sorted(
+                {
+                    tool_parameter
+                    for local, tool_parameters in controlled.items()
+                    if _call_uses_parameter(module, node, local, set(), 0)
+                    for tool_parameter in tool_parameters
+                }
+            )
+            if not reached:
                 continue
             kind, impact, severity = classified
             found.append(
@@ -492,20 +621,81 @@ def _tool_capabilities(
                     operation=qualified or "eval",
                     impact=impact,
                     severity=severity,
-                    controlled_parameters=controlled,
+                    controlled_parameters=reached,
                     source_evidence=[
+                        *(item.model_copy() for item in chain),
                         capability_evidence(
-                            context.relative_path,
+                            module.relative_path,
                             _span(node),
                             detector_id,
                             tool_name=tool.name,
                             kind=kind,
                             operation=qualified,
-                        )
+                        ),
                     ],
                 )
             )
+            continue
+        if project is None:
+            continue
+        helper = project.js_function(module, node.callee)
+        if helper is None:
+            continue
+        helper_module, helper_info = helper
+        mapped: dict[str, set[str]] = {}
+        for param in helper_info.params:
+            argument = _argument_for(node, param)
+            if argument is None:
+                continue
+            reached_by = {
+                tool_parameter
+                for local, tool_parameters in controlled.items()
+                if _expression_uses_parameter(module, argument, local, set(), 0)
+                for tool_parameter in tool_parameters
+            }
+            if reached_by and param.name:
+                mapped[param.name] = reached_by
+        if not mapped:
+            continue
+        hop = capability_evidence(
+            module.relative_path,
+            _span(node),
+            detector_id,
+            tool_name=tool.name,
+            kind="helper_call",
+            operation=helper_info.name,
+        )
+        hop.matched_pattern = f"bound-tool-helper:{helper_info.name}"
+        found.extend(
+            _capabilities_in(
+                tool,
+                helper_module,
+                helper_info.node,
+                mapped,
+                detector_id,
+                project,
+                [*chain, hop],
+                visited,
+            )
+        )
     return found
+
+
+def _argument_for(call: CallExpr, param: Param) -> Node | None:
+    """The argument ``call`` passes to ``param``; a destructured name picks its property."""
+    if param.index >= len(call.args):
+        return None
+    argument = call.args[param.index]
+    if isinstance(argument, SpreadExpr) or any(
+        isinstance(item, SpreadExpr) for item in call.args[: param.index]
+    ):
+        return None
+    if param.properties and isinstance(argument, ObjectExpr):
+        for prop in argument.properties:
+            if prop.key == param.name:
+                return prop.value
+        return None
+    return argument
 
 
 def _executor_parameters(execute: FunctionNode) -> set[str]:
@@ -642,20 +832,90 @@ def _expression_uses_parameter(
 # ---------------------------------------------------------------------------
 
 
-class _FlowTracer:
-    """Conservative same-file expression tracer with a strict depth bound."""
+@dataclass(frozen=True)
+class _Frame:
+    """One resolved call the tracer descended into: params bind to ``call``'s args."""
 
-    def __init__(self, module: JsModule) -> None:
+    module_path: str
+    function: str
+    caller: _FlowTracer
+    call: CallExpr
+
+
+# Result is a plain transformation of the inputs: tainted input stays a
+# *proven* flow.  Any other call the index cannot resolve makes it potential.
+_TRANSPARENT_CALLS = frozenset({"String", "JSON.stringify", "encodeURIComponent"})
+_TRANSPARENT_METHODS = frozenset(
+    {
+        "trim",
+        "trimStart",
+        "trimEnd",
+        "toLowerCase",
+        "toUpperCase",
+        "toString",
+        "join",
+        "concat",
+        "replace",
+        "replaceAll",
+        "slice",
+        "substring",
+        "split",
+        "padStart",
+        "padEnd",
+    }
+)
+
+_SeenKey = tuple[str, str | None, str]
+
+
+class _FlowTracer:
+    """Conservative expression tracer, bounded in depth, call depth, and visits.
+
+    The TypeScript counterpart of the Python tracer: within a file it follows
+    bindings and composition; with a :class:`ProjectIndex` it also follows a
+    parameter to its resolved call sites (``call_argument``), a call into a
+    project function through its returns (``call_return``), and an imported
+    binding to its definition (``import_reference``).
+    """
+
+    def __init__(
+        self,
+        module: JsModule,
+        project: ProjectIndex | None = None,
+        *,
+        budget: Budget | None = None,
+        frames: tuple[_Frame, ...] = (),
+        ascent: int = 0,
+    ) -> None:
         self.module = module
+        self.project = project
+        self.budget = budget or Budget()
+        self.frames = frames
+        self.ascent = ascent
 
     def trace(self, node: Node) -> FlowTrace:
         return self._trace(node, set(), 0)
 
-    def _trace(
-        self, node: Node, seen: set[tuple[str | None, str]], depth: int
-    ) -> FlowTrace:
+    def _spawn(
+        self,
+        module: JsModule,
+        *,
+        frames: tuple[_Frame, ...] | None = None,
+        ascent: int | None = None,
+    ) -> _FlowTracer:
+        return _FlowTracer(
+            module,
+            self.project,
+            budget=self.budget,
+            frames=self.frames if frames is None else frames,
+            ascent=self.ascent if ascent is None else ascent,
+        )
+
+    def _trace(self, node: Node, seen: set[_SeenKey], depth: int) -> FlowTrace:
         if depth > _MAX_DEPTH:
             return FlowTrace(None, steps=(self._step(node, None, "max_depth"),))
+        if not self.budget.spend():
+            return FlowTrace(None, steps=(self._step(node, None, "analysis_budget_exhausted"),))
 
         if isinstance(node, Literal):
             return FlowTrace(False)
@@ -667,11 +927,16 @@ class _FlowTracer:
             named = _named_source(node.name)
             if named is not None:
                 return self._source(node, *named)
-            key = (self.module.scope_for(node), node.name)
+            key = (self.module.relative_path, self.module.scope_for(node), node.name)
             if key in seen:
                 return FlowTrace(None, steps=(self._step(node, node.name, "cycle"),))
             assignment = self.module.assignment_for(node.name, node)
             if assignment is None:
+                crossed = self._parameter_flow(node, {*seen, key}, depth)
+                if crossed is None:
+                    crossed = self._import_flow(node, {*seen, key}, depth)
+                if crossed is not None:
+                    return crossed
                 return FlowTrace(
                     None, steps=(self._step(node, node.name, "unknown_symbol"),)
                 )
@@ -701,10 +966,16 @@ class _FlowTracer:
             source = _call_source(qualified) or _call_source(local)
             if source is not None:
                 return self._source(node, *source)
+            summarized = self._call_summary(node, seen, depth)
+            if summarized is not None:
+                return summarized
             traces = [self._trace(argument, seen, depth + 1) for argument in node.args]
             if isinstance(node.callee, MemberExpr):
                 traces.append(self._trace(node.callee, seen, depth + 1))
-            return combine_traces(*traces)
+            traced = combine_traces(*traces)
+            if traced.user_controlled is True and not _transparent_call(node, local):
+                return _with_step(traced, self._step(node, local or None, "unresolved_call"))
+            return traced
 
         if isinstance(node, TemplateLiteral):
             return combine_traces(
@@ -740,6 +1011,104 @@ class _FlowTracer:
             return self._trace(node.value, seen, depth + 1)
 
         return FlowTrace(None, steps=(self._step(node, None, "dynamic_expression"),))
+
+    # -- interprocedural ----------------------------------------------------
+
+    def _declaring_function(self, node: Identifier) -> tuple[JsFunctionInfo, Param] | None:
+        info = self.module.enclosing_function(node)
+        while info is not None:
+            for param in info.params:
+                if param.name == node.name:
+                    return info, param
+            info = self._parent_function(info.qualified_name)
+        return None
+
+    def _parameter_flow(
+        self, node: Identifier, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Bind a parameter of an ordinary function to its call-site arguments."""
+        declared = self._declaring_function(node)
+        if declared is None:
+            return None
+        function, param = declared
+        for frame in reversed(self.frames):
+            if (
+                frame.module_path == self.module.relative_path
+                and frame.function == function.qualified_name
+            ):
+                argument = _argument_for(frame.call, param)
+                if argument is None:
+                    return FlowTrace(
+                        None, steps=(self._step(node, node.name, "unbound_parameter"),)
+                    )
+                traced = frame.caller._trace(argument, seen, depth + 1)
+                return _with_step(traced, frame.caller._step(argument, node.name, "call_argument"))
+        if self.project is None or self.ascent >= MAX_CALL_DEPTH:
+            return None
+        callers = self.project.js_callers(self.module, function)
+        if not callers:
+            return None
+        traces: list[FlowTrace] = []
+        for caller_module, call in callers[:MAX_CALL_SITES]:
+            argument = _argument_for(call, param)
+            if argument is None:
+                traces.append(FlowTrace(None))
+                continue
+            caller = self._spawn(caller_module, frames=(), ascent=self.ascent + 1)
+            traced = caller._trace(argument, seen, depth + 1)
+            traces.append(_with_step(traced, caller._step(argument, node.name, "call_argument")))
+        if len(callers) > MAX_CALL_SITES:
+            traces.append(
+                FlowTrace(None, steps=(self._step(node, node.name, "analysis_budget_exhausted"),))
+            )
+        return combine_traces(*traces)
+
+    def _call_summary(
+        self, node: CallExpr, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Trace a call into a project function through its return values."""
+        if self.project is None or len(self.frames) >= MAX_CALL_DEPTH:
+            return None
+        target = self.project.js_function(self.module, node.callee)
+        if target is None:
+            return None
+        target_module, info = target
+        if any(
+            frame.module_path == target_module.relative_path
+            and frame.function == info.qualified_name
+            for frame in self.frames
+        ):
+            return FlowTrace(None, steps=(self._step(node, info.name, "cycle"),))
+        returns = js_returns(info.node)
+        if not returns:
+            return FlowTrace(False)
+        frame = _Frame(target_module.relative_path, info.qualified_name, self, node)
+        callee = self._spawn(target_module, frames=(*self.frames, frame))
+        traced = combine_traces(
+            *(
+                _with_step(
+                    callee._trace(item, seen, depth + 1),
+                    callee._step(item, info.name, "return_value"),
+                )
+                for item in returns
+            )
+        )
+        return _with_step(traced, self._step(node, info.name, "call_return"))
+
+    def _import_flow(
+        self, node: Identifier, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Follow an imported binding into the module that defines it."""
+        if self.project is None or node.name not in self.module.aliases:
+            return None
+        symbol = self.project.js_symbol(self.module, node.name)
+        if symbol is None or symbol.value is None or isinstance(symbol.value, FunctionNode):
+            return None
+        target = self._spawn(symbol.module)
+        traced = target._trace(symbol.value, seen, depth + 1)
+        return _with_step(traced, target._step(symbol.value, node.name, "import_reference"))
+
+    # -- sources ------------------------------------------------------------
 
     def _parameter_source(
         self, node: Identifier
@@ -781,7 +1150,7 @@ class _FlowTracer:
         boundary: str,
         user_controlled: bool | None,
     ) -> FlowTrace:
-        source = SourceRef(kind, _span(node), symbol, boundary)
+        source = SourceRef(kind, _span(node), symbol, boundary, self.module.relative_path)
         return FlowTrace(
             user_controlled,
             (source,),
@@ -790,6 +1159,21 @@ class _FlowTracer:
 
     def _step(self, node: Node, symbol: str | None, operation: str) -> ResolutionStep:
         return flow_step(self.module.relative_path, _span(node), symbol, operation)
+
+
+def _with_step(trace: FlowTrace, step: ResolutionStep) -> FlowTrace:
+    return FlowTrace(trace.user_controlled, trace.sources, (*trace.steps, step))
+
+
+def _transparent_call(node: CallExpr, local: str) -> bool:
+    if local in _TRANSPARENT_CALLS:
+        return True
+    callee = node.callee
+    return (
+        isinstance(callee, MemberExpr)
+        and isinstance(callee.prop, Identifier)
+        and callee.prop.name in _TRANSPARENT_METHODS
+    )
 
 
 def _named_source(name: str) -> tuple[str, str, str, bool | None] | None:
@@ -864,6 +1248,16 @@ def _call_source(name: str) -> tuple[str, str, str, bool | None] | None:
 # ---------------------------------------------------------------------------
 
 
+def _spread(node: ObjectExpr | None) -> Node | None:
+    """The argument of the first ``...spread`` in an object literal."""
+    if node is None:
+        return None
+    for prop in node.properties:
+        if prop.key is None and prop.computed:
+            return prop.value
+    return None
+
+
 def _prop(node: ObjectExpr | None, key: str) -> Node | None:
     if node is None:
         return None
@@ -885,6 +1279,25 @@ def _resolve(module: JsModule, node: Node | None, depth: int = 0) -> Node | None
             return node
         return _resolve(module, assignment.value, depth + 1)
     return node
+
+
+def _resolve_anywhere(
+    project: ProjectIndex | None, module: JsModule, node: Node | None, depth: int = 0
+) -> tuple[JsModule, Node | None]:
+    """Like :func:`_resolve`, but also through an import the index resolves."""
+    if node is None or depth > _MAX_DEPTH:
+        return module, node
+    if isinstance(node, AwaitExpr):
+        return _resolve_anywhere(project, module, node.argument, depth + 1)
+    if isinstance(node, Identifier):
+        assignment = module.assignment_for(node.name, node)
+        if assignment is not None:
+            return _resolve_anywhere(project, module, assignment.value, depth + 1)
+        if project is not None:
+            symbol = project.js_symbol(module, node.name)
+            if symbol is not None and symbol.value is not None:
+                return _resolve_anywhere(project, symbol.module, symbol.value, depth + 1)
+    return module, node
 
 
 def _static_value(module: JsModule, node: Node | None, depth: int = 0) -> object | None:
@@ -913,7 +1326,9 @@ def _static_value(module: JsModule, node: Node | None, depth: int = 0) -> object
     return None
 
 
-def _reachability(module: JsModule, call: CallExpr) -> tuple[Reachability, list[str]]:
+def _same_file_reachability(
+    module: JsModule, call: CallExpr
+) -> tuple[Reachability, list[str]]:
     """Walk enclosing scopes for a framework entrypoint."""
     scope = module.scope_for(call)
     path: list[str] = []
@@ -927,3 +1342,45 @@ def _reachability(module: JsModule, call: CallExpr) -> tuple[Reachability, list[
         scope = scope.rsplit(".", 1)[0] if "." in scope else ""
     return Reachability.UNKNOWN, []
 
+
+def _reachability(
+    module: JsModule, call: CallExpr, project: ProjectIndex | None = None
+) -> tuple[Reachability, list[str]]:
+    """Same-file reachability, extended through resolved cross-file callers.
+
+    Without a resolved caller the same-file verdict stands: ``unknown`` is
+    never upgraded to ``false``.
+    """
+    verdict, path = _same_file_reachability(module, call)
+    if verdict is Reachability.TRUE or project is None:
+        return verdict, path
+    function = module.enclosing_function(call)
+    while function is not None and "." in function.qualified_name:
+        # Reachability is decided by the outermost named function.
+        parent = module.functions.get(function.qualified_name.rsplit(".", 1)[0])
+        if parent is None:
+            break
+        function = parent
+    if function is None:
+        return verdict, path
+    queue: list[tuple[JsModule, JsFunctionInfo, list[str]]] = [
+        (module, function, [f"{module.relative_path}:{function.name}"])
+    ]
+    seen: set[tuple[str, str]] = set()
+    while queue:
+        current_module, current, trail = queue.pop(0)
+        key = (current_module.relative_path, current.qualified_name)
+        if key in seen or len(trail) > MAX_CALL_DEPTH + 1:
+            continue
+        seen.add(key)
+        for caller_module, caller_call in project.js_callers(current_module, current)[
+            :MAX_CALL_SITES
+        ]:
+            caller_verdict, caller_path = _same_file_reachability(caller_module, caller_call)
+            if caller_verdict is Reachability.TRUE:
+                return Reachability.TRUE, [*caller_path, *trail]
+            caller = caller_module.enclosing_function(caller_call)
+            if caller is not None:
+                hop = f"{caller_module.relative_path}:{caller.name}"
+                queue.append((caller_module, caller, [hop, *trail]))
+    return verdict, path

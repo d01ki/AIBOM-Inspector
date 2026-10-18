@@ -35,6 +35,25 @@ class SourceRef:
     span: Span
     symbol: str
     trust_boundary: str
+    #: file of the source when it differs from the sink's (cross-file flow)
+    file: str = ""
+
+
+# Steps that keep a trace *user-controlled* but weaken it from a proof to a
+# potential path: taint was assumed to pass through code the tracer could not
+# see, or a bound stopped the analysis.  ``unresolved_call`` is the important
+# one — a call into a function outside the project (or outside the supported
+# resolution subset) is assumed to propagate its arguments.
+POTENTIAL_OPERATIONS = frozenset({"unresolved_call", "analysis_budget_exhausted"})
+# Steps that mark a hop the tracer took across a module or call boundary.
+CROSS_BOUNDARY_OPERATIONS = frozenset(
+    {"call_argument", "call_return", "import_reference", "cross_file_tool"}
+)
+
+
+def is_potential(steps: tuple[ResolutionStep, ...] | list[ResolutionStep]) -> bool:
+    """Whether a user-controlled trace relied on an unproven hop."""
+    return any(step.operation in POTENTIAL_OPERATIONS for step in steps)
 
 
 @dataclass(frozen=True)
@@ -64,11 +83,11 @@ def combine_traces(*traces: FlowTrace) -> FlowTrace:
 
     sources: list[SourceRef] = []
     steps: list[ResolutionStep] = []
-    source_keys: set[tuple[str, int, str]] = set()
+    source_keys: set[tuple[str, str, int, str]] = set()
     step_keys: set[tuple[str, int | None, int | None, str | None, str]] = set()
     for trace in traces:
         for source in trace.sources:
-            source_key = (source.kind, source.span.line, source.symbol)
+            source_key = (source.file, source.kind, source.span.line, source.symbol)
             if source_key not in source_keys:
                 sources.append(source)
                 source_keys.add(source_key)
@@ -107,7 +126,7 @@ def sink_evidence(file: str, span: Span, detector_id: str, sink_kind: str) -> Ev
 
 def source_evidence(file: str, source: SourceRef, detector_id: str) -> Evidence:
     return _evidence(
-        file,
+        source.file or file,
         source.span,
         detector_id,
         kind="source",

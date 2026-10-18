@@ -857,6 +857,90 @@
     html { scroll-behavior: auto; }
     *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
   }
+  /* -- compare revisions -------------------------------------------------- */
+  .compare-area { margin-top: 24px; }
+  .compare-lead { margin: 0 0 14px; color: #344157; font-size: 16px; line-height: 1.6; }
+  .compare-demos { display: flex; flex-wrap: wrap; gap: 8px; }
+  .compare-demos button { min-height: 42px; border-radius: 5px; font-size: 15px; }
+  .compare-repo { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--surface); }
+  .compare-repo summary { cursor: pointer; font-weight: 650; font-size: 15px; color: #344157; }
+  .compare-repo label { margin-top: 12px; }
+  .compare-repo input { min-height: 44px; border-radius: 5px; background: #fff; font-size: 15px; }
+  .compare-refs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .compare-repo button { margin-top: 12px; border-radius: 5px; }
+  #compareStatus { margin: 12px 0 0; padding: 10px 12px; border-radius: 6px;
+    background: var(--surface); font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+  #compareStatus:empty { display: none; }
+  #compareStatus.err { color: var(--chip-crit); }
+  .compare-result { padding: 4px 20px 22px; border-top: 1px solid var(--border); }
+  .verdicts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+    margin-top: 18px; }
+  .verdict { padding: 14px 16px; border: 1px solid var(--border); border-left-width: 5px;
+    border-radius: 6px; background: #fff; }
+  .verdict .verdict-label { margin: 0; color: var(--muted);
+    font: 700 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; }
+  .verdict .verdict-value { margin: 4px 0 2px; font-size: 21px; font-weight: 720; }
+  .verdict .verdict-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5;
+    overflow-wrap: anywhere; }
+  .verdict.ok { border-left-color: #39745b; }
+  .verdict.ok .verdict-value { color: #2d6149; }
+  .verdict.bad { border-left-color: #a7333f; }
+  .verdict.bad .verdict-value { color: #a7333f; }
+  .verdict.warn { border-left-color: #9b701c; }
+  .verdict.warn .verdict-value { color: #7d5a14; }
+  .revisions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch; gap: 10px; margin-top: 14px; }
+  .revision { padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); font-size: 14px; min-width: 0; }
+  .revision h4 { margin: 0 0 2px; font-size: 15px; }
+  .revision .revision-target { margin: 0 0 8px; color: var(--muted); font-size: 13px;
+    overflow-wrap: anywhere; }
+  .revision ul { margin: 6px 0 0; padding-left: 18px; }
+  .revision-arrow { align-self: center; color: var(--muted); font-size: 22px; }
+  .compare-heading { margin: 22px 0 6px; font-size: 17px; }
+  .compare-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+  .path-change { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border);
+    border-radius: 6px; background: #fff; }
+  .path-change header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .path-change h4 { margin: 0; font-size: 15px; }
+  .path-change p { margin: 6px 0 0; color: #455166; font-size: 14px; }
+  .sev-tag, .evidence-tag { display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font: 700 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .sev-tag { color: #fff; }
+  .evidence-tag { border: 1px solid currentColor; background: #fff; }
+  .evidence-tag.proven_static { color: #2d6149; }
+  .evidence-tag.potential { color: #7d5a14; }
+  .evidence-tag.unknown { color: #5c6677; border-style: dashed; }
+  .path-graph { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0 0;
+    padding: 0; list-style: none; }
+  .path-graph li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .path-graph li + li::before { content: "→"; color: var(--muted); }
+  .path-node { min-height: 0; max-width: 260px; padding: 6px 9px; border: 1px solid #c9d0dc;
+    border-radius: 5px; background: var(--surface); color: var(--fg); text-align: left;
+    font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+  .path-node small { display: block; color: var(--muted); font-weight: 500;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .path-node:hover:not(:disabled) { background: var(--accent-soft); color: var(--fg);
+    transform: none; box-shadow: none; }
+  .path-node[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .path-node.potential { border-color: #c9a35a; border-style: dashed; }
+  .path-node.unknown { border-color: #9aa3b2; border-style: dotted; }
+  .path-node.role-operation { border-color: #c98a92; }
+  .node-detail { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent);
+    border-radius: 6px; background: var(--accent-soft); font-size: 14px; }
+  .node-detail h4 { margin: 0 0 6px; font-size: 15px; }
+  .node-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 12px; margin: 0; }
+  .node-detail dt { color: var(--muted); }
+  .node-detail dd { margin: 0; overflow-wrap: anywhere; }
+  .node-detail ul { margin: 8px 0 0; padding-left: 18px; color: #455166; }
+  @media (max-width: 720px) {
+    .verdicts, .compare-refs { grid-template-columns: minmax(0, 1fr); }
+    .revisions { grid-template-columns: minmax(0, 1fr); }
+    .revision-arrow { transform: rotate(90deg); justify-self: center; }
+    .compare-result { padding: 4px 14px 18px; }
+  }
 </style>
 </head>
 <body>
@@ -871,6 +955,7 @@
       <nav class="app-nav" aria-label="Page sections">
         <a href="#scanSection">Scan</a>
         <a href="#resultsArea">Results</a>
+        <a href="#compareSection">Compare</a>
         <a href="#helpPanel">Help</a>
         <a href="https://github.com/d01ki/AIBOM-Inspector/blob/main/docs/detection-methodology.md"
            target="_blank" rel="noopener noreferrer">Methodology</a>
@@ -1134,6 +1219,74 @@
         </table></div>
       </section>
       </div>
+      </div>
+    </section>
+
+    <section class="results-area compare-area" id="compareSection" aria-labelledby="compare-title">
+      <header class="section-titlebar">
+        <div>
+          <span class="panel-index">03</span>
+          <h2 id="compare-title">Compare revisions</h2>
+        </div>
+        <span class="result-state" id="compareState">Waiting for input</span>
+      </header>
+      <div class="scan-body">
+        <p class="compare-lead"><strong>An AIBOM does not change. The attack surface does.</strong>
+          Two revisions are judged on two separate questions: is the component inventory
+          the same, and did a path from untrusted input to a bound tool appear?</p>
+        <div class="compare-demos" role="group" aria-label="Offline comparison demos">
+          <button id="compareDemoPy" type="button">Python demo</button>
+          <button id="compareDemoTs" type="button" class="ghost">TypeScript demo</button>
+          <button id="compareDemoFix" type="button" class="ghost">Rescan the fixed revision</button>
+        </div>
+        <p class="field-help">The demos ship with AIBOM Inspector: a route, a prompt builder, an
+          agent and a tool split across four files, at a baseline and a candidate revision with
+          identical components. Nothing is executed and no network is used.</p>
+        <details class="compare-repo">
+          <summary>Compare two revisions of a public repository</summary>
+          <label for="compareRepo">Repository URL</label>
+          <input type="url" id="compareRepo" placeholder="https://github.com/owner/repository"
+                 autocomplete="off" spellcheck="false">
+          <div class="compare-refs">
+            <div>
+              <label for="compareBase">Baseline ref</label>
+              <input type="text" id="compareBase" placeholder="main" autocomplete="off"
+                     spellcheck="false">
+            </div>
+            <div>
+              <label for="compareHead">Candidate ref</label>
+              <input type="text" id="compareHead" placeholder="branch, tag, or commit SHA"
+                     autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <button id="compareRun" type="button">Compare revisions</button>
+        </details>
+        <p id="compareStatus" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="compare-result" id="compareResult" tabindex="-1" hidden>
+        <div class="verdicts">
+          <div class="verdict" id="bomVerdict"></div>
+          <div class="verdict" id="boundaryVerdict"></div>
+        </div>
+        <div class="revisions">
+          <article class="revision" id="baselineCard" aria-label="Baseline revision"></article>
+          <span class="revision-arrow" aria-hidden="true">→</span>
+          <article class="revision" id="candidateCard" aria-label="Candidate revision"></article>
+        </div>
+        <h3 class="compare-heading">Path changes</h3>
+        <p class="compare-note">Severity is the potential impact of the operation the tool can
+          reach. Evidence is how much of the path was proven: <strong>Proven statically</strong>
+          (every hop resolved), <strong>Potential</strong> (an assumption was needed; never
+          Critical), <strong>Unknown</strong> (shown, never gated). Select a node for its
+          file, line and limits.</p>
+        <div id="pathChanges"></div>
+        <div class="node-detail" id="nodeDetail" hidden></div>
+        <h3 class="compare-heading">Other changes</h3>
+        <div class="tablewrap"><table id="otherChanges">
+          <thead><tr><th>Severity</th><th>Kind</th><th>Change</th><th>Evidence</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
       </div>
     </section>
 
@@ -2083,6 +2236,235 @@ $("findingSearch").addEventListener("input", filterFindings);
 $("severityFilter").addEventListener("change", filterFindings);
 $("inventorySearch").addEventListener("input", filterInventory);
 $("typeFilter").addEventListener("change", filterInventory);
+
+// ── compare revisions ─────────────────────────────────────────────────────────
+// Same engine as `aibom diff` and POST /api/diff; this only renders the payload.
+const EVIDENCE_LABEL = { proven_static: "Proven statically", potential: "Potential",
+  unknown: "Unknown" };
+const ROLE_LABEL = { source: "Untrusted input", flow: "Flow", privileged_prompt: "Privileged prompt",
+  model: "Model", tool: "Bound tool", operation: "Operation" };
+const PATH_KINDS = ["impact_path_added", "impact_path_changed", "impact_path_unresolved",
+  "impact_path_removed"];
+const COMPARE_BUTTONS = ["compareDemoPy", "compareDemoTs", "compareDemoFix", "compareRun"];
+let compareLanguage = "python";
+let compareNodes = [];
+
+function setCompareStatus(msg, isErr) {
+  const s = $("compareStatus"); s.textContent = msg; s.className = isErr ? "err" : "";
+}
+
+function revisionLabel(target) {
+  if (typeof target === "string" && target.startsWith("built-in://")) {
+    const parts = target.replace("built-in://", "").split("/");
+    const language = parts[1] === "typescript" ? "TypeScript" : "Python";
+    return `${language} demo · ${parts[2] || "revision"}`;
+  }
+  return repoLabel(target);
+}
+
+async function runCompare(button, busyLabel, status, request) {
+  const original = button.textContent;
+  COMPARE_BUTTONS.forEach((id) => { $(id).disabled = true; });
+  button.textContent = busyLabel;
+  $("compareSection").setAttribute("aria-busy", "true");
+  $("compareState").textContent = "Comparison in progress";
+  setCompareStatus(status, false);
+  try {
+    const body = await request();
+    renderCompare(body);
+    $("compareState").textContent = "Comparison loaded";
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto" : "smooth";
+    $("compareResult").scrollIntoView({ behavior, block: "start" });
+    $("compareResult").focus({ preventScroll: true });
+  } catch (e) {
+    setCompareStatus("The comparison could not be completed: " + e.message, true);
+    $("compareState").textContent = "Comparison failed";
+    if (e instanceof BackendUnavailable) showApiEndpointField();
+  } finally {
+    COMPARE_BUTTONS.forEach((id) => { $(id).disabled = false; });
+    button.textContent = original;
+    $("compareSection").removeAttribute("aria-busy");
+  }
+}
+
+function compareDemo(language, revision) {
+  compareLanguage = language;
+  const button = revision === "fixed" ? $("compareDemoFix")
+    : $(language === "typescript" ? "compareDemoTs" : "compareDemoPy");
+  const query = `language=${language}&scenario=cross-file&revision=${revision}`;
+  return runCompare(button, "Comparing…",
+    revision === "fixed"
+      ? "Rescanning the fixed revision against the vulnerable candidate (offline)…"
+      : `Scanning the ${language} baseline and candidate revisions (offline)…`,
+    () => postJson(apiBase() + "/api/diff/demo?" + query));
+}
+
+function compareRepo() {
+  const repo = $("compareRepo").value.trim();
+  const base = $("compareBase").value.trim();
+  const head = $("compareHead").value.trim();
+  if (!isRepositoryUrl(repo) || !base || !head) {
+    setCompareStatus("Enter a repository URL and both refs to compare.", true);
+    return Promise.resolve();
+  }
+  return runCompare($("compareRun"), "Comparing…",
+    `Cloning ${repoLabel(repo)} at ${base} and ${head}…`,
+    () => postJson(apiBase() + "/api/diff",
+      { repo_url: repo, base_ref: base, head_ref: head }));
+}
+
+function renderCompare(body) {
+  const drift = body.drift || {};
+  $("compareResult").hidden = false;
+  $("nodeDetail").hidden = true;
+  renderVerdicts(drift);
+  renderRevision($("baselineCard"), "Baseline", body.baseline, body.baseline_paths);
+  renderRevision($("candidateCard"), "Candidate", body.candidate, body.candidate_paths);
+  const changes = drift.changes || [];
+  const paths = changes.filter(c => PATH_KINDS.includes(c.kind));
+  const others = changes.filter(c => !PATH_KINDS.includes(c.kind));
+  compareNodes = [];
+  $("pathChanges").innerHTML = paths.length
+    ? paths.map((change, index) => pathChangeHtml(change, index)).join("")
+    : `<p class="field-help">No agent capability path was added, changed or removed.</p>`;
+  $("pathChanges").querySelectorAll(".path-node").forEach((node) => {
+    node.addEventListener("click", () => showNode(node));
+  });
+  const rows = others.map(change => {
+    const evidence = (change.after_evidence && change.after_evidence[0])
+      || (change.before_evidence && change.before_evidence[0]);
+    return `<tr><td>${sevTag(change.severity)}</td><td><code>${esc(change.kind)}</code></td>`
+      + `<td><strong>${esc(change.title)}</strong><br>${esc(change.description)}</td>`
+      + `<td>${esc(evLoc(evidence))}${change.evidence_level
+        ? "<br>" + evidenceTag(change.evidence_level) : ""}</td></tr>`;
+  });
+  $("otherChanges").querySelector("tbody").innerHTML = rows.length ? rows.join("")
+    : `<tr><td colspan="4">No other changes.</td></tr>`;
+  setCompareStatus(
+    `${changes.length} change(s) between ${revisionLabel(drift.baseline_target)} and `
+    + `${revisionLabel(drift.candidate_target)}.`, false);
+}
+
+function renderVerdicts(drift) {
+  const bom = drift.bom;
+  const bomBox = $("bomVerdict");
+  if (bom && bom.identical) {
+    bomBox.className = "verdict ok";
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p>`
+      + `<p class="verdict-value">Unchanged</p><p class="verdict-note">${bom.candidate_components}`
+      + ` components compared (${esc((bom.compared_types || []).join(", "))}): names, versions`
+      + ` and security metadata are identical. Prompts are compared as paths, not as parts.</p>`;
+  } else if (bom) {
+    bomBox.className = "verdict warn";
+    const delta = [...bom.added.map(x => "+" + x), ...bom.removed.map(x => "−" + x),
+      ...bom.changed.map(x => "~" + x)];
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p>`
+      + `<p class="verdict-value">Changed</p><p class="verdict-note">`
+      + `${esc(delta.slice(0, 6).join(", "))}${delta.length > 6 ? ` +${delta.length - 6} more` : ""}</p>`;
+  } else {
+    bomBox.className = "verdict";
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p><p class="verdict-value">—</p>`;
+  }
+  const changes = drift.changes || [];
+  const added = changes.filter(c => c.kind === "impact_path_added");
+  const unresolved = changes.filter(c => c.kind === "impact_path_unresolved");
+  const box = $("boundaryVerdict");
+  if (drift.security_boundary_changed) {
+    const proven = added.filter(c => c.evidence_level === "proven_static").length;
+    box.className = "verdict bad";
+    box.innerHTML = `<p class="verdict-label">SECURITY BOUNDARY</p>`
+      + `<p class="verdict-value">Changed</p><p class="verdict-note">${added.length} new agent`
+      + ` capability path(s), ${proven} proven statically. A static path, not a proven exploit.</p>`;
+  } else {
+    box.className = unresolved.length ? "verdict warn" : "verdict ok";
+    box.innerHTML = `<p class="verdict-label">SECURITY BOUNDARY</p>`
+      + `<p class="verdict-value">Unchanged</p><p class="verdict-note">${unresolved.length
+        ? `${unresolved.length} unresolved input(s) to review — not proven either way.`
+        : "No new path from untrusted input to privileged instructions or a bound tool."}</p>`;
+  }
+}
+
+function renderRevision(card, title, summary, paths) {
+  if (!summary) { card.innerHTML = ""; return; }
+  const counts = Object.entries(summary.counts || {})
+    .filter(([kind, count]) => count && kind !== "prompt")
+    .map(([kind, count]) => `${count} ${kind}`).join(" · ");
+  const impact = (paths && paths.impact) || [];
+  const unresolved = (paths && paths.unresolved) || [];
+  const items = [...impact.map(p => `<li>${sevTag(p.severity)} ${evidenceTag(p.evidence_level)}`
+      + ` ${esc(p.source_kind)} → ${esc(p.tool_names.join(", "))}</li>`),
+    ...unresolved.map(p => `<li>${evidenceTag("unknown")} ${esc(p.sink_kind)} → `
+      + `${esc(p.tool_names.join(", "))}</li>`)];
+  const score = summary.score || {};
+  card.innerHTML = `<h4>${title}</h4>`
+    + `<p class="revision-target">${esc(revisionLabel(summary.target))}</p>`
+    + `<div>${esc(counts || "no components")}</div>`
+    + `<div>${summary.findings} finding(s) · score ${score.overall ?? "–"}`
+    + `${score.grade ? " (" + esc(score.grade) + ")" : ""}</div>`
+    + `<div><strong>${impact.length}</strong> agent capability path(s)</div>`
+    + (items.length ? `<ul>${items.join("")}</ul>` : "");
+}
+
+function sevTag(severity) {
+  return `<span class="sev-tag" style="background:${SEV_COLOR[severity] || "#64716a"}">`
+    + `${esc(severity)}</span>`;
+}
+
+function evidenceTag(level) {
+  const key = EVIDENCE_LABEL[level] ? level : "unknown";
+  return `<span class="evidence-tag ${key}">${EVIDENCE_LABEL[key]}</span>`;
+}
+
+function pathChangeHtml(change, index) {
+  const details = change.details || {};
+  const view = details.after || details;
+  const nodes = view.nodes || [];
+  const graph = nodes.map((node, position) => {
+    const id = compareNodes.length;
+    compareNodes.push({ node, limitations: view.limitations || [], change });
+    const where = node.file ? `${node.file}:${node.line}` : "location unresolved";
+    return `<li><button type="button" class="path-node role-${esc(node.role)} ${esc(node.status)}"`
+      + ` data-node="${id}" aria-pressed="false"`
+      + ` aria-label="${esc((ROLE_LABEL[node.role] || node.role) + ": " + node.label + ", " + where)}">`
+      + `${esc(ROLE_LABEL[node.role] || node.role)}: ${esc(node.label)}`
+      + `<small>${esc(where)}</small></button></li>`;
+  }).join("");
+  const consequence = view.potential_consequence
+    ? `<p><strong>Potential consequence:</strong> ${esc(view.potential_consequence)}</p>` : "";
+  const boundary = view.changed_boundary
+    ? `<p><strong>Changed boundary:</strong> ${esc(view.changed_boundary)}</p>` : "";
+  return `<article class="path-change" aria-labelledby="pathChange${index}">`
+    + `<header>${sevTag(change.severity)} ${evidenceTag(change.evidence_level)}`
+    + (view.cross_file ? ` <span class="evidence-tag">cross-file</span>` : "")
+    + ` <h4 id="pathChange${index}">${esc(change.title)}</h4></header>`
+    + `<p>${esc(change.description)}</p>${boundary}${consequence}`
+    + (graph ? `<ol class="path-graph" aria-label="Path nodes">${graph}</ol>` : "")
+    + `</article>`;
+}
+
+function showNode(button) {
+  const entry = compareNodes[Number(button.dataset.node)];
+  if (!entry) return;
+  $("pathChanges").querySelectorAll(".path-node").forEach((item) => {
+    item.setAttribute("aria-pressed", item === button ? "true" : "false");
+  });
+  const { node, limitations } = entry;
+  const detail = $("nodeDetail");
+  detail.hidden = false;
+  detail.innerHTML = `<h4>${esc(ROLE_LABEL[node.role] || node.role)}: ${esc(node.label)}</h4>`
+    + `<dl><dt>Location</dt><dd>${esc(node.file ? node.file + ":" + node.line : "unresolved")}</dd>`
+    + `<dt>Evidence</dt><dd>${evidenceTag(node.status)}</dd>`
+    + (node.detail ? `<dt>Detail</dt><dd>${esc(node.detail)}</dd>` : "")
+    + `</dl>`
+    + (limitations.length
+      ? `<ul>${limitations.map(item => `<li>${esc(item)}</li>`).join("")}</ul>` : "");
+}
+
+$("compareDemoPy").addEventListener("click", () => compareDemo("python", "candidate"));
+$("compareDemoTs").addEventListener("click", () => compareDemo("typescript", "candidate"));
+$("compareDemoFix").addEventListener("click", () => compareDemo(compareLanguage, "fixed"));
+$("compareRun").addEventListener("click", compareRepo);
 
 renderApiLine();
 

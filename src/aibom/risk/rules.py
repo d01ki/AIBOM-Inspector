@@ -485,7 +485,12 @@ def aibom_impact_001_bound_tool_blast_radius(inv: Inventory) -> list[Finding]:
                     f"instructions and directly bound tool(s) {tools}; model-controlled tool "
                     f"parameter(s) {parameters} reach recognized operations that could "
                     f"{consequences}. This is a potential steering path, not proof that "
-                    "exploitation succeeds at runtime."
+                    "exploitation succeeds at runtime. Evidence: "
+                    + (
+                        "every hop proven statically."
+                        if path.evidence_level == "proven_static"
+                        else "potential (" + "; ".join(path.limitations[:1]) + ")."
+                    )
                 ),
                 remediation=(
                     "Keep untrusted content out of agent instructions; expose only narrowly "
@@ -498,6 +503,7 @@ def aibom_impact_001_bound_tool_blast_radius(inv: Inventory) -> list[Finding]:
                 source_kind=path.source_kind,
                 sink_kind=path.sink_kind,
                 trust_boundary=path.trust_boundary,
+                evidence_level=path.evidence_level,
             )
         )
     return out

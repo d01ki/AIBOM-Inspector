@@ -94,3 +94,25 @@ def test_fully_resolved_bom_is_schema_valid() -> None:
         relationship=RelationshipType.INVOKES, source_evidence=[_ev()],
     ))
     _assert_valid(to_cyclonedx_json(inv))
+
+
+@pytest.mark.parametrize(
+    "fixture", ["xfile-py-candidate", "xfile-ts-candidate", "xfile-py-baseline"]
+)
+def test_cross_file_demo_boms_are_schema_valid(fixture: str) -> None:
+    import json
+    from pathlib import Path
+
+    from aibom.service import run_scan
+
+    root = Path(__file__).parent / "fixtures" / fixture
+    document = to_cyclonedx_json(run_scan(root).inventory)
+    _assert_valid(document)
+    properties = {
+        prop["name"]: prop["value"]
+        for component in json.loads(document)["components"]
+        for prop in component.get("properties", [])
+    }
+    assert properties.get("aibom:prompt_flow_cross_file") == "true"
+    if fixture.endswith("candidate"):
+        assert properties.get("aibom:prompt_flow_evidence_level") == "proven_static"

@@ -137,13 +137,34 @@ def model_entity(
     model_evidence = evidence(context, call, detector_id, pattern, confidence)
     if sensitive and isinstance(resolved.value, str):
         model_evidence.snippet = model_evidence.snippet.replace(resolved.value, "<redacted>")
+    all_evidence = [model_evidence]
+    if status is ValueResolution.RESOLVED:
+        # `MODEL = "x"` ... `create(model=MODEL)`: keep where the id is written,
+        # not only where it is used.
+        all_evidence.extend(
+            Evidence(
+                file=step.file,
+                line_start=step.line,
+                line_end=step.line,
+                column_start=step.column,
+                snippet=f"<model-id-declaration:{name}>",
+                matched_pattern="model-id-declaration",
+                confidence=confidence,
+                detector_id=detector_id,
+                kind="ast",
+            )
+            for step in resolution_path
+            if step.operation == "literal"
+            and step.line is not None
+            and step.line != model_evidence.line_start
+        )
     return Model(
         name=name,
         provider=provider,
         revision=revision,
         revision_pinned=revision is not None,
         environment_variable=resolved.environment_variable,
-        source_evidence=[model_evidence],
+        source_evidence=all_evidence,
         detector_ids=[detector_id],
         usage=UsageState(
             declared=True,

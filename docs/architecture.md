@@ -4,25 +4,39 @@ AIBOM Inspector is an offline-first static analysis pipeline. Scanned code is
 read and parsed, but never imported or executed.
 
 ```text
-CLI / HTTP API
+CLI / HTTP API / web UI
   -> run_scan
      -> RepoCollector
-        -> Python AST detector registry
+        -> pre-pass: parse every .py / JS / TS file once -> ProjectIndex
+           (module + symbol index, import/re-export/tsconfig-paths resolution)
+        -> per-file detector registry (Python AST, JS/TS subset AST),
+           each with ScanContext.project for bounded cross-file resolution
         -> legacy regex compatibility detector
         -> generic model-file detector
-     -> DependencyCollector
+     -> DependencyCollector / LockfileCollector
      -> Inventory normalization and deduplication
      -> optional metadata/vulnerability resolvers
-     -> exposure + agent capability impact paths
+     -> exposure + agent capability impact paths (evidence level, nodes)
      -> deterministic risk rules and score
   -> JSON / CycloneDX / SARIF / graph / self-contained HTML
 
 Baseline scan + candidate scan
-  -> prompt-slot matching (file + role + sink + ordinal; line-insensitive)
-  -> exposure-path comparison
-  -> agent capability impact-path comparison
+  -> BOM comparison (identical? over which entity types?)
+  -> path matching: prompt slot, then line/file/rename-insensitive semantic key
+  -> exposure-path and impact-path comparison (added/removed/changed/unresolved)
   -> component / usage / finding comparison
-  -> drift JSON + severity-gated CLI
+  -> drift JSON, severity-gated CLI (unknown never gates), compare view in the UI
+```
+
+```mermaid
+flowchart TD
+    A[Source files / syntax parsers] --> B[Module & symbol index]
+    B --> C[Import / export / alias resolution]
+    C --> D[Bounded interprocedural flow]
+    D --> E[Source / prompt role / agent / tool binding / operation]
+    E --> F[Evidence-backed impact paths]
+    F --> G[Behavioral drift comparison]
+    G --> H[CLI / API / web UI / SARIF / CycloneDX]
 ```
 
 ## Detector boundary
@@ -39,7 +53,8 @@ Baseline scan + candidate scan
 - production/test/example/docs source context.
 
 The registry supports per-detector disabling. `RepoCollector` parses each
-Python file once and shares the resulting AST index between provider detectors.
+Python and JS/TS file once, in a pre-pass, and shares the resulting syntax
+trees between detectors and with the cross-file `ProjectIndex`.
 
 ## Exposure paths and behavioral drift
 
@@ -60,6 +75,45 @@ confirmed privileged exposure plus a direct agent tool binding and a bounded
 flow from a tool parameter into a recognized high-impact operation. The
 derived `ImpactPath` records the model, tool, controlled parameter, operation,
 severity, reachability, confidence, and source/sink/capability evidence.
+
+## Cross-file analysis
+
+`ProjectIndex` (`detectors/project.py`) holds every module parsed in a scan.
+Detectors still run one file at a time; the index only answers "which module
+and binding does this name refer to?" for the statically resolvable subset:
+
+| Language | Resolved | Left unresolved |
+|---|---|---|
+| Python | `import a.b`, `from a.b import c`, `from ..x import y`, re-exports in `__init__.py`; unique module-name suffixes for `src/`-style layouts | `importlib`, `__import__`, `getattr`, methods on objects, ambiguous suffixes, single-segment names that are not project root modules |
+| JS/TS | `./x`, `../x` (with extension and `index` resolution, `.js` meaning `.ts`), `export {a as b} from`, `export * from`, `import * as ns`, root `tsconfig`/`jsconfig` `paths` | bare package specifiers, dynamic `import()`, `extends`/project references, `export default function name` |
+
+On top of it each language's tracer adds three steps, each recorded in the
+prompt's `data_flow_path` with its own file and line:
+
+- `call_argument` — a parameter of an ordinary function is bound to the
+  argument at each resolved call site (up to 8 sites, 4 boundaries up);
+- `call_return` / `return_value` — a call into a project function is traced
+  through the callee's return expressions with its parameters bound to the
+  call's arguments, so a helper that returns only literals sanitizes;
+- `import_reference` — an imported module-level binding is followed to the
+  module that defines it.
+
+Tool bindings resolve imported tools (and imported `TOOLS` lists / barrels /
+one level of tool factory), and capability search descends into project
+helpers that receive a tool parameter. Reachability walks resolved callers to
+an entrypoint in another file. A shared `Budget` caps visits per trace; cycles
+are detected per module/function frame.
+
+## Evidence levels
+
+Every impact path has a `severity` (potential impact class of the reachable
+operation) and an independent `evidence_level`:
+
+| Level | Meaning | Gate |
+|---|---|---|
+| `proven_static` | every hop resolved; input is from a recognized untrusted source; route from an entrypoint resolved | may be Critical |
+| `potential` | user-controlled, but taint crossed an `unresolved_call`, a bound was hit, or no entrypoint route was resolved | capped at High; `impact_severity` keeps the uncapped class |
+| `unknown` | privileged prompt with a steerable bound tool whose input could not be resolved either way | INFO, never fails `--fail-on` |
 
 ## Compatibility migration
 

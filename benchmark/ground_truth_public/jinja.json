@@ -1,0 +1,12 @@
+{
+  "repository": "pallets/jinja",
+  "commit": "5ef70112a1ff19c05324ff889dd30405b1002044",
+  "language": "python",
+  "local_path": "benchmark/checkouts/jinja",
+  "notes": [
+    "Curated 2026-10-18. Template engine; no AI SDK, model id, LLM prompt or AI package.",
+    "Adversarial for prompt templates: Jinja templates and tests/res/templates/ are",
+    "HTML/text templates, not model prompts."
+  ],
+  "components": []
+}

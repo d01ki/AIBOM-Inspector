@@ -1,0 +1,52 @@
+{
+  "repository": "vercel-labs/ai-sdk-preview-roundtrips",
+  "commit": "9242a902cb7ba9df4d7d8eda296199a1a1102f79",
+  "language": "typescript",
+  "local_path": "benchmark/checkouts/ai-sdk-preview-roundtrips",
+  "notes": [
+    "Curated 2026-10-18 by reading every source file before running the scanner.",
+    "AI packages follow the project's documented allowlist (collectors/dependencies.py).",
+    "The two tools are inline objects (not tool()); tools are not scored."
+  ],
+  "components": [
+    {
+      "type": "ai_package",
+      "name": "@ai-sdk/openai",
+      "file": "package.json",
+      "line": 12,
+      "status": "declared"
+    },
+    {
+      "type": "ai_package",
+      "name": "ai",
+      "file": "package.json",
+      "line": 15,
+      "status": "declared"
+    },
+    {
+      "type": "service",
+      "name": "openai",
+      "file": "app/(preview)/api/chat/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "model",
+      "name": "gpt-4o",
+      "file": "app/(preview)/api/chat/route.ts",
+      "line": 10,
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "system-prompt@app/(preview)/api/chat/route.ts:11",
+      "file": "app/(preview)/api/chat/route.ts",
+      "status": "invoked"
+    },
+    {
+      "type": "prompt",
+      "name": "template-prompt@app/(preview)/api/chat/route.ts:16",
+      "file": "app/(preview)/api/chat/route.ts",
+      "status": "invoked"
+    }
+  ]
+}

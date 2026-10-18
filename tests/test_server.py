@@ -226,3 +226,38 @@ def test_demo_sarif_endpoint_is_offline(client: TestClient) -> None:
     assert resp.status_code == 200
     rules = resp.json()["runs"][0]["tool"]["driver"]["rules"]
     assert any(rule["id"] == "AIBOM-IMPACT-001" for rule in rules)
+
+
+@pytest.mark.parametrize("language", ["python", "typescript"])
+def test_cross_file_demo_payload_carries_bom_scope_and_graph(
+    client: TestClient, language: str
+) -> None:
+    body = client.post(f"/api/diff/demo?language={language}&scenario=cross-file").json()
+    drift = body["drift"]
+    assert drift["bom"]["identical"] is True
+    assert drift["bom"]["compared_types"]
+    assert drift["security_boundary_changed"] is True
+    [added] = [c for c in drift["changes"] if c["kind"] == "impact_path_added"]
+    assert added["evidence_level"] == "proven_static"
+    nodes = added["details"]["nodes"]
+    assert {node["role"] for node in nodes} >= {
+        "source",
+        "privileged_prompt",
+        "model",
+        "tool",
+        "operation",
+    }
+    assert all(node["file"] for node in nodes if node["role"] != "model" or node["file"])
+    assert body["baseline_paths"]["impact"] == []
+    assert len(body["candidate_paths"]["impact"]) == 1
+
+
+def test_cross_file_demo_fixed_revision_removes_the_path(client: TestClient) -> None:
+    body = client.post("/api/diff/demo?scenario=cross-file&revision=fixed").json()
+    kinds = {c["kind"] for c in body["drift"]["changes"]}
+    assert "impact_path_removed" in kinds
+    assert body["drift"]["security_boundary_changed"] is False
+
+
+def test_diff_demo_rejects_an_unknown_scenario(client: TestClient) -> None:
+    assert client.post("/api/diff/demo?scenario=nope").status_code == 400

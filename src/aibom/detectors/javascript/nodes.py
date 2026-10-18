@@ -122,6 +122,8 @@ class Param:
     name: str = ""
     properties: list[str] = field(default_factory=list)
     line: int = 1
+    #: positional slot in the parameter list; destructured names share a slot
+    index: int = 0
 
 
 @dataclass
@@ -149,6 +151,16 @@ class ImportDecl(Node):
     source: str = ""
     #: local binding name -> imported name ('default', '*', or the export name)
     specifiers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ExportDecl(Node):
+    """``export { a as b } from 'x'``, ``export * from 'x'``, ``export default a``."""
+
+    source: str = ""
+    #: exported name -> local (or, with ``source``, imported) name
+    specifiers: dict[str, str] = field(default_factory=dict)
+    star: bool = False
 
 
 @dataclass

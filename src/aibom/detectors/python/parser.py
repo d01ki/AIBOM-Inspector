@@ -39,6 +39,7 @@ class _Index(ast.NodeVisitor):
         self.parents: dict[int, ast.AST] = {}
         self.scopes: dict[int, str | None] = {}
         self.aliases: dict[str, str] = {}
+        self.import_levels: dict[str, int] = {}
         self.import_nodes: list[ast.Import | ast.ImportFrom] = []
         self.assignments: dict[tuple[str | None, str], list[Assignment]] = {}
         self.functions: dict[str, FunctionInfo] = {}
@@ -105,6 +106,8 @@ class _Index(ast.NodeVisitor):
         for alias in node.names:
             local = alias.asname or alias.name
             self.aliases[local] = f"{module}.{alias.name}".strip(".")
+            if node.level:
+                self.import_levels[local] = node.level
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.scopes[id(node)] = self.scope
@@ -184,6 +187,8 @@ class PythonModule:
     calls: list[ast.Call]
     docstring_lines: set[int]
     main_guard_nodes: set[int]
+    #: local name -> relative-import level (``from ..x import y`` is 2)
+    import_levels: dict[str, int] = field(default_factory=dict)
 
     def qualified_name(self, node: ast.AST) -> str | None:
         """Return a dotted symbol name with import aliases expanded."""
@@ -305,6 +310,7 @@ def parse_python(source: str, relative_path: str) -> PythonModule:
         calls=index.calls,
         docstring_lines=index.docstring_lines,
         main_guard_nodes=index.main_guard_nodes,
+        import_levels=index.import_levels,
     )
 
 

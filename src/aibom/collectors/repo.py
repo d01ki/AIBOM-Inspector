@@ -8,6 +8,7 @@ scanned code; it only reads text.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import re
 from collections import defaultdict
@@ -16,7 +17,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from aibom.collectors.base import Collector
 from aibom.detectors.base import ScanContext
-from aibom.detectors.javascript.parser import parse_javascript
+from aibom.detectors.javascript.parser import JsModule, parse_javascript
+from aibom.detectors.project import ProjectIndex
 from aibom.detectors.python.parser import (
     PythonModule,
     classify_source_context,
@@ -37,6 +39,7 @@ from aibom.models.entities import (
 )
 from aibom.models.evidence import Evidence
 from aibom.models.signals import RiskSignal
+from aibom.tools import link_tools
 
 # Directories that never contain first-party AI supply-chain signal worth scanning.
 _IGNORE_DIRS = {
@@ -192,12 +195,22 @@ _RE_MCP = re.compile(r"""['"]mcpServers['"]\s*:""")
 # MCP *server* implementations (the supply-chain surface an AI client consumes):
 # Python mcp / fastmcp usage, or the TS server SDK.
 _RE_MCP_SERVER_PY = re.compile(
-    r"""(?:^\s*from\s+(?:mcp|fastmcp)(?:[.\w]*)\s+import\b"""
-    r"""|^\s*import\s+(?:mcp|fastmcp)\b"""
-    r"""|\bFastMCP\s*\()"""
+    r"""(?:^\s*from\s+mcp\.server(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+mcp\.server\b"""
+    r"""|^\s*from\s+fastmcp(?:[.\w]*)\s+import\b"""
+    r"""|^\s*import\s+fastmcp\b"""
+    r"""|\b(?:FastMCP|MCPServer)\s*\()"""
 )
+# Server entry points only: `@modelcontextprotocol/sdk/client/...` and
+# `@modelcontextprotocol/client` are MCP *clients*.
 _RE_MCP_SERVER_JS = re.compile(
-    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:sdk|server)[^'"]*['"]"""
+    r"""(?:from\s*|require\s*\(\s*)['"]@modelcontextprotocol/(?:server|sdk/server)[^'"]*['"]"""
+)
+# Pattern-tier languages: the official SDKs' server constructors.
+_RE_MCP_SERVER_OTHER = re.compile(
+    r"""\bmcp\.NewServer\s*\("""  # Go (modelcontextprotocol/go-sdk)
+    r"""|\bMCP::Server\.new\b"""  # Ruby (mcp gem)
+    r"""|\bimpl\s+(?:rmcp::)?ServerHandler\s+for\b"""  # Rust (rmcp)
 )
 
 # JS/TS provider SDK imports (ESM import-from or CJS require of an AI SDK).
@@ -326,6 +339,8 @@ class RepoCollector(Collector):
             raise FileNotFoundError(f"scan target does not exist: {self.root}")
         self.disabled_detectors = disabled_detectors or set()
         self.detectors = detector_registry or default_registry(disabled=self.disabled_detectors)
+        self.project: ProjectIndex | None = None
+        self._parsed: dict[Path, PythonModule | JsModule | Exception] = {}
 
     # -- public API ------------------------------------------------------------
 
@@ -338,13 +353,71 @@ class RepoCollector(Collector):
         for detector_id in detector_ids:
             if detector_id not in inventory.stats.detectors_run:
                 inventory.stats.detectors_run.append(detector_id)
-        for path in self._iter_files():
+        files = self._iter_files()
+        self._index_project(files)
+        for path in files:
             rel = self._rel(path)
             suffix = path.suffix.lower()
             if suffix in _WEIGHT_SUFFIXES:
                 self._detect_weight_file(inventory, path, rel)
             if self._is_text_file(path):
                 self._scan_text_file(inventory, path, rel)
+        # Bindings and steerability span files, so tools are graded last.
+        link_tools(inventory)
+
+    # -- project index ---------------------------------------------------------
+
+    def _index_project(self, files: list[Path]) -> None:
+        """Parse every Python and JS/TS file once, before any detector runs.
+
+        Detectors still inspect one file at a time; the index only lets them
+        resolve an import to the module that defines it.  Parse failures are
+        remembered so the per-file pass reports them exactly as before.
+        """
+        self.project = ProjectIndex()
+        self._parsed = {}
+        base = self.root if self.root.is_dir() else self.root.parent
+        for name in ("tsconfig.json", "jsconfig.json"):
+            config = base / name
+            if config.is_file():
+                with contextlib.suppress(OSError, UnicodeDecodeError):
+                    self.project.load_tsconfig(config.read_text(encoding="utf-8"))
+                break
+        for path in files:
+            suffix = path.suffix.lower()
+            if suffix != ".py" and suffix not in _JS_SUFFIXES:
+                continue
+            try:
+                if path.stat().st_size > _MAX_FILE_BYTES:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = self._rel(path)
+            try:
+                if suffix == ".py":
+                    python = parse_python(text, rel)
+                    self.project.add_python(python)
+                    self._parsed[path] = python
+                else:
+                    javascript = parse_javascript(text, rel)
+                    self.project.add_javascript(javascript)
+                    self._parsed[path] = javascript
+            except (SyntaxError, ValueError, RecursionError) as exc:
+                self._parsed[path] = exc
+
+    def _parsed_module(
+        self, path: Path, text: str, rel: str
+    ) -> PythonModule | JsModule | Exception:
+        cached = self._parsed.get(path)
+        if cached is not None:
+            return cached
+        try:
+            if path.suffix.lower() == ".py":
+                return parse_python(text, rel)
+            return parse_javascript(text, rel)
+        except (SyntaxError, ValueError, RecursionError) as exc:
+            return exc
 
     # -- file iteration --------------------------------------------------------
 
@@ -361,6 +434,10 @@ class RepoCollector(Collector):
             # app does) silently scans as empty.
             rel_parts = path.relative_to(self.root).parts
             if any(part in _IGNORE_DIRS for part in rel_parts):
+                continue
+            if path.is_symlink() and not _inside(path, self.root):
+                # A link out of the scan root is not part of the repository,
+                # and following it would read arbitrary host files.
                 continue
             files.append(path)
         return sorted(files)
@@ -435,14 +512,14 @@ class RepoCollector(Collector):
         # per-file buckets used to draw intra-file relationship edges
         buckets: dict[type[Entity], list[str]] = defaultdict(list)
 
+        project = self.project
         if path.suffix.lower() == ".py":
-            try:
-                python = parse_python(text, rel)
-            except (SyntaxError, ValueError) as exc:
-                line = getattr(exc, "lineno", None)
+            python = self._parsed_module(path, text, rel)
+            if isinstance(python, Exception):
+                line = getattr(python, "lineno", None)
                 location = f"{rel}:{line}" if line else rel
-                inventory.stats.parse_errors.append(f"{location}: {exc}")
-            else:
+                inventory.stats.parse_errors.append(f"{location}: {python}")
+            elif isinstance(python, PythonModule):
                 structured_python = True
                 context = ScanContext(
                     root=self.root,
@@ -451,6 +528,7 @@ class RepoCollector(Collector):
                     text=text,
                     source_context=classify_source_context(rel),
                     python=python,
+                    project=project,
                 )
                 for detection in self.detectors.detect(context):
                     canonical = inventory.add_entity(detection.entity)
@@ -462,11 +540,10 @@ class RepoCollector(Collector):
         elif path.suffix.lower() in _JS_SUFFIXES:
             # The JS/TS parser is tolerant by design, so a malformed file
             # degrades to the regex pass instead of failing the scan.
-            try:
-                javascript = parse_javascript(text, rel)
-            except RecursionError as exc:
-                inventory.stats.parse_errors.append(f"{rel}: {exc}")
-            else:
+            javascript = self._parsed_module(path, text, rel)
+            if isinstance(javascript, Exception):
+                inventory.stats.parse_errors.append(f"{rel}: {javascript}")
+            elif isinstance(javascript, JsModule):
                 context = ScanContext(
                     root=self.root,
                     path=path,
@@ -474,6 +551,7 @@ class RepoCollector(Collector):
                     text=text,
                     source_context=classify_source_context(rel),
                     javascript=javascript,
+                    project=project,
                 )
                 for detection in self.detectors.detect(context):
                     canonical = inventory.add_entity(detection.entity)
@@ -798,7 +876,11 @@ class RepoCollector(Collector):
                     source_evidence=[ev("mcp-config", line, 0.8)],
                 )
             )
-        if _RE_MCP_SERVER_PY.search(line) or _RE_MCP_SERVER_JS.search(line):
+        if (
+            _RE_MCP_SERVER_PY.search(line)
+            or _RE_MCP_SERVER_JS.search(line)
+            or _RE_MCP_SERVER_OTHER.search(line)
+        ):
             found.append(
                 Service(
                     name=f"mcp-server@{rel}",
@@ -987,6 +1069,14 @@ class RepoCollector(Collector):
                             ],
                         )
                     )
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _sha(text: str) -> str:

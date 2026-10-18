@@ -2,6 +2,8 @@
 
 **Landscape review date:** 2026-07-28
 **Capability update:** 2026-07-31 (syntax-aware TypeScript/JavaScript analysis)
+**Capability update:** 2026-10-18 (bounded cross-file flow, evidence levels, identical-BOM scope, compare view)
+**Experiment:** 2026-10-18 (agent-audit and Cisco AI BOM run on the drift fixtures and negative controls)
 
 ## Executive conclusion
 
@@ -98,8 +100,28 @@ integrated, auditable workflow.
 
 ## Competitive landscape
 
+### Measured (2026-10-18)
+
+Produced by `benchmark/competitors/compare.py`; full output in
+`benchmark/reports/competitors-latest.md`.
+
+| Tool | What was run | Result |
+|---|---|---|
+| agent-audit 0.20.0 | `scan` (static) and `--baseline --fail-on-new` on 5 identical-BOM pairs | Candidate not flagged in 4 of 5; flagged in 1 only by a line-shift fingerprint change of a finding already present in the baseline. Reports the command-running tool as critical in both revisions. |
+| Cisco AI BOM (`cisco-aibom`) 1.10.0 | `analyze <dir> --output-format json`, no LLM configured | Exits 1: an LLM (`--llm-model`) is required. Not run with an LLM; no result claimed. |
+| Snyk Agent Scan / Snyk AI-BOM | — | Not run: both send data to Snyk and need an account. |
+
+What this supports: *"On these five identical-BOM pairs, a finding-diff
+baseline of a static agent scanner did not surface the new prompt-to-tool
+path."* What it does not support: any detection rate, any claim about the
+tools not run, or "cannot". The pairs are this project's own fixtures.
+
+### Documentation review (2026-07-28)
+
 This table compares publicly documented capabilities, not private roadmaps or
-undocumented implementation details.
+undocumented implementation details. Apart from the measured rows above, none
+of these tools has been run, so no row states that a tool *cannot* do
+something. Present it that way.
 
 | Project | Publicly documented strength | AIBOM Inspector positioning |
 |---|---|---|
@@ -137,14 +159,19 @@ Avoid:
 - "The only repository-wide AIBOM."
 - "The only AIBOM attack-path tool."
 - "The first agent taint analyzer" or "the only toxic-flow scanner."
-- "Full reachability" or "complete taint analysis." Current analysis is bounded
-  and same-file.
+- "Full reachability" or "complete taint analysis." Current analysis is
+  cross-file but bounded to the statically resolvable import subset, 4 call
+  boundaries and a visit budget; everything else is `unknown`.
 - "Zero false positives" beyond the exact checked-in benchmark set.
 - "A complete TypeScript/JavaScript parser." It is a deliberately bounded subset
   parser: it models bindings, calls, members, objects, templates, and function
   bodies, and skips type-level syntax. It is tolerant, not spec-compliant.
-- "Cross-file TypeScript taint." JS/TS flow tracing is same-file, exactly like
-  the Python analysis; a tool defined in another module is not followed.
+- "Whole-program" or "framework-complete" taint. Cross-file flow covers
+  relative imports, barrels, namespace imports and tsconfig `paths` (TS) and
+  absolute/relative imports (Python); dependency injection, methods on
+  objects, dynamic imports and code in dependencies are not followed.
+- "Critical" for a path that is not `proven_static`. Potential paths are
+  capped at High by construction; say "potential" out loud in the demo.
 
 ## Suggested Black Hat abstract paragraph
 
@@ -177,25 +204,29 @@ Demo sequence:
    `generateText({ system })`, the binding is `tools: { runDiagnostic: tool(…) }`,
    and the operation is `execSync(command)` — the same reasoning, a different
    ecosystem, and no npm install.
-5. The drift demo is a CLI capability: `aibom demo` runs the Python and
-   TypeScript comparisons offline — no URL, API key, or network needed. The web
-   UI covers single-revision scans only.
+5. The cross-file version of the same story is in
+   [blackhat-asia-demo.md](blackhat-asia-demo.md): four files, identical BOM,
+   shown in the CLI (`aibom demo`) and in the web UI's **Compare revisions**
+   panel.
 
 ## Evidence still needed before the talk
 
-- Expand the public benchmark from **six** repositories to at least 20,
-  including mixed-role prompt cases. (Was two; `vercel/ai-chatbot`,
-  `expressjs/express`, `psf/requests`, and `encode/httpx` were curated
-  2026-07-31.)
-- Close the TypeScript recall gap the corpus exposed: model ids declared in a
-  data structure and resolved through `gateway.languageModel(id)` are not
-  followed, giving public-corpus recall of 0.79 for TypeScript vs 1.00 for
-  Python.
+- ~~Expand the public benchmark to at least 20~~ — 20 pinned repositories
+  (2026-10-18); first run on the unseen cases P 0.913 / R 0.661, frozen.
+  Small repositories only; large frameworks are still unmeasured.
+- ~~Close the TypeScript recall gap~~ — gateway/catalog model resolution
+  shipped 2026-10-18 (TypeScript public-corpus recall 0.79 -> 1.00 on the same,
+  now-overfit corpus; a fresh corpus is needed to measure it independently).
+- ~~Cross-file flow~~ — shipped 2026-10-18 for Python and TypeScript, bounded.
+- Re-verify the competitive table by running each tool against the same pinned
+  corpus — agent-audit done and Cisco AI BOM probed (2026-10-18, *Measured*
+  above); Cisco with an LLM and the Snyk tools still need an account/key and
+  explicit approval to upload code.
 - ~~Add JavaScript/TypeScript syntax-aware prompt-flow analysis~~ — shipped
   2026-07-31 (`javascript.prompt-flow.ast`).
 - ~~Measure JS/TS precision separately from Python~~ — shipped 2026-07-31
   (`## By language` in the benchmark report).
 - Measure drift precision on real pull requests, not only synthetic revisions.
-- Publish a pinned comparison corpus and commands so competitors and reviewers
-  can reproduce the capability matrix.
+- ~~Publish a pinned comparison corpus and commands~~ —
+  `benchmark/competitors/compare.py` with the pinned corpus (2026-10-18).
 - Keep the novelty claim dated. This market changes quickly.
