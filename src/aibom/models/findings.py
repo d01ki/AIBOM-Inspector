@@ -73,6 +73,10 @@ class Finding(BaseModel):
     sink_kind: str | None = None
     trust_boundary: str | None = None
     data_flow_path: list[ResolutionStep] = Field(default_factory=list)
+    evidence_level: str | None = Field(
+        default=None,
+        description="For path findings: proven_static | potential. Independent of severity.",
+    )
 
 
 class CategoryScore(BaseModel):

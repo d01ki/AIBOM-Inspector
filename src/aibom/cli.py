@@ -613,8 +613,9 @@ def diff_scans(
         _render_drift(report)
     if output is not None:
         _write_or_exit(output, report.model_dump_json(indent=2), "AIBOM drift report")
+    # An `unknown` path change is shown but never gates: it is not a proof.
     if threshold is not None and any(
-        change.severity.rank >= threshold.rank for change in report.changes
+        change.gates and change.severity.rank >= threshold.rank for change in report.changes
     ):
         raise typer.Exit(code=1)
 
@@ -875,6 +876,24 @@ def _render_drift(report: DriftReport) -> None:
         f"\n[bold]AIBOM behavioral drift:[/bold] {len(report.changes)} change(s)\n"
         f"[dim]{report.baseline_target} -> {report.candidate_target}[/dim]"
     )
+    bom = report.bom
+    if bom is not None:
+        scope = ", ".join(bom.compared_types) or "no components"
+        if bom.identical:
+            console.print(
+                f"[green]Component BOM unchanged[/green] "
+                f"[dim](compared {bom.candidate_components} components: {scope}; "
+                "prompts are compared as paths)[/dim]"
+            )
+        else:
+            console.print(
+                f"[yellow]Component BOM changed[/yellow] [dim](+{len(bom.added)} "
+                f"-{len(bom.removed)} ~{len(bom.changed)}; compared: {scope})[/dim]"
+            )
+    if report.security_boundary_changed:
+        console.print("[bold red]Security boundary changed[/bold red]")
+    else:
+        console.print("[green]Security boundary unchanged[/green]")
     if not report.changes:
         console.print("[green]No AI supply-chain or trust-boundary drift detected.[/green]")
         return
@@ -887,13 +906,38 @@ def _render_drift(report: DriftReport) -> None:
     for change in report.changes:
         evidence = change.after_evidence or change.before_evidence
         location = evidence[0].location() if evidence else ""
+        level = _EVIDENCE_LABEL.get(change.evidence_level or "")
         table.add_row(
-            f"[{_SEVERITY_STYLE[change.severity]}] {change.severity.value} [/]",
+            f"[{_SEVERITY_STYLE[change.severity]}] {change.severity.value} [/]"
+            + (f"\n[dim]{level}[/dim]" if level else ""),
             change.kind.value,
             f"{change.title}\n[dim]{change.description}[/dim]",
             location,
         )
     console.print(table)
+    for change in report.changes:
+        nodes = change.details.get("nodes") or []
+        if change.kind.value not in {"impact_path_added", "impact_path_unresolved"} or not nodes:
+            continue
+        hops = " -> ".join(
+            f"{node['role']}"
+            + (f" {node['file']}:{node['line']}" if node.get("file") else "")
+            + ("" if node.get("status") == "proven_static" else f" [{node.get('status')}]")
+            for node in nodes
+        )
+        console.print(f"[bold]{change.after_name}[/bold] [dim]{hops}[/dim]")
+    console.print(
+        "[dim]Evidence level is independent of severity: 'proven statically' means every "
+        "hop was resolved, 'potential' relied on an assumption, and 'unknown' never fails "
+        "--fail-on.[/dim]"
+    )
+
+
+_EVIDENCE_LABEL = {
+    "proven_static": "proven statically",
+    "potential": "potential",
+    "unknown": "unknown",
+}
 
 
 def _render_impacts(paths: list[ImpactPath], *, empty_note: bool = True) -> None:
@@ -906,14 +950,15 @@ def _render_impacts(paths: list[ImpactPath], *, empty_note: bool = True) -> None
         show_lines=True,
     )
     table.add_column("Sev", style="bold")
-    table.add_column("Proven path")
+    table.add_column("Path")
     table.add_column("Potential consequence")
     table.add_column("Evidence", style="dim")
     for path in paths:
         models = ", ".join(path.model_names) or "unresolved model"
         route = (
             f"{path.source_kind} -> privileged instructions -> {models} -> "
-            f"{', '.join(path.tool_names)}"
+            f"{', '.join(path.tool_names)}\n[dim]{_EVIDENCE_LABEL[path.evidence_level]}"
+            f"{' · cross-file' if path.cross_file else ''}[/dim]"
         )
         capability_evidence = [
             evidence

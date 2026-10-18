@@ -35,7 +35,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from aibom.detectors.flow import is_potential
 from aibom.inventory import Inventory
+from aibom.models.analysis import Reachability
 from aibom.models.entities import (
     Agent,
     Dataset,
@@ -416,6 +418,18 @@ def _prompt_component(prompt: Prompt, ctx: SbomContext) -> dict[str, Any]:
                 ),
             )
         )
+    if prompt.user_controlled is True:
+        potential = is_potential(prompt.data_flow_path) or (
+            prompt.usage.reachable is not Reachability.TRUE
+        )
+        props.append(
+            _prop(
+                "aibom:prompt_flow_evidence_level",
+                "potential" if potential else "proven_static",
+            )
+        )
+    if len({step.file for step in prompt.data_flow_path}) > 1:
+        props.append(_prop("aibom:prompt_flow_cross_file", "true"))
     for step in prompt.data_flow_path:
         location = f"{step.file}:{step.line}" if step.line is not None else step.file
         symbol = f" {step.symbol}" if step.symbol else ""

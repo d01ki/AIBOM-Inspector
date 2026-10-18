@@ -103,6 +103,8 @@ def _result(finding: Finding, rule_index: int) -> dict[str, Any]:
     fingerprint = _fingerprint(finding)
     if fingerprint:
         result["partialFingerprints"] = {"aibomFinding/v1": fingerprint}
+    if finding.evidence_level:
+        result["properties"] = {"aibom/evidenceLevel": finding.evidence_level}
     return result
 
 

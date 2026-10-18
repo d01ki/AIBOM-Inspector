@@ -21,6 +21,7 @@ from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
 from aibom.export.sarif import to_sarif
 from aibom.graph import build_graph
+from aibom.impact import build_impact_paths, build_unresolved_impacts
 from aibom.policy import production_ai_component_count, production_view
 from aibom.report.html import render_html
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
@@ -203,8 +204,20 @@ def _to_drift_payload(baseline: ScanResult, candidate: ScanResult) -> dict[str, 
         "drift": report.model_dump(),
         "baseline": _revision_summary(baseline),
         "candidate": _revision_summary(candidate),
-        "components_identical": _component_signature(baseline)
-        == _component_signature(candidate),
+        # Kept for API compatibility; `drift.bom` states the compared scope.
+        "components_identical": report.bom.identical if report.bom else False,
+        "baseline_paths": _paths_payload(baseline),
+        "candidate_paths": _paths_payload(candidate),
+    }
+
+
+def _paths_payload(result: ScanResult) -> dict[str, Any]:
+    """Impact paths (proven and potential) plus unresolved candidates, for the graph."""
+    return {
+        "impact": [path.model_dump(mode="json") for path in build_impact_paths(result.inventory)],
+        "unresolved": [
+            path.model_dump(mode="json") for path in build_unresolved_impacts(result.inventory)
+        ],
     }
 
 
@@ -217,15 +230,6 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": len(result.findings),
     }
-
-
-def _component_signature(result: ScanResult) -> list[list[str]]:
-    """Every non-prompt component, so 'same parts, new behavior' is checkable."""
-    return sorted(
-        [entity.type.value, entity.name, str(getattr(entity, "version", "") or "")]
-        for entity in result.inventory.entities
-        if entity.type.value != "prompt"
-    )
 
 
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
