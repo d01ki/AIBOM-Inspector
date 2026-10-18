@@ -273,3 +273,23 @@ def test_detector_can_be_disabled_by_stable_id(tmp_path: Path) -> None:
     )
     assert not _models(inventory)
     assert "python.openai.ast" not in inventory.stats.detectors_run
+
+
+def test_openai_agents_sdk_model_is_inventoried(tmp_path: Path) -> None:
+    from aibom.models.entities import Model, Service
+    from aibom.service import run_scan
+
+    (tmp_path / "app.py").write_text(
+        'from agents import Agent\n\nagent = Agent(name="a", model="gpt-4.1", instructions="x")\n',
+        encoding="utf-8",
+    )
+    entities = run_scan(tmp_path).inventory.entities
+    [model] = [e for e in entities if isinstance(e, Model)]
+    assert (model.name, model.provider) == ("gpt-4.1", "openai")
+    assert any(isinstance(e, Service) and e.name == "openai" for e in entities)
+
+    # A project's own `agents` package is not the OpenAI Agents SDK.
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "agents" / "__init__.py").write_text("class Agent: ...\n", encoding="utf-8")
+    entities = run_scan(tmp_path).inventory.entities
+    assert not [e for e in entities if isinstance(e, Model)]
