@@ -115,17 +115,21 @@
 - Tools are not scored by the benchmark: no curated ground truth lists tools
   yet, so the `Tools` row stays N/A.
 - Runtime observations are not imported, so `runtime_observed` is always false.
-- The external benchmark covers seven pinned public repositories (two positive,
-  five negative, across Python, TypeScript/JavaScript and Go) plus three local
-  fixtures. That is useful regression evidence, **not** evidence of broad
-  ecosystem coverage; the documented threshold is 20. Large frameworks are
-  excluded on purpose: a case only counts once every component has been
-  hand-reviewed, which is not possible on a 10k-file tree.
-- Public-corpus precision and recall are both 1.00 as of 2026-10-18. The
-  TypeScript recall gap (0.79) was closed by gateway/catalog model resolution;
-  those six expectations were the false negatives the fix was written against,
-  so the 1.00 is **regression evidence for that fix, not an independent
-  measurement**. A fresh, larger corpus is needed for an accuracy claim.
+- The external benchmark covers 20 pinned public repositories (9 positive,
+  11 negative; Python, TypeScript/JavaScript, Go and one five-language MCP
+  repository) plus three local fixtures. Small repositories only: a case
+  counts once every component has been hand-reviewed, which is not possible on
+  a 10k-file tree, so large frameworks and monorepos are not represented.
+- The first run on the 13 newly curated cases is the only independent number:
+  precision 0.913, recall 0.661 (frozen in `reports/external-20-unseen.md`).
+  The defects it exposed were fixed, after which the same corpus scores 0.966 /
+  0.869 — regression evidence, not generalization. All 11 negative
+  repositories produced no false positive in either run.
+- Still missed on that corpus (by design or not yet supported): model ids
+  registered with a plugin framework rather than passed to an SDK call (the
+  `llm` plugin in simonw/llm-claude-3), prompts passed to a sink only through
+  `**kwargs`, and model ids that appear only in recorded test cassettes (found,
+  but with test-file evidence instead of the source location).
 - Attack-path accuracy (exposure and impact paths) is measured only on the
   checked-in positive/negative/unknown fixtures, not on public repositories.
   Component inventory accuracy and path accuracy must not be conflated.

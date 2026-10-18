@@ -32,14 +32,19 @@ the unit tests (`tests/test_lockfiles.py`), not by this corpus.
 - A checked-in synthetic fixture validates the harness but is not evidence of
   external-repository accuracy.
 
-The checked-in external report (2026-10-18) covers seven manually reviewed,
-commit-pinned repositories — two positive (Python, TypeScript) and five
-negative (Python, JavaScript, Go). It records precision 1.0000, recall 1.0000
-and F1 1.0000 with 39 true positives, no false positives and no false
-negatives. The previous TypeScript misses (gateway-routed and catalog-declared
-model ids in `vercel/ai-chatbot`) were fixed against those same expectations,
-so the corpus is now regression evidence for that fix rather than an
-independent measurement.
+The external corpus (2026-10-18) has 20 manually reviewed, commit-pinned
+repositories: 9 positive and 11 negative. Ground truth for the 13 newest
+cases was written before the scanner ran on them, and that first run is
+frozen:
+
+| Run | Repos | Precision | Recall | F1 | TP | FP | FN |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| First run on 13 unseen cases + 7 earlier (frozen: `reports/external-20-unseen.md`) | 20 | 0.913 | 0.661 | 0.767 | 84 | 8 | 43 |
+| After fixing what that run exposed (`reports/external-latest.md`) | 20 | 0.966 | 0.869 | 0.915 | 113 | 4 | 17 |
+
+Corrections to ground truth after the first run are limited to curation
+mistakes against rules written down beforehand, and each is recorded in the
+case's `notes` (see `benchmark/README.md`, *Protocol*).
 
 ## Inventory accuracy vs path accuracy
 

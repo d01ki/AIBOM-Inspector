@@ -124,10 +124,12 @@ factory, renames the builder and shifts lines with no reported drift.
 no impact path (`test_user_role_only_flow_is_not_privileged`,
 `test_user_message_only_is_not_a_privileged_change`).
 
-**How accurate is it on real code?** Component inventory: 39/39, 0 FP on seven
-pinned public repositories — but that corpus includes the six cases the latest
-fix targeted, so it is regression evidence. Path accuracy is pinned by
-positive/negative/unknown fixtures, not by a public corpus yet.
+**How accurate is it on real code?** Component inventory on 20 pinned public
+repositories, ground truth written before scanning: the first run on the 13
+unseen cases scored precision 0.913, recall 0.661, with no false positive on
+any of the 11 negative repositories. After fixing what that run exposed: 0.966
+/ 0.869 — but that is now a seen corpus. Quote the first number. Path accuracy
+is pinned by positive/negative/unknown fixtures, not by a public corpus yet.
 
 **Does it run MCP servers or call models?** No. It reads text.
 

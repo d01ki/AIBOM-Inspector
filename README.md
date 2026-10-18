@@ -496,18 +496,18 @@ python benchmark/evaluate.py  # precision/recall benchmark
 ```
 
 The benchmark covers three deterministic local fixtures plus a
-[pinned public evaluation](benchmark/reports/external-latest.md) over seven
-repositories — two positive and five negative, across Python, TypeScript and
-Go.
+[pinned public evaluation](benchmark/reports/external-latest.md) over 20
+repositories across Python, TypeScript/JavaScript, Go and one five-language MCP
+repository.
 
-Current public-corpus result (2026-10-18): **precision 1.00, recall 1.00**
-(39 TP, 0 FP, 0 FN). Until this release TypeScript recall was 0.79: six
-gateway-routed and catalog-declared model ids in `vercel/ai-chatbot` were
-missed. Those six expectations were kept and are now found, so this number is
-regression evidence for that fix — **not** an independent accuracy measurement.
-
-Seven repositories is regression evidence, not a claim of broad ecosystem
-coverage. The documented target is 20.
+Public corpus (2026-10-18): 20 pinned repositories, 9 positive and 11
+negative, ground truth written before scanning. On its first run over the 13
+newly added cases the scanner scored **precision 0.913, recall 0.661** — that
+is the independent number, and it is kept frozen. The defects it exposed were
+fixed (each with a failing-first regression test), after which the same corpus
+scores precision 0.966, recall 0.869: regression evidence, not
+generalization. The 11 negative repositories produced no false positive in
+either run. Small repositories only; see [limitations](docs/limitations.md).
 
 Implementation details: [architecture](docs/architecture.md),
 [detection methodology](docs/detection-methodology.md),

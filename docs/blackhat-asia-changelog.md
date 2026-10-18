@@ -35,7 +35,7 @@ tool capability graph (see `git log`).
 ```bash
 uv run ruff check .   # All checks passed!
 uv run mypy           # Success: no issues found in 64 source files
-uv run pytest         # 404 passed, 1 skipped (396 before the P1 tool graph)
+uv run pytest         # 419 passed, 1 skipped
 ```
 
 Before: 340 passed. The skipped test checks that the scanner does not follow
@@ -69,6 +69,26 @@ report byte for byte. **Caveat:** the six fixed false negatives are the
 expectations the fix targeted, so the "after" column is regression evidence,
 not an independent accuracy claim. The local fixture benchmark
 (`python benchmark/evaluate.py`) is unchanged: 51 TP, 0 FP, 0 FN.
+
+### Component inventory — 20-repository corpus (P1)
+
+Thirteen repositories were added (seven positive, six negative), ground truth
+written before scanning. Protocol and per-case notes: `benchmark/README.md`.
+
+| Run | Precision | Recall | F1 | TP / FP / FN |
+|---|---:|---:|---:|---:|
+| First run, frozen (`reports/external-20-unseen.md`) | 0.913 | 0.661 | 0.767 | 84 / 8 / 43 |
+| After the fixes it exposed (`reports/external-latest.md`) | 0.966 | 0.869 | 0.915 | 113 / 4 / 17 |
+
+The first row is the only independent measurement. Fixes it led to:
+semicolon-free JS imports and `as T[]` casts swallowing statements (parser
+ASI), MCP clients read as servers, Go/Ruby/Rust MCP servers, OpenAI
+`parse`/`stream`/thread-message sinks, SDK clients imported from another
+module, `RealtimeAgent`, `@ai-sdk` provider factories, Python model
+declaration lines, manifest line attribution, three allowlist gaps. Each has
+a regression test that fails before the fix. Remaining misses are documented
+in [limitations](limitations.md) (plugin-registered models, `**kwargs`
+prompts, cassette-only model evidence).
 
 ### Path behavior — fixtures
 
@@ -106,10 +126,9 @@ Overhead of the project index and cross-file tracing: within ~8%.
 
 ## Not done (explicitly)
 
-- **P1 — corpus of 20+ repositories and competitor comparison.** Not done.
-  The corpus is still seven repositories, and the competitive table in
+- **P1 — competitor comparison.** Not done. The competitive table in
   [novelty-positioning](novelty-positioning.md) is a documentation review,
-  not an experiment; no competitor tool was run.
+  not an experiment; no competitor tool was run against the corpus.
 - **P2 — runtime evidence.** Design only: [runtime-evidence-design](runtime-evidence-design.md).
 - Docker image build was not re-run in this environment (Docker daemon
   unavailable). The equivalent install path was verified: the wheel built
