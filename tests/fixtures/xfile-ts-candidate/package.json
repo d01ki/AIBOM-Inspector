@@ -1,0 +1,10 @@
+{
+  "name": "xfile-ts-demo",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@ai-sdk/openai": "1.3.22",
+    "ai": "4.3.16",
+    "zod": "3.25.0"
+  }
+}
