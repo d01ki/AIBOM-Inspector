@@ -49,8 +49,6 @@ MAX_TRACE_STEPS = 4_000
 _MAX_REEXPORT_HOPS = 6
 
 _JS_EXTENSIONS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
-_LINE_COMMENT = re.compile(r"(?m)(^|[^:\"'])//.*$")
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 
 
@@ -120,9 +118,7 @@ class ProjectIndex:
 
     def load_tsconfig(self, text: str, directory: str = "") -> None:
         """Read ``baseUrl`` and ``paths`` from a tsconfig/jsconfig, if parseable."""
-        cleaned = _TRAILING_COMMA.sub(
-            r"\1", _LINE_COMMENT.sub(r"\1", _BLOCK_COMMENT.sub("", text))
-        )
+        cleaned = _TRAILING_COMMA.sub(r"\1", _strip_json_comments(text))
         try:
             document = json.loads(cleaned)
         except ValueError:
@@ -383,6 +379,33 @@ class ProjectIndex:
 
 
 # -- helpers ------------------------------------------------------------------
+
+
+def _strip_json_comments(text: str) -> str:
+    """Remove ``//`` and ``/* */`` comments outside strings (tsconfig is JSONC).
+
+    ``"@/*"`` and ``"**/*.ts"`` are strings, not comment openers.
+    """
+    out: list[str] = []
+    index, length = 0, len(text)
+    while index < length:
+        char = text[index]
+        if char == '"':
+            end = index + 1
+            while end < length and text[end] != '"':
+                end += 2 if text[end] == "\\" else 1
+            out.append(text[index : end + 1])
+            index = end + 1
+        elif text.startswith("//", index):
+            newline = text.find("\n", index)
+            index = length if newline < 0 else newline
+        elif text.startswith("/*", index):
+            close = text.find("*/", index + 2)
+            index = length if close < 0 else close + 2
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
 
 
 def js_returns(function: FunctionNode) -> list[Node]:

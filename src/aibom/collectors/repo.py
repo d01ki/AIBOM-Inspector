@@ -39,6 +39,7 @@ from aibom.models.entities import (
 )
 from aibom.models.evidence import Evidence
 from aibom.models.signals import RiskSignal
+from aibom.tools import link_tools
 
 # Directories that never contain first-party AI supply-chain signal worth scanning.
 _IGNORE_DIRS = {
@@ -351,6 +352,8 @@ class RepoCollector(Collector):
                 self._detect_weight_file(inventory, path, rel)
             if self._is_text_file(path):
                 self._scan_text_file(inventory, path, rel)
+        # Bindings and steerability span files, so tools are graded last.
+        link_tools(inventory)
 
     # -- project index ---------------------------------------------------------
 

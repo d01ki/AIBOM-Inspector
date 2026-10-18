@@ -18,7 +18,7 @@ from aibom.detectors.flow import is_potential
 from aibom.exposure import ExposurePath, build_exposure_paths, prompt_slots
 from aibom.impact import ImpactPath, build_impact_paths, build_unresolved_impacts
 from aibom.models.analysis import Reachability
-from aibom.models.entities import Agent, Entity, EntityType, Model, Package, Prompt, Service
+from aibom.models.entities import Agent, Entity, EntityType, Model, Package, Prompt, Service, Tool
 from aibom.models.evidence import Evidence
 from aibom.models.findings import Finding, Severity
 from aibom.service import ScanResult
@@ -33,6 +33,7 @@ class DriftKind(str, Enum):
     IMPACT_PATH_REMOVED = "impact_path_removed"
     IMPACT_PATH_CHANGED = "impact_path_changed"
     IMPACT_PATH_UNRESOLVED = "impact_path_unresolved"
+    TOOL_REACHABILITY_ESCALATED = "tool_reachability_escalated"
     PROMPT_CONTENT_CHANGED = "prompt_content_changed"
     PROMPT_TARGET_CHANGED = "prompt_target_changed"
     TRUST_BOUNDARY_CHANGED = "trust_boundary_changed"
@@ -115,6 +116,7 @@ def compare_scan_results(baseline: ScanResult, candidate: ScanResult) -> DriftRe
     changes.extend(_compare_exposures(baseline, candidate))
     changes.extend(_compare_prompts(baseline, candidate))
     changes.extend(_compare_entities(baseline, candidate))
+    changes.extend(_compare_tools(baseline, candidate, changes))
     changes.extend(_compare_findings(baseline, candidate))
     changes.sort(key=lambda change: (-change.severity.rank, change.kind.value, change.id))
 
@@ -142,6 +144,7 @@ _BOUNDARY_KINDS = {
     DriftKind.IMPACT_PATH_ADDED,
     DriftKind.IMPACT_PATH_CHANGED,
     DriftKind.TRUST_BOUNDARY_CHANGED,
+    DriftKind.TOOL_REACHABILITY_ESCALATED,
 }
 
 
@@ -774,7 +777,87 @@ def _security_fields(entity: Entity) -> dict[str, Any]:
             "tools": sorted(entity.tools),
             "model_refs": sorted(entity.model_refs),
         }
+    if isinstance(entity, Tool):
+        # The tool's code, not its reachability: state is behavior and is
+        # compared by `_compare_tools`, so an identical BOM stays identical.
+        return {"framework": entity.framework, "capabilities": _tool_signature(entity)}
     return {}
+
+
+def _tool_signature(tool: Tool) -> list[str]:
+    return sorted(
+        f"{item.kind}:{item.operation}:{','.join(item.controlled_parameters)}"
+        for item in tool.capabilities
+    )
+
+
+def _compare_tools(
+    baseline: ScanResult, candidate: ScanResult, earlier: list[DriftChange]
+) -> list[DriftChange]:
+    """A tool newly reachable from untrusted input, by registration or binding.
+
+    Tools are matched by name and file, then by name and capability signature
+    (so moving a tool is not a change).  A bound tool already reported as part
+    of a new impact path is not reported twice.
+    """
+    before = [e for e in baseline.inventory.entities if isinstance(e, Tool)]
+    after = [e for e in candidate.inventory.entities if isinstance(e, Tool)]
+    covered = {
+        name
+        for change in earlier
+        if change.kind is DriftKind.IMPACT_PATH_ADDED
+        for name in change.details.get("tools", [])
+    }
+    by_key = {tool.natural_key(): tool for tool in before}
+    by_shape = {(tool.tool_name, tuple(_tool_signature(tool))): tool for tool in before}
+    changes: list[DriftChange] = []
+    for tool in after:
+        old = by_key.get(tool.natural_key()) or by_shape.get(
+            (tool.tool_name, tuple(_tool_signature(tool)))
+        )
+        old_state = old.state if old is not None else "absent"
+        if tool.state != "potentially_reachable" or old_state == tool.state:
+            continue
+        if tool.tool_name in covered:
+            continue
+        worst = max(
+            (Severity(item.severity) for item in tool.capabilities),
+            key=lambda item: item.rank,
+            default=Severity.MEDIUM,
+        )
+        # Registration proves who chooses the arguments, not that an attack
+        # works, so this never reaches Critical on its own.
+        severity = Severity.HIGH if worst.rank >= Severity.HIGH.rank else Severity.MEDIUM
+        operations = ", ".join(dict.fromkeys(item.impact for item in tool.capabilities))
+        changes.append(
+            _change(
+                DriftKind.TOOL_REACHABILITY_ESCALATED,
+                severity,
+                "Tool newly reachable from untrusted input",
+                (
+                    f"{tool.framework or 'agent'} tool '{tool.tool_name}' moved from "
+                    f"{old_state} to {tool.state}; a caller-controlled parameter can "
+                    f"{operations or 'reach a recognized operation'}."
+                ),
+                entity_type=EntityType.TOOL.value,
+                before_id=old.id if old is not None else None,
+                after_id=tool.id,
+                before_name=old.name if old is not None else None,
+                after_name=tool.name,
+                after_evidence=[
+                    *tool.source_evidence,
+                    *(e for item in tool.capabilities for e in item.source_evidence),
+                ],
+                evidence_level="proven_static",
+                details={
+                    "before_state": old_state,
+                    "after_state": tool.state,
+                    "trust_boundary": tool.trust_boundary,
+                    "capabilities": _tool_signature(tool),
+                },
+            )
+        )
+    return changes
 
 
 def _finding_key(finding: Finding) -> tuple[str, str]:

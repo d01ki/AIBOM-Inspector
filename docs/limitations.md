@@ -96,10 +96,24 @@
   operation; it does not prove that a model will select the tool, that an
   attacker can produce the required arguments, or that runtime exploitation
   succeeds. The UI and finding text label the consequence as potential.
-- MCP capability analysis is not implemented; MCP inventory remains
-  compatibility-detector output. MCP tool handlers are treated as untrusted
-  entrypoints (`tool_input`), but an MCP tool's own operations are not yet
-  joined into a capability graph.
+- Tool inventory and the MCP capability graph cover: Python `@function_tool`,
+  LangChain `@tool`, MCP `@<server>.tool()` (in a module importing `mcp` or
+  `fastmcp`); TypeScript `server.tool(...)` / `server.registerTool(...)` (in a
+  module importing `@modelcontextprotocol/sdk`) and `tool({...})` from `ai` or
+  `@openai/agents`, including `const make = (deps) => tool({...})` factories.
+  Not covered: `server.setRequestHandler(CallToolRequestSchema, ...)` dispatch
+  tables, tools registered in a loop or from a registry object, MCP server
+  configuration (`mcpServers` JSON) mapped to the server code, and tool
+  descriptions/schemas (a description is never used as evidence of danger).
+- A registered MCP tool whose parameter reaches an operation is
+  `potentially_reachable` because the MCP client chooses its arguments;
+  authorization middleware, per-tool approval and client-side confirmation are
+  not modeled. Such a change is reported at most as High.
+- A binding is matched to a tool definition by name; with several tools of the
+  same name, only a capability-location match counts, otherwise the binding is
+  left unmatched.
+- Tools are not scored by the benchmark: no curated ground truth lists tools
+  yet, so the `Tools` row stays N/A.
 - Runtime observations are not imported, so `runtime_observed` is always false.
 - The external benchmark covers seven pinned public repositories (two positive,
   five negative, across Python, TypeScript/JavaScript and Go) plus three local

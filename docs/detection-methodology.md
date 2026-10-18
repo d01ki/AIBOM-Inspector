@@ -164,6 +164,27 @@ when a revision connects that path while the component set remains unchanged,
 `impact_path_unresolved` (never gated) when a privileged prompt with a
 steerable tool gains an input the tracer cannot resolve.
 
+## Tools and the MCP capability graph
+
+`python.tool-capability.ast` and `javascript.tool-capability.ast` record every
+tool definition as a `Tool` entity, bound or not, with the operations its own
+parameters are proven to reach (the same proof as impact paths, including
+helper descent and cross-file resolution). After collection, `link_tools`
+grades each one:
+
+| State | Meaning |
+|---|---|
+| `declared` | a tool definition no analyzed agent binds |
+| `registered` | registered on an MCP server: the client chooses the arguments |
+| `bound` | listed in an analyzed agent's `tools` |
+| `potentially_reachable` | an MCP tool with a parameter-controlled operation, or a bound tool whose agent's privileged instructions are proven user-controlled |
+| `unknown` | an MCP registration whose handler cannot be resolved |
+
+The state is behavior: it is excluded from the BOM-identity fields and drift
+reports a move to `potentially_reachable` as `tool_reachability_escalated`
+(High at most), unless a new impact path already covers the same tool.
+Descriptions and schemas are never used as evidence of danger.
+
 ## Gateway-routed and catalog-declared models (JS/TS)
 
 `javascript.model-catalog.ast` records the Vercel AI Gateway service at each

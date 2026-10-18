@@ -76,6 +76,7 @@ _TYPE_STYLE = {
     EntityType.SERVICE: "bold blue",
     EntityType.PACKAGE: "bold white",
     EntityType.LICENSE: "white",
+    EntityType.TOOL: "bold red",
 }
 
 _SEVERITY_STYLE = {

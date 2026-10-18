@@ -32,6 +32,7 @@ class EntityType(str, Enum):
     SERVICE = "service"
     PACKAGE = "package"
     LICENSE = "license"
+    TOOL = "tool"
 
 
 class RelationshipType(str, Enum):
@@ -202,6 +203,46 @@ class Agent(Entity):
     framework: str | None = Field(default=None, description="e.g. 'langchain', 'langgraph'.")
     tools: list[str] = Field(default_factory=list)
     model_refs: list[str] = Field(default_factory=list)
+
+
+TOOL_STATES = ("unknown", "declared", "registered", "bound", "potentially_reachable")
+
+
+class Tool(Entity):
+    """A function exposed to a model: an agent tool or an MCP server tool.
+
+    ``state`` is a reachability ladder, each step a separate static fact:
+
+    * ``declared`` - decorated/constructed as a tool (``@function_tool``,
+      ``tool({...})``) but not bound by any analyzed agent;
+    * ``registered`` - registered on an MCP server, so any connected client
+      (and the model behind it) chooses the arguments;
+    * ``bound`` - listed in an analyzed agent constructor's ``tools``;
+    * ``potentially_reachable`` - untrusted input can steer it: an MCP tool
+      whose parameter reaches a recognized operation, or a bound tool whose
+      agent's privileged instructions are proven user-controlled;
+    * ``unknown`` - registered, but the handler could not be resolved.
+
+    ``state`` is behavior, not identity: it is excluded from the component
+    BOM comparison and compared as drift instead.
+    """
+
+    type: EntityType = EntityType.TOOL
+    tool_name: str = ""
+    framework: str | None = Field(
+        default=None, description="mcp | openai-agents | langchain | vercel-ai"
+    )
+    state: str = Field(default="declared", description=" | ".join(TOOL_STATES))
+    trust_boundary: str | None = Field(
+        default=None, description="Who supplies the arguments when reachable."
+    )
+    bound_by: list[str] = Field(
+        default_factory=list, description="Prompt sinks whose agent binds this tool."
+    )
+    capabilities: list[ToolCapability] = Field(
+        default_factory=list,
+        description="Operations a tool parameter is proven to reach.",
+    )
 
 
 class Service(Entity):

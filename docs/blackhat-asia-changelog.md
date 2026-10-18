@@ -21,9 +21,12 @@ produced by the commands listed with them; nothing is estimated.
 | Demo | same-file impact + drift | + five-step cross-file demo (CLI, API, UI) |
 | Web safety | URL/host/ref allowlists, timeout | + checkout size/file caps, no symlink checkout, no following symlinks out of the root |
 | Exports | — | evidence level in findings, SARIF result properties, CycloneDX `aibom:prompt_flow_evidence_level` / `_cross_file` |
+| Tools (P1) | only as names in a prompt's `tool_refs` | `Tool` entities for agent and MCP tools with a `declared → registered → bound → potentially_reachable` ladder (`unknown` when a handler cannot be resolved), proven capabilities, `INVOKES` edges from binding prompts, drift kind `tool_reachability_escalated`, CycloneDX `aibom:tool_*` |
+| tsconfig parsing | `/*` inside strings (`"@/*"`, `"**/*.ts"`) was stripped as a comment, losing `paths` in standard Next.js configs | string-aware JSONC comment stripping |
 
 Commits: `7f84d06` (P0-A), `c079411` (P0-B Python), `0a16127` (P0-B TS),
-`0de2f85` + `a54e225` (P0-C), `5407aae` + `05af2c3` (P0-D).
+`0de2f85` + `a54e225` (P0-C), `5407aae` + `05af2c3` (P0-D), then the P1
+tool capability graph (see `git log`).
 
 ## Measured results
 
@@ -31,8 +34,8 @@ Commits: `7f84d06` (P0-A), `c079411` (P0-B Python), `0a16127` (P0-B TS),
 
 ```bash
 uv run ruff check .   # All checks passed!
-uv run mypy           # Success: no issues found in 61 source files
-uv run pytest         # 396 passed, 1 skipped
+uv run mypy           # Success: no issues found in 64 source files
+uv run pytest         # 404 passed, 1 skipped (396 before the P1 tool graph)
 ```
 
 Before: 340 passed. The skipped test checks that the scanner does not follow
@@ -103,12 +106,6 @@ Overhead of the project index and cross-file tracing: within ~8%.
 
 ## Not done (explicitly)
 
-- **P1 — MCP / agent capability graph.** Not implemented. MCP tool handlers
-  remain untrusted *entrypoints*; MCP tool operations are not joined into
-  `declared → registered → bound → potentially reachable` states. The project
-  index and `_capabilities_in` helper descent are the intended building
-  blocks: a `@mcp.tool` / `server.tool(...)` handler can reuse the same
-  parameter-to-operation proof, with `registered` as its binding state.
 - **P1 — corpus of 20+ repositories and competitor comparison.** Not done.
   The corpus is still seven repositories, and the competitive table in
   [novelty-positioning](novelty-positioning.md) is a documentation review,

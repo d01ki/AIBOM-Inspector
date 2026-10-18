@@ -46,6 +46,7 @@ from aibom.models.entities import (
     Package,
     Prompt,
     Service,
+    Tool,
 )
 from aibom.models.evidence import Evidence
 from aibom.spdx import canonical_spdx, is_spdx
@@ -302,6 +303,8 @@ def _component(entity: Entity, ctx: SbomContext) -> dict[str, Any]:
         comp = _prompt_component(entity, ctx)
     elif isinstance(entity, Agent):
         comp = _agent_component(entity, ctx)
+    elif isinstance(entity, Tool):
+        comp = _tool_component(entity, ctx)
     elif isinstance(entity, Package):
         comp = _package_component(entity)
     else:
@@ -446,6 +449,29 @@ def _agent_component(agent: Agent, ctx: SbomContext) -> dict[str, Any]:
     _append_prop(props, "aibom:framework", agent.framework)
     if agent.tools:
         _append_prop(props, "aibom:tools", ",".join(agent.tools))
+    _dedupe_or_drop_props(comp)
+    return comp
+
+
+def _tool_component(tool: Tool, ctx: SbomContext) -> dict[str, Any]:
+    comp = _base_component("application", tool)
+    _apply_first_party_supplier(comp, ctx)
+    props: list[dict[str, str]] = comp.setdefault("properties", [])
+    props.append(_prop("aibom:kind", "tool"))
+    _append_prop(props, "aibom:tool_name", tool.tool_name)
+    _append_prop(props, "aibom:framework", tool.framework)
+    _append_prop(props, "aibom:tool_state", tool.state)
+    _append_prop(props, "aibom:tool_trust_boundary", tool.trust_boundary)
+    for capability in tool.capabilities:
+        props.append(
+            _prop(
+                "aibom:tool_capability",
+                (
+                    f"{capability.kind}:{capability.operation}:{capability.severity}:"
+                    f"params={','.join(capability.controlled_parameters)}"
+                ),
+            )
+        )
     _dedupe_or_drop_props(comp)
     return comp
 

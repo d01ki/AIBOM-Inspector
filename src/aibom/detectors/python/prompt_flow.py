@@ -1021,21 +1021,26 @@ def _is_recognized_tool(
     module: PythonModule,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> bool:
+    return tool_framework(module, node) is not None
+
+
+def tool_framework(
+    module: PythonModule,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str | None:
+    """The framework a decorator registers ``node`` with as a tool, if any."""
     for decorator in node.decorator_list:
         target = decorator.func if isinstance(decorator, ast.Call) else decorator
         qualified = module.qualified_name(target) or ""
         if qualified == "agents.function_tool":
-            return True
-        if qualified in {
-            "langchain_core.tools.tool",
-            "langchain.tools.tool",
-            "mcp.tool",
-            "fastmcp.tool",
-        }:
-            return True
+            return "openai-agents"
+        if qualified in {"langchain_core.tools.tool", "langchain.tools.tool"}:
+            return "langchain"
+        if qualified in {"mcp.tool", "fastmcp.tool"}:
+            return "mcp"
         if qualified.endswith(".tool") and module.has_import("mcp", "fastmcp"):
-            return True
-    return False
+            return "mcp"
+    return None
 
 
 def _classify_capability(

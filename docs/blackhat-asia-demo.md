@@ -131,9 +131,11 @@ positive/negative/unknown fixtures, not by a public corpus yet.
 
 **Does it run MCP servers or call models?** No. It reads text.
 
-**Is MCP capability analysis included?** Not yet — MCP tool handlers are
-untrusted entrypoints, but MCP tool operations are not joined into the
-capability graph. Do not demo it as a feature.
+**Is MCP capability analysis included?** A first version: MCP and agent tools
+are inventoried with a reachability ladder, and a registered MCP tool whose
+parameter reaches a command is `potentially_reachable` (High at most). It does
+not model MCP dispatch tables, client-side approval, or server configuration;
+keep it out of the main demo and mention it as scope.
 
 ## If something goes wrong on stage
 
