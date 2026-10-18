@@ -58,7 +58,7 @@ counterpart:
 | Prompt sinks | `generateText`/`streamText`/`generateObject`/`streamObject` (`ai`), `new Agent({instructions})` (`@openai/agents`), `chat.completions.create`, `responses.create`, `beta.assistants.create`, `messages.create`/`messages.stream` |
 | Roles | `system`/`prompt` options and `messages[].role` are separated; only `system`/`developer` count as privileged |
 | Sources | route-handler parameters, `request.json()`/`text()`/`formData()`, `req.body`/`query`/`params`/`headers`, `searchParams.get`, MCP tool parameters, `process.argv`/`env`, `fs` reads, retrieval and database calls |
-| Bindings | `tools: { name: tool({ execute }) }` (object map) and `tools: [boundTool]` (array), resolved through variable bindings |
+| Bindings | `tools: { name: tool({ execute }) }` (object map) and `tools: [boundTool]` (array), resolved through variable bindings and imports |
 | Operations | `child_process`, `fs`/`fs/promises` writes and deletes, `eval`/`new Function`/`vm`, state-changing `fetch`/`axios`, mailer sends |
 
 The same restrictions apply as in Python: the operation must sit inside an
@@ -99,8 +99,14 @@ arguments in OpenAI Responses, Chat Completions, Completions, and Assistants,
 plus Anthropic Messages and Completions. Direct message lists are split by role
 so untrusted user content does not taint an independent static system message.
 
-The bounded tracer follows same-file assignments, concatenation, f-strings,
-containers, subscripts, and wrapper-call arguments. Recognized sources include
+The bounded tracer follows assignments, concatenation, f-strings, containers,
+subscripts, and call arguments. With the project index it crosses files: a
+parameter is bound to its resolved call sites, a call into a project function
+is traced through that function's returns (so a helper returning only literals
+sanitizes), and an imported constant is followed to its definition. Taint
+through a call outside the index is kept but marked `unresolved_call`, which
+makes any resulting impact path `potential` instead of proven (see
+[architecture](architecture.md#evidence-levels)). Recognized sources include
 HTTP request/route parameters, CLI input, environment variables, WebSocket
 messages, files, retrieved documents, and database results. Each prompt records
 the source kind, sink kind, trust boundary, model reference, and sanitized flow
@@ -143,11 +149,33 @@ undecorated functions, and fixed operations such as
 `subprocess.run(["uptime"])`. Evidence stores the binding, parameter name,
 sanitized qualified operation, and line—not argument values.
 
+The tool may live in another module: an imported tool, an imported `TOOLS`
+list, a barrel re-export or (TS) a one-level tool factory is resolved through
+the project index, and the operation may sit in a project helper the tool
+passes its parameter to (up to three helper levels). Evidence then contains
+both the helper call site and the operation, each with its own file.
+
 `AIBOM-IMPACT-001` is emitted instead of the generic prompt-exposure finding
 for the same root path, avoiding duplicate score deductions. `aibom diff`
-compares stable prompt anchors and capability signatures; it emits
-`impact_path_added` when a revision connects that path while
-the component set remains unchanged.
+compares stable prompt anchors, then a semantic key that ignores files, lines
+and function names, plus capability signatures; it emits `impact_path_added`
+when a revision connects that path while the component set remains unchanged,
+`impact_path_changed` when the bound surface or evidence level changes, and
+`impact_path_unresolved` (never gated) when a privileged prompt with a
+steerable tool gains an input the tracer cannot resolve.
+
+## Gateway-routed and catalog-declared models (JS/TS)
+
+`javascript.model-catalog.ast` records the Vercel AI Gateway service at each
+`gateway.languageModel(...)` / `gateway(...)` call (imported from `ai` or
+`@ai-sdk/gateway`). The model argument is resolved statically — literal,
+`const`, template without expressions, `+` concatenation, an object member,
+also through an import — and only then recorded as an *invoked* model, with
+evidence at both the call site and the declaration. Gateway-style ids
+(`vendor/model` with a known AI vendor) in a top-level catalog (`id`,
+`model`, `modelId` keys of object/array literals) or a `*model*` constant are
+recorded as *declared* only, and only when the codebase imports an AI SDK.
+A runtime-selected argument records the gateway, never a model.
 
 ## Usage classification
 
@@ -164,7 +192,9 @@ only. Runtime evidence is not yet ingested and therefore remains false.
 
 ## Reachability
 
-The initial call graph is same-file and bounded. It recognizes FastAPI/Flask-
+Reachability first uses the same-file call graph, then walks resolved
+cross-file callers (bounded) until an entrypoint is found; the recorded path
+names each hop as `file:function`. The same-file call graph is bounded. It recognizes FastAPI/Flask-
 style routes, router routes, CLI command decorators, task/tool decorators,
 common Lambda handler names, and `if __name__ == "__main__"` calls. Results are:
 
@@ -172,8 +202,8 @@ common Lambda handler names, and `if __name__ == "__main__"` calls. Results are:
 - `false`: supported entrypoints exist in the file, but no same-file path was found;
 - `unknown`: there is no supported entrypoint or analysis is insufficient.
 
-`false` must not be interpreted as globally unreachable until cross-file and
-dynamic dispatch analysis are implemented.
+`false` must not be interpreted as globally unreachable: dynamic dispatch,
+methods on objects and framework-generated routes are still invisible.
 
 ## Confidence
 

@@ -2,6 +2,7 @@
 
 **Landscape review date:** 2026-07-28
 **Capability update:** 2026-07-31 (syntax-aware TypeScript/JavaScript analysis)
+**Capability update:** 2026-10-18 (bounded cross-file flow, evidence levels, identical-BOM scope, compare view)
 
 ## Executive conclusion
 
@@ -99,7 +100,9 @@ integrated, auditable workflow.
 ## Competitive landscape
 
 This table compares publicly documented capabilities, not private roadmaps or
-undocumented implementation details.
+undocumented implementation details. It is a documentation review dated
+2026-07-28; none of these tools has yet been run against the pinned corpus, so
+no row states that a tool *cannot* do something. Present it that way.
 
 | Project | Publicly documented strength | AIBOM Inspector positioning |
 |---|---|---|
@@ -137,14 +140,19 @@ Avoid:
 - "The only repository-wide AIBOM."
 - "The only AIBOM attack-path tool."
 - "The first agent taint analyzer" or "the only toxic-flow scanner."
-- "Full reachability" or "complete taint analysis." Current analysis is bounded
-  and same-file.
+- "Full reachability" or "complete taint analysis." Current analysis is
+  cross-file but bounded to the statically resolvable import subset, 4 call
+  boundaries and a visit budget; everything else is `unknown`.
 - "Zero false positives" beyond the exact checked-in benchmark set.
 - "A complete TypeScript/JavaScript parser." It is a deliberately bounded subset
   parser: it models bindings, calls, members, objects, templates, and function
   bodies, and skips type-level syntax. It is tolerant, not spec-compliant.
-- "Cross-file TypeScript taint." JS/TS flow tracing is same-file, exactly like
-  the Python analysis; a tool defined in another module is not followed.
+- "Whole-program" or "framework-complete" taint. Cross-file flow covers
+  relative imports, barrels, namespace imports and tsconfig `paths` (TS) and
+  absolute/relative imports (Python); dependency injection, methods on
+  objects, dynamic imports and code in dependencies are not followed.
+- "Critical" for a path that is not `proven_static`. Potential paths are
+  capped at High by construction; say "potential" out loud in the demo.
 
 ## Suggested Black Hat abstract paragraph
 
@@ -177,9 +185,10 @@ Demo sequence:
    `generateText({ system })`, the binding is `tools: { runDiagnostic: tool(…) }`,
    and the operation is `execSync(command)` — the same reasoning, a different
    ecosystem, and no npm install.
-5. The drift demo is a CLI capability: `aibom demo` runs the Python and
-   TypeScript comparisons offline — no URL, API key, or network needed. The web
-   UI covers single-revision scans only.
+5. The cross-file version of the same story is in
+   [blackhat-asia-demo.md](blackhat-asia-demo.md): four files, identical BOM,
+   shown in the CLI (`aibom demo`) and in the web UI's **Compare revisions**
+   panel.
 
 ## Evidence still needed before the talk
 
@@ -187,10 +196,13 @@ Demo sequence:
   including mixed-role prompt cases. (Was two; `vercel/ai-chatbot`,
   `expressjs/express`, `psf/requests`, and `encode/httpx` were curated
   2026-07-31.)
-- Close the TypeScript recall gap the corpus exposed: model ids declared in a
-  data structure and resolved through `gateway.languageModel(id)` are not
-  followed, giving public-corpus recall of 0.79 for TypeScript vs 1.00 for
-  Python.
+- ~~Close the TypeScript recall gap~~ — gateway/catalog model resolution
+  shipped 2026-10-18 (TypeScript public-corpus recall 0.79 -> 1.00 on the same,
+  now-overfit corpus; a fresh corpus is needed to measure it independently).
+- ~~Cross-file flow~~ — shipped 2026-10-18 for Python and TypeScript, bounded.
+- Re-verify the competitive table by running each tool against the same pinned
+  corpus; the table below the line is a documentation review (2026-07-28),
+  not an experiment.
 - ~~Add JavaScript/TypeScript syntax-aware prompt-flow analysis~~ — shipped
   2026-07-31 (`javascript.prompt-flow.ast`).
 - ~~Measure JS/TS precision separately from Python~~ — shipped 2026-07-31

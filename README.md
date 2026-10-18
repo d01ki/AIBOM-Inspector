@@ -56,6 +56,17 @@ reports that user-controlled text now reaches the system prompt of an agent
 whose bound tool runs a shell command — a path that did not exist in the
 previous revision. That is what `aibom diff` gates on in CI.
 
+> **An AIBOM does not change. The attack surface does.**
+
+The chain may span files. In the bundled cross-file demo the route, the prompt
+builder, the agent factory and the tool live in four modules; the candidate
+revision changes one `return` line in the builder, and the report shows the
+new path hop by hop (`routes/api.py:11 -> prompts/builder.py:8 ->
+assistant/main.py:9 -> tools/executor.py:16`), next to the verdict
+*Component BOM unchanged* (and over which entity types). Every path is labelled
+**proven statically** or **potential** independently of its severity; only a
+proven path can be Critical, and an unresolved one is shown but never gates.
+
 Prompt text and tool arguments are never stored: only hashes and sanitized
 paths leave the scanner.
 
@@ -158,7 +169,7 @@ The dated, source-linked competitive analysis and claim boundaries are in
   dependency-free tolerant parser — no Node.js, no bundling, no transpiling,
   and the analyzed code is never executed
 - **Evidence & reachability** — declared/imported/instantiated/invoked states,
-  same-file entrypoint paths, confidence factors, stable detector IDs, and
+  bounded cross-file entrypoint paths, confidence factors, stable detector IDs, and
   production/test/example/docs source contexts. The complete inventory retains
   every context, while findings, score, graph, and behavioral paths default to
   production evidence so deliberately vulnerable fixtures do not score their
@@ -208,7 +219,8 @@ The dated, source-linked competitive analysis and claim boundaries are in
 - **Web app** — FastAPI backend (`aibom serve`) + single-page UI with an
   interactive risk-colored dependency graph, the minimum-elements conformance
   table, and the same exports as the CLI (HTML, CycloneDX, SARIF, inventory
-  JSON). Revision comparison is CLI/API only (`aibom diff`, `POST /api/diff`)
+  JSON), plus a **Compare revisions** panel (baseline vs candidate, BOM verdict
+  beside the security-boundary verdict, clickable path graph with file:line)
 - **Reproducible benchmark harness** — category precision/recall/F1 with
   explicit false-positive and false-negative reports, scored **per language**
   so Python results cannot mask TypeScript ones
@@ -406,9 +418,9 @@ aibom demo
 (a two-file FastAPI + OpenAI Agents fixture shipped with the tool: a request
 body reaches the agent's instructions, and the agent is bound to a tool that
 runs shell commands).
-After that, paste a repository URL for a normal scan. The UI scans one revision;
-comparing two revisions is a CLI and API capability (`aibom diff`,
-`POST /api/diff`). Without Docker:
+After that, paste a repository URL for a normal scan. **Compare revisions**
+runs the offline Python/TypeScript cross-file demos (and the fixed revision),
+or two refs of a public repository through `POST /api/diff`. Without Docker:
 
 ```bash
 pip install -e ".[server]"         # in the venv from "Install without Docker"
@@ -483,19 +495,18 @@ uv run mypy              # types
 python benchmark/evaluate.py  # precision/recall benchmark
 ```
 
-The benchmark covers two deterministic local fixtures (one Python, one
-TypeScript) plus a [pinned public evaluation](benchmark/reports/external-latest.md)
-over six repositories — two positive and four negative, across both language
-front ends.
+The benchmark covers three deterministic local fixtures plus a
+[pinned public evaluation](benchmark/reports/external-latest.md) over seven
+repositories — two positive and five negative, across Python, TypeScript and
+Go.
 
-Current public-corpus result: **precision 1.00** (no false positives anywhere,
-including a 163-file pure-JavaScript codebase) and **recall 0.85** — Python
-1.00, TypeScript 0.79. The six recall misses are listed in the report rather
-than trimmed from the ground truth; they are model ids declared in a data
-structure and resolved through an indirection, which the scanner does not
-follow yet.
+Current public-corpus result (2026-10-18): **precision 1.00, recall 1.00**
+(39 TP, 0 FP, 0 FN). Until this release TypeScript recall was 0.79: six
+gateway-routed and catalog-declared model ids in `vercel/ai-chatbot` were
+missed. Those six expectations were kept and are now found, so this number is
+regression evidence for that fix — **not** an independent accuracy measurement.
 
-Six repositories is regression evidence, not a claim of broad ecosystem
+Seven repositories is regression evidence, not a claim of broad ecosystem
 coverage. The documented target is 20.
 
 Implementation details: [architecture](docs/architecture.md),

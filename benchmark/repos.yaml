@@ -4,8 +4,8 @@ version: 2
 # immutable commit. The candidate lists below are NOT counted until curation is
 # complete - they record intent, not evidence.
 #
-# Status 2026-07-31: 6 public cases curated (2 positive, 4 negative) across both
-# language front ends. The documented target is 20; this is not there yet, and
+# Status 2026-10-18: 7 public cases curated (2 positive, 5 negative) across
+# Python, TypeScript/JavaScript and Go. The documented target is 20; this is not there yet, and
 # the shortfall is stated in docs/limitations.md rather than papered over.
 repositories:
   - repository: local/vulnerable-ai-app
@@ -54,6 +54,12 @@ public_repositories:
     commit: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
     language: python
     ground_truth: ground_truth_public/httpx.json
+    role: negative
+    enabled_by_default: false
+  - repository: gin-gonic/gin
+    commit: 34dac209ffb6ef85cc78c5d217bbb7ad001d68fd
+    language: go
+    ground_truth: ground_truth_public/gin.json
     role: negative
     enabled_by_default: false
 

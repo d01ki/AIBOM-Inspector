@@ -4,9 +4,9 @@ Repositories evaluated: 7
 
 | Category | Precision | Recall | F1 | TP | FP | FN |
 |---|---:|---:|---:|---:|---:|---:|
-| Overall | 1.0000 | 0.8462 | 0.9167 | 33 | 0 | 6 |
-| Models | 1.0000 | 0.2857 | 0.4444 | 2 | 0 | 5 |
-| Services | 1.0000 | 0.5000 | 0.6667 | 1 | 0 | 1 |
+| Overall | 1.0000 | 1.0000 | 1.0000 | 39 | 0 | 0 |
+| Models | 1.0000 | 1.0000 | 1.0000 | 7 | 0 | 0 |
+| Services | 1.0000 | 1.0000 | 1.0000 | 2 | 0 | 0 |
 | Prompts | 1.0000 | 1.0000 | 1.0000 | 25 | 0 | 0 |
 | Agents | N/A | N/A | N/A | 0 | 0 | 0 |
 | Tools | N/A | N/A | N/A | 0 | 0 | 0 |
@@ -21,13 +21,8 @@ Repositories evaluated: 7
 |---|---:|---:|---:|---:|---:|---:|---:|
 | go | 1 | N/A | N/A | N/A | 0 | 0 | 0 |
 | python | 4 | 1.0000 | 1.0000 | 1.0000 | 11 | 0 | 0 |
-| typescript | 2 | 1.0000 | 0.7857 | 0.8800 | 22 | 0 | 6 |
+| typescript | 2 | 1.0000 | 1.0000 | 1.0000 | 28 | 0 | 0 |
 
 ## Errors
 
-- False negative: `vercel/ai-chatbot` models `moonshotai/kimi-k2.5` at `lib/ai/models.ts:6`
-- False negative: `vercel/ai-chatbot` models `deepseek/deepseek-v3.2` at `lib/ai/models.ts:30`
-- False negative: `vercel/ai-chatbot` models `openai/gpt-oss-20b` at `lib/ai/models.ts:44`
-- False negative: `vercel/ai-chatbot` models `openai/gpt-oss-120b` at `lib/ai/models.ts:52`
-- False negative: `vercel/ai-chatbot` models `xai/grok-4.1-fast-non-reasoning` at `lib/ai/models.ts:60`
-- False negative: `vercel/ai-chatbot` services `vercel-ai-gateway` at `lib/ai/providers.ts:25`
+No mismatches in the evaluated cases.

@@ -2,12 +2,12 @@
   "schema_version": 2,
   "repository_count": 7,
   "overall": {
-    "true_positives": 33,
+    "true_positives": 39,
     "false_positives": 0,
-    "false_negatives": 6,
+    "false_negatives": 0,
     "precision": 1.0,
-    "recall": 0.8462,
-    "f1": 0.9167
+    "recall": 1.0,
+    "f1": 1.0
   },
   "languages": {
     "go": {
@@ -29,31 +29,31 @@
       "repository_count": 4
     },
     "typescript": {
-      "true_positives": 22,
+      "true_positives": 28,
       "false_positives": 0,
-      "false_negatives": 6,
+      "false_negatives": 0,
       "precision": 1.0,
-      "recall": 0.7857,
-      "f1": 0.88,
+      "recall": 1.0,
+      "f1": 1.0,
       "repository_count": 2
     }
   },
   "categories": {
     "models": {
-      "true_positives": 2,
+      "true_positives": 7,
       "false_positives": 0,
-      "false_negatives": 5,
+      "false_negatives": 0,
       "precision": 1.0,
-      "recall": 0.2857,
-      "f1": 0.4444
+      "recall": 1.0,
+      "f1": 1.0
     },
     "services": {
-      "true_positives": 1,
+      "true_positives": 2,
       "false_positives": 0,
-      "false_negatives": 1,
+      "false_negatives": 0,
       "precision": 1.0,
-      "recall": 0.5,
-      "f1": 0.6667
+      "recall": 1.0,
+      "f1": 1.0
     },
     "prompts": {
       "true_positives": 25,
@@ -118,29 +118,29 @@
       "commit": "c2f8235e1f3ea903ad8b7f61447c4f74164b5c58",
       "language": "typescript",
       "overall": {
-        "true_positives": 22,
+        "true_positives": 28,
         "false_positives": 0,
-        "false_negatives": 6,
+        "false_negatives": 0,
         "precision": 1.0,
-        "recall": 0.7857,
-        "f1": 0.88
+        "recall": 1.0,
+        "f1": 1.0
       },
       "categories": {
         "models": {
-          "true_positives": 0,
+          "true_positives": 5,
           "false_positives": 0,
-          "false_negatives": 5,
-          "precision": null,
-          "recall": 0.0,
-          "f1": null
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
         },
         "services": {
-          "true_positives": 0,
+          "true_positives": 1,
           "false_positives": 0,
-          "false_negatives": 1,
-          "precision": null,
-          "recall": 0.0,
-          "f1": null
+          "false_negatives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
         },
         "prompts": {
           "true_positives": 18,
@@ -200,44 +200,7 @@
         }
       },
       "false_positives": [],
-      "false_negatives": [
-        {
-          "category": "models",
-          "name": "moonshotai/kimi-k2.5",
-          "file": "lib/ai/models.ts",
-          "line": 6
-        },
-        {
-          "category": "models",
-          "name": "deepseek/deepseek-v3.2",
-          "file": "lib/ai/models.ts",
-          "line": 30
-        },
-        {
-          "category": "models",
-          "name": "openai/gpt-oss-20b",
-          "file": "lib/ai/models.ts",
-          "line": 44
-        },
-        {
-          "category": "models",
-          "name": "openai/gpt-oss-120b",
-          "file": "lib/ai/models.ts",
-          "line": 52
-        },
-        {
-          "category": "models",
-          "name": "xai/grok-4.1-fast-non-reasoning",
-          "file": "lib/ai/models.ts",
-          "line": 60
-        },
-        {
-          "category": "services",
-          "name": "vercel-ai-gateway",
-          "file": "lib/ai/providers.ts",
-          "line": 25
-        }
-      ]
+      "false_negatives": []
     },
     {
       "repository": "expressjs/express",

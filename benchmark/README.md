@@ -38,7 +38,7 @@ current scanner output. Where the two disagree, the mismatch is the finding:
 the `@ai-sdk/*` provider packages were added to the service map because this
 benchmark reported the missing OpenAI service as a false negative.
 
-Six pinned public cases have been manually reviewed:
+Seven pinned public cases have been manually reviewed:
 
 | Repository | Role | Language front end |
 |---|---|---|
@@ -48,6 +48,7 @@ Six pinned public cases have been manually reviewed:
 | `expressjs/express` | negative | JavaScript |
 | `psf/requests` | negative | Python |
 | `encode/httpx` | negative | Python |
+| `gin-gonic/gin` | negative | Go (pattern tier) |
 
 Prepare their checkouts at the `local_path` values in
 `ground_truth_public/*.json` (clone, then check out the pinned commit), and run:
@@ -63,11 +64,34 @@ The public cases are not part of the default command because the evaluator is
 offline-first and does not clone repositories implicitly.
 
 The checked-in `reports/external-latest.md` is the result for the pinned public
-cases: precision 1.00 with no false positives anywhere, and recall 0.85 overall
-(Python 1.00, TypeScript 0.79). The six recall misses are all in
-`vercel/ai-chatbot` and are listed in the report rather than removed from the
-ground truth — five model ids declared in a `ChatModel[]` literal and reached
-via `gateway.languageModel(id)`, plus the AI Gateway service itself.
+cases as of 2026-10-18: precision 1.00, recall 1.00 (39 TP, 0 FP, 0 FN).
 
-Six repositories is regression evidence and must not be presented as broad
-external accuracy. The documented target is 20.
+Until 2026-10-18 recall was 0.85 overall (TypeScript 0.79): five model ids
+declared in a `ChatModel[]` literal and reached via `gateway.languageModel(id)`,
+plus the AI Gateway service, were missed in `vercel/ai-chatbot`. Those six
+expectations were **not** edited; the scanner now finds them
+(`javascript.model-catalog.ast`). Because they are exactly what the fix was
+written against, this corpus now measures regression, not generalization.
+`tests/test_js_model_catalog.py::test_ai_chatbot_external_regression` re-runs
+the case whenever the checkout is present.
+
+Seven repositories is regression evidence and must not be presented as broad
+external accuracy. The documented target is 20; expanding it with
+*previously unseen* positive repositories is the open item.
+
+To prepare every checkout at its pinned SHA without executing anything:
+
+```bash
+for gt in benchmark/ground_truth_public/*.json; do
+  python - "$gt" <<'PY'
+import json, subprocess, sys
+d = json.load(open(sys.argv[1]))
+path, sha = d["local_path"], d["commit"]
+subprocess.run(["git", "init", "-q", path], check=True)
+subprocess.run(["git", "-C", path, "remote", "add", "origin",
+                f"https://github.com/{d['repository']}.git"], check=False)
+subprocess.run(["git", "-C", path, "fetch", "-q", "--depth", "1", "origin", sha], check=True)
+subprocess.run(["git", "-C", path, "checkout", "-q", "FETCH_HEAD"], check=True)
+PY
+done
+```

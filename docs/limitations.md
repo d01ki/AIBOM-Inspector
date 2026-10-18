@@ -26,11 +26,34 @@
   same POM. Parent POMs, `dependencyManagement`, BOM imports and Gradle version
   catalogs are not resolved, so some versions stay unknown.
 
-- Reachability is same-file. Imported calls, dependency injection, dynamic
-  dispatch, reflection, monkey patching, and framework-generated routes can
-  produce `unknown` or conservative `false` results.
-- Python wrapper tracing is one hop and handles straightforward positional or
-  keyword forwarding only.
+- Reachability and prompt flow are **cross-file but bounded** (since 2026-10).
+  A project-wide index resolves the statically resolvable subset of imports:
+  Python absolute and relative imports (`import a.b`, `from ..x import y`,
+  re-exports through `__init__.py`), and JS/TS relative specifiers,
+  `export { a as b } from`, `export * from`, namespace imports and
+  `tsconfig.json` `paths` of the `"@/*": ["./*"]` shape (root tsconfig/jsconfig
+  only; no `extends`, no nested project references). Across that subset the
+  tracers follow a parameter to its resolved call sites, a call through the
+  callee's `return` values, and an imported constant to its definition.
+- What stays unresolved, and is reported as `unknown` rather than safe:
+  bare package specifiers (code in `node_modules`/site-packages is never read),
+  dynamic `import()`/`importlib`/`getattr`, method calls on objects
+  (`self.helper(x)`, `client.build(x)`), dependency injection, decorators that
+  wrap a function, monkey patching, framework-generated routes, and a module
+  name that matches more than one file (`svc_a/tools/x.py` and
+  `svc_b/tools/x.py` for `import tools.x`) — ambiguity is never guessed.
+- Bounds: 4 call boundaries, 8 call sites per function, 4,000 expression visits
+  per trace, 6 re-export hops, 3 helper levels below a tool. A path cut by a
+  bound carries an `analysis_budget_exhausted` step and cannot be proven.
+- Untrusted input passing through a call the index cannot see is assumed to
+  propagate (an `unresolved_call` step). That keeps the flow, but marks any
+  resulting path `potential`: it is never reported as Critical. A small list
+  of pure transformations (`str`, `.format`, `.join`, `.strip`, `String`,
+  `.trim`, `JSON.stringify`, ...) does not weaken a proof.
+- Sanitization is recognized only structurally: a helper whose `return`
+  values do not depend on the tainted parameter (an allowlist returning
+  literals) breaks the flow. A sanitizer that returns a transformed version of
+  its input (`re.sub`, `escape`) is not trusted.
 - Values loaded through arbitrary config-loader functions are unresolved;
   cross-file YAML/JSON/TOML linking is not implemented yet.
 - JavaScript/TypeScript uses a **bounded subset parser**, not a spec-compliant
@@ -39,47 +62,58 @@
   degrade to `Unknown` rather than raising, so a file can be partially analyzed
   without any signal that a specific expression was skipped. JSX children,
   `with` blocks, and label/`switch` control flow are not represented.
-- JS/TS flow tracing is same-file, like the Python analysis. A tool, prompt
-  constant, or sanitizer defined in another module is not followed, and
-  re-exports are not resolved.
+  `export default function name()` is not indexed as the `default` export.
 - JS/TS prompt sinks and dangerous operations come from a fixed list (Vercel AI
   SDK, OpenAI Agents, OpenAI/Anthropic Node SDKs; `child_process`, `fs`,
   `eval`/`vm`, state-changing `fetch`/`axios`, mailer sends). LangChain.js
   chains, custom provider wrappers, and framework middleware are not modeled.
-- JS/TS results are measured separately from Python (`## By language` in the
-  benchmark report) over one local fixture and two pinned public repositories.
-  Reported precision is 1.00 with no false positives, including on a 163-file
-  pure-JavaScript codebase; recall is the weaker number (see below).
-- Prompt source-to-sink analysis is same-file and bounded. Cross-module helper
-  calls, arbitrary sanitizers, dynamic message construction, and framework
-  objects outside the recognized source/sink set remain `unknown`.
-- Drift prompt matching is line-insensitive but uses the ordinal of prompts
-  with the same file/role/sink. Reordering several identical sink calls can
-  appear as content/target drift until structural call-site fingerprints are
-  implemented.
+- JS/TS model ids reached through the Vercel AI Gateway are recorded as
+  *invoked* only when the `gateway.languageModel(...)` argument resolves
+  statically (also through an imported object). Ids in a model catalog are
+  recorded as *declared* only, and only when the codebase imports an AI SDK and
+  the id has a known vendor prefix (`openai/`, `anthropic/`, `xai/`, ...). A
+  runtime-selected id (a function parameter, `process.env`) is never invented.
+- Drift matches paths by prompt slot (file/role/sink/ordinal), then by a
+  semantic key (source kind, sink kind, trust boundary, bound capability
+  signature) that ignores files, lines and function names. Two *different*
+  paths with an identical semantic key, where one is removed and the other
+  added in the same change, are reported as unchanged.
+- "Component BOM unchanged" means: the same set of non-prompt entities (models,
+  packages, services, agents, datasets) with the same names, versions and
+  security metadata. Prompts are excluded from that verdict on purpose and are
+  compared as exposure and impact paths.
 - Trust-Boundary Drift proves static paths, not runtime exploitability. A
   framework guard or sanitizer outside the supported tracer can remain
   invisible, and `unknown` is never treated as safe.
 - Agent capability impact analysis recognizes explicit bindings only — OpenAI
-  Agents SDK `tools=[...]` in Python, and `tools: {…}` / `tools: [...]` in
-  TypeScript — over a small high-confidence operation set per language. Dynamic
-  tool registries, wrapper decorators, cross-file tools, policy middleware,
-  runtime approvals, and provider-side guardrails are not modeled.
+  Agents SDK `tools=[...]` in Python (also an imported tool or an imported
+  `TOOLS` list), and `tools: {…}` / `tools: [...]` in TypeScript (also an
+  imported tool, through barrels, or one level of tool factory) — over a small
+  high-confidence operation set per language. Dynamic tool registries, wrapper
+  decorators, policy middleware, runtime approvals, and provider-side
+  guardrails are not modeled.
 - An impact path proves that model-controlled tool parameters can reach an
   operation; it does not prove that a model will select the tool, that an
   attacker can produce the required arguments, or that runtime exploitation
   succeeds. The UI and finding text label the consequence as potential.
 - MCP capability analysis is not implemented; MCP inventory remains
-  compatibility-detector output.
+  compatibility-detector output. MCP tool handlers are treated as untrusted
+  entrypoints (`tool_input`), but an MCP tool's own operations are not yet
+  joined into a capability graph.
 - Runtime observations are not imported, so `runtime_observed` is always false.
-- The external benchmark covers six pinned public repositories (two positive,
-  four negative) plus two local fixtures. That is useful regression evidence,
-  **not** evidence of broad ecosystem coverage; the documented threshold is 20.
-  Large frameworks are excluded on purpose: a case only counts once every
-  component has been hand-reviewed, which is not possible on a 10k-file tree.
-- Public-corpus recall is currently 0.79 for TypeScript against 1.00 for
-  Python. The gap is model discovery: model ids declared in a data structure
-  and resolved through an indirection (`gateway.languageModel(id)`) are not
-  followed, so `vercel/ai-chatbot` reports five model false negatives.
+- The external benchmark covers seven pinned public repositories (two positive,
+  five negative, across Python, TypeScript/JavaScript and Go) plus three local
+  fixtures. That is useful regression evidence, **not** evidence of broad
+  ecosystem coverage; the documented threshold is 20. Large frameworks are
+  excluded on purpose: a case only counts once every component has been
+  hand-reviewed, which is not possible on a 10k-file tree.
+- Public-corpus precision and recall are both 1.00 as of 2026-10-18. The
+  TypeScript recall gap (0.79) was closed by gateway/catalog model resolution;
+  those six expectations were the false negatives the fix was written against,
+  so the 1.00 is **regression evidence for that fix, not an independent
+  measurement**. A fresh, larger corpus is needed for an accuracy claim.
+- Attack-path accuracy (exposure and impact paths) is measured only on the
+  checked-in positive/negative/unknown fixtures, not on public repositories.
+  Component inventory accuracy and path accuracy must not be conflated.
 - The scanner identifies references and risky configuration; it does not load,
   sandbox, or behaviorally test models.

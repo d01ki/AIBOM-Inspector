@@ -32,11 +32,23 @@ the unit tests (`tests/test_lockfiles.py`), not by this corpus.
 - A checked-in synthetic fixture validates the harness but is not evidence of
   external-repository accuracy.
 
-The checked-in external report currently covers two manually reviewed,
-commit-pinned repositories. It records precision 1.0000, recall 1.0000, and F1
-1.0000 with 11 true positives, no false positives, and no false negatives. The
-previous three OpenAI Assistants `instructions=` misses are now covered by the
-prompt-flow AST detector.
+The checked-in external report (2026-10-18) covers seven manually reviewed,
+commit-pinned repositories — two positive (Python, TypeScript) and five
+negative (Python, JavaScript, Go). It records precision 1.0000, recall 1.0000
+and F1 1.0000 with 39 true positives, no false positives and no false
+negatives. The previous TypeScript misses (gateway-routed and catalog-declared
+model ids in `vercel/ai-chatbot`) were fixed against those same expectations,
+so the corpus is now regression evidence for that fix rather than an
+independent measurement.
+
+## Inventory accuracy vs path accuracy
+
+The corpus scores *component inventory* (models, services, prompts, packages).
+It says nothing about exposure or impact *path* accuracy. Path behavior is
+pinned separately by positive, negative and unknown fixtures:
+`tests/test_cross_file_python.py`, `tests/test_cross_file_typescript.py` and
+`tests/test_drift_identical_bom.py`. The two must never be reported as one
+number.
 
 Do not claim broad external-repository support until at least 20 pinned public
 repositories, including negative cases, are present and reviewed.
