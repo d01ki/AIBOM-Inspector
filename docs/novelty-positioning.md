@@ -194,10 +194,7 @@ Demo sequence:
 
 - ~~Expand the public benchmark to at least 20~~ — 20 pinned repositories
   (2026-10-18); first run on the unseen cases P 0.913 / R 0.661, frozen.
-  Still small repositories only. Originally: expand the public benchmark from **six** repositories to at least 20,
-  including mixed-role prompt cases. (Was two; `vercel/ai-chatbot`,
-  `expressjs/express`, `psf/requests`, and `encode/httpx` were curated
-  2026-07-31.)
+  Small repositories only; large frameworks are still unmeasured.
 - ~~Close the TypeScript recall gap~~ — gateway/catalog model resolution
   shipped 2026-10-18 (TypeScript public-corpus recall 0.79 -> 1.00 on the same,
   now-overfit corpus; a fresh corpus is needed to measure it independently).
