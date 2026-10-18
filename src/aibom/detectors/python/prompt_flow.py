@@ -24,8 +24,15 @@ from aibom.detectors.flow import (
     sink_evidence,
     source_evidence,
 )
+from aibom.detectors.project import (
+    MAX_CALL_DEPTH,
+    MAX_CALL_SITES,
+    Budget,
+    ProjectIndex,
+    python_returns,
+)
 from aibom.detectors.python.common import argument_node, require_python
-from aibom.detectors.python.parser import PythonModule
+from aibom.detectors.python.parser import FunctionInfo, PythonModule
 from aibom.detectors.python.value_resolver import ValueResolver
 from aibom.detectors.result import Detection
 from aibom.models.analysis import (
@@ -36,8 +43,10 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.entities import Prompt, ToolCapability
+from aibom.models.evidence import Evidence
 
 _MAX_DEPTH = 20
+_MAX_HELPER_DEPTH = 3
 _OPENAI_SUFFIXES = (
     ".responses.create",
     ".chat.completions.create",
@@ -92,13 +101,9 @@ class PromptFlowPythonDetector:
             if provider is None:
                 continue
             model_refs = _model_refs(call, resolver)
-            tool_refs = _bound_tool_refs(module, call)
-            capabilities = _bound_tool_capabilities(
-                context,
-                module,
-                tool_refs,
-                self.detector_id,
-            )
+            tools = _bound_tools(module, call, context.project)
+            tool_refs = [tool.name for tool in tools]
+            capabilities = _bound_tool_capabilities(tools, self.detector_id, context.project)
             for prompt_input in _prompt_inputs(module, call, provider, resolver):
                 yield Detection(
                     self._entity(
@@ -126,8 +131,8 @@ class PromptFlowPythonDetector:
     ) -> Prompt:
         expression = prompt_input.expression
         resolved = resolver.resolve(expression)
-        trace = _FlowTracer(module).trace(expression)
-        reachable, reachability_path = module.reachability(call)
+        trace = _FlowTracer(module, context.project).trace(expression)
+        reachable, reachability_path = cross_file_reachability(module, call, context.project)
 
         hashed = (
             content_hash(resolved.value)
@@ -188,23 +193,102 @@ class PromptFlowPythonDetector:
         )
 
 
-class _FlowTracer:
-    """Conservative same-file expression tracer with a strict depth bound."""
+@dataclass(frozen=True)
+class _Frame:
+    """One resolved call the tracer descended into: params bind to ``call``'s args."""
 
-    def __init__(self, module: PythonModule) -> None:
+    module_path: str
+    function: str
+    caller: _FlowTracer
+    call: ast.Call
+
+
+# Calls whose result is a plain transformation of their inputs.  Tainted input
+# through one of these is still a *proven* flow; through any other call that
+# the index cannot resolve, it is only a potential one.
+_TRANSPARENT_CALLS = frozenset(
+    {"str", "repr", "format", "textwrap.dedent", "json.dumps", "dict", "list", "tuple"}
+)
+_TRANSPARENT_METHODS = frozenset(
+    {
+        "format",
+        "join",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "lower",
+        "upper",
+        "title",
+        "replace",
+        "split",
+        "splitlines",
+        "encode",
+        "decode",
+        "removeprefix",
+        "removesuffix",
+        "get",
+    }
+)
+
+_SeenKey = tuple[str, str | None, str]
+
+
+class _FlowTracer:
+    """Conservative expression tracer, bounded in depth, call depth, and visits.
+
+    Within a file it follows assignments and expression composition.  With a
+    :class:`ProjectIndex` it also follows, across files when needed:
+
+    * a parameter of an ordinary function back to the arguments at its resolved
+      call sites (``call_argument``);
+    * a call into a project function through that function's ``return``
+      expressions, with its parameters bound to this call's arguments
+      (``call_return``) -- so a helper that ignores its input does not taint;
+    * an imported name to the module-level binding that defines it
+      (``import_reference``).
+
+    Anything outside that subset stays ``unknown`` or, for an unresolved call
+    that receives tainted input, is marked ``unresolved_call`` (potential).
+    """
+
+    def __init__(
+        self,
+        module: PythonModule,
+        project: ProjectIndex | None = None,
+        *,
+        budget: Budget | None = None,
+        frames: tuple[_Frame, ...] = (),
+        ascent: int = 0,
+    ) -> None:
         self.module = module
+        self.project = project
+        self.budget = budget or Budget()
+        self.frames = frames
+        self.ascent = ascent
 
     def trace(self, node: ast.AST) -> FlowTrace:
         return self._trace(node, set(), 0)
 
-    def _trace(
+    def _spawn(
         self,
-        node: ast.AST,
-        seen: set[tuple[str | None, str]],
-        depth: int,
-    ) -> FlowTrace:
+        module: PythonModule,
+        *,
+        frames: tuple[_Frame, ...] | None = None,
+        ascent: int | None = None,
+    ) -> _FlowTracer:
+        return _FlowTracer(
+            module,
+            self.project,
+            budget=self.budget,
+            frames=self.frames if frames is None else frames,
+            ascent=self.ascent if ascent is None else ascent,
+        )
+
+    def _trace(self, node: ast.AST, seen: set[_SeenKey], depth: int) -> FlowTrace:
         if depth > _MAX_DEPTH:
             return FlowTrace(None, steps=(self._step(node, None, "max_depth"),))
+        if not self.budget.spend():
+            return FlowTrace(None, steps=(self._step(node, None, "analysis_budget_exhausted"),))
 
         if isinstance(node, ast.Constant):
             return FlowTrace(False)
@@ -216,11 +300,16 @@ class _FlowTracer:
             named = _named_source(node.id)
             if named is not None:
                 return self._source(node, *named)
-            key = (self.module.scope_for(node), node.id)
+            key = (self.module.relative_path, self.module.scope_for(node), node.id)
             if key in seen:
                 return FlowTrace(None, steps=(self._step(node, node.id, "cycle"),))
             assignment = self.module.assignment_for(node.id, node)
             if assignment is None:
+                crossed = self._parameter_flow(node, {*seen, key}, depth)
+                if crossed is None:
+                    crossed = self._import_flow(node, {*seen, key}, depth)
+                if crossed is not None:
+                    return crossed
                 return FlowTrace(
                     None,
                     steps=(self._step(node, node.id, "unknown_symbol"),),
@@ -257,8 +346,18 @@ class _FlowTracer:
             source = _call_source(qualified)
             if source is not None:
                 return self._source(node, *source)
+            summarized = self._call_summary(node, seen, depth)
+            if summarized is not None:
+                return summarized
             children = [*node.args, *(kw.value for kw in node.keywords)]
-            return combine_traces(*(self._trace(child, seen, depth + 1) for child in children))
+            if isinstance(node.func, ast.Attribute):
+                children.append(node.func.value)
+            traced = combine_traces(
+                *(self._trace(child, seen, depth + 1) for child in children)
+            )
+            if traced.user_controlled is True and not _transparent_call(node, qualified):
+                return _with_step(traced, self._step(node, qualified or None, "unresolved_call"))
+            return traced
 
         if isinstance(node, ast.JoinedStr):
             return combine_traces(*(self._trace(value, seen, depth + 1) for value in node.values))
@@ -284,7 +383,101 @@ class _FlowTracer:
                 self._trace(node.orelse, seen, depth + 1),
             )
 
+        if isinstance(node, ast.Await):
+            return self._trace(node.value, seen, depth + 1)
+
         return FlowTrace(None, steps=(self._step(node, None, "dynamic_expression"),))
+
+    # -- interprocedural ----------------------------------------------------
+
+    def _parameter_flow(
+        self, node: ast.Name, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Bind a parameter of an ordinary function to its call-site arguments."""
+        function = self.module.enclosing_function(node)
+        if function is None or node.id not in _function_parameters(function.node):
+            return None
+        for frame in reversed(self.frames):
+            if (
+                frame.module_path == self.module.relative_path
+                and frame.function == function.qualified_name
+            ):
+                argument = _argument_for(frame.call, function.node, node.id)
+                if argument is None:
+                    return FlowTrace(None, steps=(self._step(node, node.id, "unbound_parameter"),))
+                traced = frame.caller._trace(argument, seen, depth + 1)
+                return _with_step(traced, frame.caller._step(argument, node.id, "call_argument"))
+        if self.project is None or self.ascent >= MAX_CALL_DEPTH:
+            return None
+        callers = self.project.python_callers(self.module, function)
+        if not callers:
+            return None
+        traces: list[FlowTrace] = []
+        for caller_module, call in callers[:MAX_CALL_SITES]:
+            argument = _argument_for(call, function.node, node.id)
+            if argument is None:
+                traces.append(FlowTrace(None))
+                continue
+            caller = self._spawn(caller_module, frames=(), ascent=self.ascent + 1)
+            traced = caller._trace(argument, seen, depth + 1)
+            traces.append(_with_step(traced, caller._step(argument, node.id, "call_argument")))
+        if len(callers) > MAX_CALL_SITES:
+            traces.append(
+                FlowTrace(None, steps=(self._step(node, node.id, "analysis_budget_exhausted"),))
+            )
+        return combine_traces(*traces)
+
+    def _call_summary(
+        self, node: ast.Call, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Trace a call into a project function through its return values."""
+        if self.project is None or len(self.frames) >= MAX_CALL_DEPTH:
+            return None
+        target = self.project.python_function(self.module, node.func)
+        if target is None:
+            return None
+        if any(
+            frame.module_path == target.module.relative_path
+            and frame.function == target.info.qualified_name
+            for frame in self.frames
+        ):
+            return FlowTrace(None, steps=(self._step(node, target.info.name, "cycle"),))
+        returns = python_returns(target.info.node)
+        if returns is None:
+            return None
+        if not returns:
+            return FlowTrace(False)
+        frame = _Frame(target.module.relative_path, target.info.qualified_name, self, node)
+        callee = self._spawn(target.module, frames=(*self.frames, frame))
+        traced = combine_traces(
+            *(
+                _with_step(
+                    callee._trace(item, seen, depth + 1),
+                    callee._step(item, target.info.name, "return_value"),
+                )
+                for item in returns
+            )
+        )
+        return _with_step(traced, self._step(node, target.info.name, "call_return"))
+
+    def _import_flow(
+        self, node: ast.Name, seen: set[_SeenKey], depth: int
+    ) -> FlowTrace | None:
+        """Follow an imported module-level binding into the module defining it."""
+        if self.project is None or node.id not in self.module.aliases:
+            return None
+        symbol = self.project.python_symbol(self.module, node.id)
+        if symbol is None:
+            return None
+        bindings = symbol.module.assignments.get((None, symbol.name))
+        if not bindings:
+            return None
+        binding = max(bindings, key=lambda item: item.line)
+        target = self._spawn(symbol.module)
+        traced = target._trace(binding.value, seen, depth + 1)
+        return _with_step(traced, target._step(binding.value, node.id, "import_reference"))
+
+    # -- sources ------------------------------------------------------------
 
     def _parameter_source(
         self, node: ast.Name
@@ -292,13 +485,7 @@ class _FlowTracer:
         function = self.module.enclosing_function(node)
         if function is None or function.entrypoint_kind not in _UNTRUSTED_ENTRYPOINTS:
             return None
-        args = function.node.args
-        parameters = [*args.posonlyargs, *args.args, *args.kwonlyargs]
-        if args.vararg is not None:
-            parameters.append(args.vararg)
-        if args.kwarg is not None:
-            parameters.append(args.kwarg)
-        if node.id not in {parameter.arg for parameter in parameters}:
+        if node.id not in _function_parameters(function.node):
             return None
         kind, boundary = _UNTRUSTED_ENTRYPOINTS[function.entrypoint_kind]
         return kind, node.id, boundary, True
@@ -311,7 +498,7 @@ class _FlowTracer:
         boundary: str,
         user_controlled: bool | None,
     ) -> FlowTrace:
-        source = SourceRef(kind, _span(node), symbol, boundary)
+        source = SourceRef(kind, _span(node), symbol, boundary, self.module.relative_path)
         return FlowTrace(
             user_controlled,
             (source,),
@@ -320,6 +507,45 @@ class _FlowTracer:
 
     def _step(self, node: ast.AST, symbol: str | None, operation: str) -> ResolutionStep:
         return flow_step(self.module.relative_path, _span(node), symbol, operation)
+
+
+def _with_step(trace: FlowTrace, step: ResolutionStep) -> FlowTrace:
+    return FlowTrace(trace.user_controlled, trace.sources, (*trace.steps, step))
+
+
+def _transparent_call(node: ast.Call, qualified: str) -> bool:
+    if qualified in _TRANSPARENT_CALLS:
+        return True
+    return isinstance(node.func, ast.Attribute) and node.func.attr in _TRANSPARENT_METHODS
+
+
+def _argument_for(
+    call: ast.Call,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    parameter: str,
+) -> ast.AST | None:
+    """The expression ``call`` binds to ``parameter``, including its default."""
+    args = function.args
+    for keyword in call.keywords:
+        if keyword.arg == parameter:
+            return keyword.value
+    positional = [*args.posonlyargs, *args.args]
+    names = [item.arg for item in positional]
+    if parameter in names:
+        index = names.index(parameter)
+        if index < len(call.args) and not any(
+            isinstance(item, ast.Starred) for item in call.args[: index + 1]
+        ):
+            return call.args[index]
+        defaults = args.defaults
+        offset = len(positional) - len(defaults)
+        if index >= offset:
+            return defaults[index - offset]
+        return None
+    for item, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
+        if item.arg == parameter:
+            return default
+    return None
 
 
 def _provider_for_call(module: PythonModule, call: ast.Call) -> str | None:
@@ -544,76 +770,251 @@ def _model_refs(call: ast.Call, resolver: ValueResolver) -> list[str]:
     return [value]
 
 
-def _bound_tool_refs(module: PythonModule, call: ast.Call) -> list[str]:
-    """Return explicit tool names from an agent constructor's ``tools`` list."""
+@dataclass(frozen=True)
+class _BoundTool:
+    """A tool listed in an agent's ``tools=[...]``, resolved to its definition."""
+
+    name: str
+    module: PythonModule
+    function: ast.FunctionDef | ast.AsyncFunctionDef | None
+
+
+def _bound_tools(
+    module: PythonModule, call: ast.Call, project: ProjectIndex | None
+) -> list[_BoundTool]:
+    """Return explicit tools from an agent constructor's ``tools`` list.
+
+    A tool may be defined in this file or imported from another module of the
+    project; ``tools=TOOLS`` may name a list defined elsewhere.  A name that
+    cannot be resolved keeps its place (so ``tool_refs`` stays complete) but
+    carries no definition, and therefore never yields a capability.
+    """
     expression = argument_node(call, ("tools",))
     if expression is None:
         return []
-    sequence = _dereference_sequence(module, expression, set(), 0)
-    if sequence is None:
+    located = _dereference_sequence_anywhere(module, expression, project)
+    if located is None:
         return []
-    names: list[str] = []
+    owner, sequence = located
+    found: list[_BoundTool] = []
     for item in sequence.elts:
-        qualified = module.qualified_name(item)
+        qualified = owner.qualified_name(item)
         if qualified is None:
             return []
         name = qualified.rsplit(".", 1)[-1]
-        if name not in names:
-            names.append(name)
-    return names
+        if any(existing.name == name for existing in found):
+            continue
+        found.append(_resolve_tool(owner, item, name, project))
+    return found
+
+
+def _resolve_tool(
+    module: PythonModule, item: ast.AST, name: str, project: ProjectIndex | None
+) -> _BoundTool:
+    local = [info for info in module.functions.values() if info.name == name]
+    if isinstance(item, ast.Name) and item.id not in module.aliases:
+        node = local[0].node if len(local) == 1 else None
+        return _BoundTool(name, module, node)
+    if project is not None:
+        target = project.python_function(module, item)
+        if target is not None:
+            return _BoundTool(name, target.module, target.info.node)
+    return _BoundTool(name, module, None)
+
+
+def _dereference_sequence_anywhere(
+    module: PythonModule, expression: ast.AST, project: ProjectIndex | None
+) -> tuple[PythonModule, ast.List | ast.Tuple] | None:
+    sequence = _dereference_sequence(module, expression, set(), 0)
+    if sequence is not None:
+        return module, sequence
+    if project is None or not isinstance(expression, ast.Name):
+        return None
+    symbol = project.python_symbol(module, expression.id)
+    if symbol is None:
+        return None
+    bindings = symbol.module.assignments.get((None, symbol.name))
+    if not bindings:
+        return None
+    value = max(bindings, key=lambda item: item.line).value
+    if isinstance(value, (ast.List, ast.Tuple)):
+        return symbol.module, value
+    return None
 
 
 def _bound_tool_capabilities(
-    context: ScanContext,
-    module: PythonModule,
-    tool_refs: list[str],
+    tools: list[_BoundTool],
     detector_id: str,
+    project: ProjectIndex | None,
 ) -> list[ToolCapability]:
-    """Classify high-impact calls only inside explicitly bound decorated tools."""
+    """Classify high-impact calls only inside explicitly bound decorated tools.
+
+    Operations are searched in the tool body and, through resolvable project
+    calls, in helpers the tool passes its parameters to (bounded depth).  A
+    capability is only reported when a tool parameter provably reaches the
+    operation's arguments; a fixed command is not model-controlled.
+    """
     found: list[ToolCapability] = []
-    for tool_name in tool_refs:
-        functions = [
-            info for info in module.functions.values() if info.name == tool_name
-        ]
-        if len(functions) != 1 or not _is_recognized_tool(module, functions[0].node):
+    for tool in tools:
+        if tool.function is None or not _is_recognized_tool(tool.module, tool.function):
             continue
-        function = functions[0].node
-        parameters = _function_parameters(function)
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Call):
-                continue
-            qualified = module.qualified_name(node.func) or ""
-            classified = _classify_capability(qualified, node)
-            if classified is None:
-                continue
-            controlled = sorted(
-                parameter
-                for parameter in parameters
-                if _call_uses_parameter(module, node, parameter, set(), 0)
+        parameters = _function_parameters(tool.function)
+        controlled = {parameter: {parameter} for parameter in parameters}
+        found.extend(
+            _capabilities_in(
+                tool,
+                tool.module,
+                tool.function,
+                controlled,
+                detector_id,
+                project,
+                chain=[],
+                visited=set(),
             )
-            if not controlled:
+        )
+    return found
+
+
+def _capabilities_in(
+    tool: _BoundTool,
+    module: PythonModule,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    controlled: dict[str, set[str]],
+    detector_id: str,
+    project: ProjectIndex | None,
+    *,
+    chain: list[Evidence],
+    visited: set[tuple[str, int]],
+) -> list[ToolCapability]:
+    """Operations in ``function`` reached by the tool parameters in ``controlled``.
+
+    ``controlled`` maps a local parameter to the *tool* parameters that flow
+    into it, so a capability always names the model-controlled tool inputs.
+    """
+    key = (module.relative_path, function.lineno)
+    if key in visited or len(chain) >= _MAX_HELPER_DEPTH:
+        return []
+    visited = {*visited, key}
+    found: list[ToolCapability] = []
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        qualified = module.qualified_name(node.func) or ""
+        classified = _classify_capability(qualified, node)
+        if classified is not None:
+            reached = sorted(
+                {
+                    tool_parameter
+                    for local, tool_parameters in controlled.items()
+                    if _call_uses_parameter(module, node, local, set(), 0)
+                    for tool_parameter in tool_parameters
+                }
+            )
+            if not reached:
                 continue
             kind, impact, severity = classified
             evidence = capability_evidence(
-                context.relative_path,
+                module.relative_path,
                 _span(node),
                 detector_id,
-                tool_name=tool_name,
+                tool_name=tool.name,
                 kind=kind,
                 operation=qualified,
             )
             found.append(
                 ToolCapability(
-                    tool_name=tool_name,
+                    tool_name=tool.name,
                     kind=kind,
                     operation=qualified,
                     impact=impact,
                     severity=severity,
-                    controlled_parameters=controlled,
-                    source_evidence=[evidence],
+                    controlled_parameters=reached,
+                    source_evidence=[*(item.model_copy() for item in chain), evidence],
                 )
             )
+            continue
+        if project is None:
+            continue
+        helper = project.python_function(module, node.func)
+        if helper is None:
+            continue
+        mapped: dict[str, set[str]] = {}
+        for parameter in _function_parameters(helper.info.node):
+            argument = _argument_for(node, helper.info.node, parameter)
+            if argument is None:
+                continue
+            reached_by = {
+                tool_parameter
+                for local, tool_parameters in controlled.items()
+                if _expression_uses_parameter(module, argument, local, set(), 0)
+                for tool_parameter in tool_parameters
+            }
+            if reached_by:
+                mapped[parameter] = reached_by
+        if not mapped:
+            continue
+        hop = capability_evidence(
+            module.relative_path,
+            _span(node),
+            detector_id,
+            tool_name=tool.name,
+            kind="helper_call",
+            operation=helper.info.name,
+        )
+        hop.matched_pattern = f"bound-tool-helper:{helper.info.name}"
+        found.extend(
+            _capabilities_in(
+                tool,
+                helper.module,
+                helper.info.node,
+                mapped,
+                detector_id,
+                project,
+                chain=[*chain, hop],
+                visited=visited,
+            )
+        )
     return found
+
+
+def cross_file_reachability(
+    module: PythonModule, node: ast.AST, project: ProjectIndex | None
+) -> tuple[Reachability, list[str]]:
+    """Same-file reachability, extended through resolved cross-file callers.
+
+    A sink in ``agents/main.py`` with no entrypoint of its own is reachable
+    when a route in another module calls the function containing it.  The
+    returned path names each hop as ``file:function``.  Without a resolved
+    caller the same-file verdict stands, so ``unknown`` is never upgraded to
+    ``false``.
+    """
+    verdict, path = module.reachability(node)
+    if verdict is Reachability.TRUE or project is None:
+        return verdict, path
+    function = module.enclosing_function(node)
+    if function is None:
+        return verdict, path
+    queue: list[tuple[PythonModule, FunctionInfo, list[str]]] = [
+        (module, function, [f"{module.relative_path}:{function.name}"])
+    ]
+    seen: set[tuple[str, str]] = set()
+    while queue:
+        current_module, current, trail = queue.pop(0)
+        key = (current_module.relative_path, current.qualified_name)
+        if key in seen or len(trail) > MAX_CALL_DEPTH + 1:
+            continue
+        seen.add(key)
+        for caller_module, call in project.python_callers(current_module, current)[
+            :MAX_CALL_SITES
+        ]:
+            caller_verdict, caller_path = caller_module.reachability(call)
+            if caller_verdict is Reachability.TRUE:
+                return Reachability.TRUE, [*caller_path, *trail]
+            caller = caller_module.enclosing_function(call)
+            if caller is not None:
+                hop = f"{caller_module.relative_path}:{caller.name}"
+                queue.append((caller_module, caller, [hop, *trail]))
+    return verdict, path
 
 
 def _is_recognized_tool(

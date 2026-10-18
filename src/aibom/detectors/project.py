@@ -198,10 +198,21 @@ class ProjectIndex:
             return None
         rest = name.split(".")[1:]
         level = module.import_levels.get(root, 0)
-        full = ".".join([dotted, *rest])
-        parts = full.split(".")
-        # `from pkg.mod import f` -> module pkg.mod, symbol f; `import pkg.mod`
-        # then `pkg.mod.f` -> the same.  Try the longest module prefix first.
+        readings = [[*dotted.split("."), *rest]]
+        if not level and dotted.startswith(f"{root}.") and rest:
+            # `import pkg.mod` binds `pkg`, so `pkg.mod.f` means pkg.mod.f.
+            readings.insert(0, [root, *rest])
+        for parts in readings:
+            found = self._python_symbol_parts(module, parts, level, hops)
+            if found is not None:
+                return found
+        return None
+
+    def _python_symbol_parts(
+        self, module: PythonModule, parts: list[str], level: int, hops: int
+    ) -> PySymbolRef | None:
+        # `from pkg.mod import f` -> module pkg.mod, symbol f.  Try the longest
+        # module prefix first, the way the import system would.
         for split in range(len(parts) - 1, 0, -1):
             target = self.python_module(module, ".".join(parts[:split]), level)
             if target is None:
