@@ -941,6 +941,101 @@
     .revision-arrow { transform: rotate(90deg); justify-self: center; }
     .compare-result { padding: 4px 14px 18px; }
   }
+/* Intelligence console theme: kept inline in index.html for wheel and offline distribution. */
+:root {
+  color-scheme: dark;
+  --bg: #080e18; --card: #101b2b; --surface: #0c1523;
+  --fg: #e4edf7; --muted: #98abc2; --border: #26374c;
+  --accent: #61ddd2; --accent-strong: #9af3e9; --accent-soft: #122e37;
+  --chip-crit: #ff879e; --chip-high: #ffad79; --chip-med: #efd078;
+  --chip-low: #7adbb1; --chip-info: #a4b7ce;
+  --shadow: 0 12px 36px #00000024;
+}
+body { background: var(--bg); font-size: 15px; }
+body::before { display: none; }
+::selection { background: #28616b; color: #fff; }
+.appbar { background: #0b1320f5; border-color: var(--border); backdrop-filter: blur(16px); }
+.appbar-inner { height: 70px; }
+.app-brand { color: var(--fg); letter-spacing: -.025em; }
+.app-brand-mark { width: 34px; height: 34px; border-color: #397c83; background: var(--accent-soft); color: var(--accent); border-radius: 4px; }
+.app-nav a { color: var(--muted); font-size: 13px; padding: 24px 13px 22px; }
+.app-nav a:hover, .app-nav a:focus-visible { color: var(--accent); }
+.page-wrap { padding-top: 46px; }
+.utility-intro { align-items: center; margin-bottom: 30px; }
+.utility-kicker { font-size: 11px; letter-spacing: .18em; margin-bottom: 12px; }
+.utility-intro h1 { color: var(--fg); font-size: clamp(30px, 4vw, 44px); font-weight: 620; letter-spacing: -.045em; }
+.utility-intro p:not(.utility-kicker) { max-width: 660px; font-size: 15px; line-height: 1.75; }
+.intel-stamp { flex-shrink: 0; padding: 12px 0 12px 22px; border-left: 1px solid var(--border); color: var(--muted); font: 10px/2 ui-monospace, Consolas, monospace; letter-spacing: .1em; }
+.intel-stamp strong { display: block; color: var(--accent); font-weight: 500; }
+.scan-panel, .results-area, .collapsible-panel, .card, .metric-grid, .verdict, .path-change { background: var(--card); border-color: var(--border); border-radius: 8px; }
+.scan-panel { border-top: 2px solid #4aafa9; }
+.panel-titlebar, .section-titlebar, .collapsible-panel > summary { background: #111e30; border-color: var(--border); }
+.panel-titlebar h2, .section-titlebar h2 { color: var(--fg); font-size: 16px; font-weight: 600; }
+.panel-index, .scope-badge, .result-state, .step-number, .evidence-tag { background: var(--surface); border-color: var(--border); color: var(--muted); }
+.panel-index { color: var(--accent); font-weight: 500; }
+.scan-steps { background: var(--surface); }
+.scan-steps li { min-height: 76px; }
+.scan-steps strong { color: #c3d0e2; font-size: 13px; }
+.scan-steps small { color: var(--muted); font-size: 12px; }
+.scan-steps li.is-current, .scan-steps li.is-done { background: var(--accent-soft); }
+.scan-steps li.is-current strong { color: var(--accent); }
+.scan-steps li.is-current .step-number { color: #082027; }
+.scan-steps li.is-done .step-number { background: var(--surface); border-color: var(--accent); }
+.scan-body { padding: 24px; }
+.scan-body label, .compare-lead, .compare-repo summary, .collapsible-panel > summary, .help-grid h3 { color: var(--fg); }
+.scan-body label { font-size: 12px; letter-spacing: .03em; }
+input[type=text], input[type=url], select, .scan-row input, .compare-repo input { background: var(--surface); color: var(--fg); border-color: #354a63; }
+.scan-row input { font: 13px/1.5 ui-monospace, Consolas, monospace; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #61ddd220; }
+button { color: #092329; }
+button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.scan-row button { font-size: 13px; }
+button.ghost, .demo-launch button { background: var(--surface); color: var(--fg); border: 1px solid #354a63; }
+button.ghost:hover:not(:disabled), .demo-launch button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.field-help, .field-help .text-action { font-size: 12px; }
+.demo-launch { background: var(--surface); border-color: var(--border); }
+.demo-launch span { color: var(--muted); }
+.demo-launch strong { color: var(--fg); }
+.api-line { color: var(--muted); }
+.result-state { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.result-state[data-state="running"] { color: #efd078; background: #302a19; border-color: #75633a; }
+.result-state[data-state="complete"] { color: #7adbb1; background: #132d28; border-color: #326a58; }
+.result-state[data-state="error"], #status.err { color: #ff879e; background: #321d2b; border-color: #7e3b51; }
+.tool-empty { min-height: 260px; background-color: var(--surface); background-image: linear-gradient(#26374c40 1px, transparent 1px), linear-gradient(90deg, #26374c40 1px, transparent 1px); background-size: 28px 28px; }
+.tool-empty > div { background: #0c1523ed; border: 0; padding: 24px; }
+.tool-empty h2 { color: #c7d7e9; font-size: 21px; font-weight: 500; }
+.tool-empty p { font-size: 13px; }
+.workspace-state-code { color: var(--accent); font: 10px/1.5 ui-monospace, Consolas, monospace; letter-spacing: .18em; }
+.intel-reticle { width: 44px; height: 44px; margin: 0 auto 18px; border: 1px solid #3a6373; border-radius: 50%; display: grid; place-items: center; position: relative; }
+.intel-reticle::before { content: ''; width: 20px; height: 20px; border: 1px solid #61ddd277; border-radius: 50%; }
+.intel-reticle::after { content: ''; position: absolute; width: 4px; height: 4px; background: var(--accent); border-radius: 50%; }
+.result-nav { top: 70px; background: #101b2bf5; }
+.result-nav a { color: var(--muted); }
+th { background: var(--surface); }
+tbody tr:hover { background: #16283b; }
+.finding-description, .path-change p, .node-detail ul, .help-grid ol, .help-grid ul { color: #b1c2d6; }
+code { background: #1d3045; color: #c5e4ed; }
+#graph svg, #graphDetail { background: var(--surface); border-color: var(--border); }
+#graph text { fill: var(--fg); }
+.impact-path { background: #2b1b2a; border-color: #704054; border-left-color: var(--chip-crit); }
+.impact-path strong { color: var(--chip-crit); }
+.verdict.ok .verdict-value, .evidence-tag.proven_static { color: var(--chip-low); }
+.verdict.bad .verdict-value { color: var(--chip-crit); }
+.verdict.warn .verdict-value, .evidence-tag.potential { color: var(--chip-med); }
+.evidence-tag.unknown { color: var(--muted); }
+.page-footer { border-color: var(--border); color: var(--muted); font-size: 11px; }
+#scanSection, #resultsArea, #compareSection, #helpPanel { scroll-margin-top: 90px; }
+@media (max-width: 820px) { .intel-stamp { display: none; } .app-nav a { padding-inline: 9px; } }
+@media (max-width: 600px) {
+  .appbar-inner { height: 60px; gap: 12px; }
+  .app-brand { font-size: 14px; }
+  .app-nav a { font-size: 11px; padding: 20px 6px 18px; }
+  .page-wrap { padding-top: 28px; }
+  .scan-body { padding: 18px 14px; }
+  .result-nav { top: 60px; }
+  .tool-empty { padding: 22px 12px; }
+}
+
 </style>
 </head>
 <body>
@@ -968,11 +1063,12 @@
   <main class="page-wrap" id="workspace">
     <section class="utility-intro" aria-labelledby="page-title">
       <div>
-        <p class="utility-kicker">AI SUPPLY-CHAIN ANALYSIS</p>
-        <h1 id="page-title">Inspect a repository</h1>
+        <p class="utility-kicker">AI SUPPLY-CHAIN INTELLIGENCE</p>
+        <h1 id="page-title">Understand your AI attack surface.</h1>
         <p>Discover AI components, prioritize supply-chain risks, and trace every finding
           to file-and-line evidence.</p>
       </div>
+      <aside class="intel-stamp" aria-label="Analysis principles"><strong>STATIC / EVIDENCE-BASED</strong>TRACE EVERY FINDING TO SOURCE</aside>
     </section>
 
     <section class="scan-panel" id="scanSection" aria-labelledby="scan-panel-title">
@@ -1062,7 +1158,7 @@
 
       <section class="tool-empty" id="emptyState" aria-labelledby="workspaceStateTitle">
         <div>
-          <span class="workspace-state-code" id="workspaceStateCode">READY</span>
+          <div class="intel-reticle" aria-hidden="true"></div><span class="workspace-state-code" id="workspaceStateCode">READY</span>
           <h2 id="workspaceStateTitle">No analysis loaded</h2>
           <p id="workspaceStateCopy">Enter a repository URL above and start the analysis.
             Findings and evidence will appear here.</p>
