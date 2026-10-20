@@ -183,7 +183,7 @@ def _run_git(label: str, command: list[str], *, timeout: int) -> None:
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true", "PATH": _path()},
+            env=_git_env(),
         )
     except subprocess.TimeoutExpired as exc:
         raise CloneError(f"git {label} timed out after {timeout}s") from exc
@@ -197,6 +197,21 @@ def _path() -> str:
     import os
 
     return os.environ.get("PATH", "/usr/bin:/bin")
+
+
+# Host variables the OS itself needs for git to run at all. On Windows, Winsock
+# cannot initialise without SYSTEMROOT and every clone fails with
+# "getaddrinfo() thread failed to start". Nothing git-specific (GIT_*, config,
+# credentials) is passed through.
+_OS_ENV = ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+
+
+def _git_env() -> dict[str, str]:
+    import os
+
+    env = {k: os.environ[k] for k in _OS_ENV if k in os.environ}
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true", "PATH": _path()})
+    return env
 
 
 def _last_line(text: str | None) -> str:
