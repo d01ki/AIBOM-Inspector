@@ -90,6 +90,26 @@ def test_git_never_materializes_symlinks(monkeypatch: Any) -> None:
     assert "protocol.file.allow=never" in commands[0]
 
 
+def test_git_env_keeps_os_essentials_but_not_the_rest(monkeypatch: Any) -> None:
+    # Without SYSTEMROOT, Winsock cannot initialise on Windows and every clone
+    # fails with "getaddrinfo() thread failed to start".
+    envs: list[dict[str, str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        envs.append(kwargs["env"])
+        Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(clone_mod.subprocess, "run", fake_run)
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/attacker/gitconfig")
+    with clone_repo(URL):
+        pass
+    assert envs[0]["SYSTEMROOT"] == r"C:\Windows"
+    assert envs[0]["GIT_TERMINAL_PROMPT"] == "0"
+    assert "GIT_CONFIG_GLOBAL" not in envs[0]
+
+
 def test_oversized_checkout_is_rejected(monkeypatch: Any) -> None:
     def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         dest = Path(cmd[-1])
