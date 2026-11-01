@@ -7,7 +7,6 @@ binds, and what those tools do — to an *explicitly declared* cloud identity an
 its identity policy. Comparing two revisions then shows when an agent gains a
 **potential** capability even though no model, package, prompt or tool changed.
 
-Design source: [AIBOM_Inspector_Agent_Identity_Privilege_Drift_Design.md](AIBOM_Inspector_Agent_Identity_Privilege_Drift_Design.md).
 This page documents what is **implemented and tested**; anything not listed here
 is not supported.
 
