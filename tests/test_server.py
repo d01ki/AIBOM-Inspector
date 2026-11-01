@@ -261,3 +261,43 @@ def test_cross_file_demo_fixed_revision_removes_the_path(client: TestClient) -> 
 
 def test_diff_demo_rejects_an_unknown_scenario(client: TestClient) -> None:
     assert client.post("/api/diff/demo?scenario=nope").status_code == 400
+
+
+def test_scan_and_demo_carry_agent_security(client: TestClient) -> None:
+    scanned = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+              "resolve": False, "vulns": False},
+    ).json()
+    demo = client.post("/api/demo").json()
+    for payload in (scanned, demo):
+        agents = payload["agent_security"]
+        assert agents is not None and "error" not in agents
+    assert demo["agent_security"]["agents"], "the sample app defines an Agents SDK agent"
+    # No identity manifest in the sample: never guessed, always an unknown with a reason.
+    assert "identity_unmapped" in {u["reason"] for u in demo["agent_security"]["unknowns"]}
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gated_type"),
+    [
+        ("agent-privilege-drift", "permission_scope_expanded"),
+        ("mcp-tool-exposure", "mcp_tool_exposure_added"),
+    ],
+)
+def test_agent_drift_demo_is_offline_and_verifies_the_fix(
+    client: TestClient, scenario: str, gated_type: str
+) -> None:
+    resp = client.post(f"/api/agent-drift/demo?scenario={scenario}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data["reports"]) == {"baseline", "candidate", "fixed"}
+    introduced = data["introduced"]
+    assert introduced["security_drift"] is True
+    assert gated_type in {c["type"] for c in introduced["changes"] if c["gates"]}
+    assert not [c for c in data["residual"]["changes"] if c["gates"]]
+    assert data["scenario"]["changed"]
+
+
+def test_agent_drift_demo_rejects_an_unknown_scenario(client: TestClient) -> None:
+    assert client.post("/api/agent-drift/demo?scenario=nope").status_code == 400

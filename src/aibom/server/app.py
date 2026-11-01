@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from aibom import __version__
+from aibom.agent_security.analyzer import analyze as analyze_agents
+from aibom.agent_security.safeio import InputError
+from aibom.agent_security.scenario import SCENARIOS, run_scenario, scenario_root
 from aibom.compliance.minimum_elements import evaluate_cyclonedx
 from aibom.demo import (
     crossfile_drift_demo_paths,
@@ -120,13 +123,47 @@ def create_app() -> FastAPI:
     def scan(
         req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
     ) -> dict[str, Any]:
-        result = _scan(req, cloner)
-        return _to_payload(req.repo_url, result)
+        result, agents = _scan_with_agents(req, cloner)
+        return _to_payload(req.repo_url, result, agents)
 
     @app.post("/api/demo")
     def demo_scan() -> dict[str, Any]:
         result = _run_demo()
-        return _to_payload("built-in://impact-demo", result)
+        path = impact_demo_path()
+        agents = _agent_payload(path, result, "built-in://impact-demo") if path else None
+        return _to_payload("built-in://impact-demo", result, agents)
+
+    @app.post("/api/agent-drift/demo")
+    def agent_drift_demo(scenario: str = "agent-privilege-drift") -> dict[str, Any]:
+        """Offline Baseline -> Candidate -> Fixed privilege drift, as ``aibom demo --scenario``."""
+        meta = SCENARIOS.get(scenario)
+        if meta is None:
+            raise HTTPException(
+                status_code=400, detail=f"scenario must be one of: {', '.join(SCENARIOS)}"
+            )
+        root = scenario_root(scenario)
+        if root is None:
+            raise HTTPException(
+                status_code=503, detail=f"the built-in {scenario} scenario is unavailable"
+            )
+        outcome = run_scenario(root, scenario)
+        return {
+            "scenario": {
+                "name": meta.name,
+                "changed": meta.changed,
+                "change": meta.change,
+                "fix": meta.fix,
+            },
+            "revisions": {
+                stage: _revision_summary(scan) for stage, scan in outcome.scans.items()
+            },
+            "reports": {
+                stage: report.model_dump(mode="json") for stage, report in outcome.reports.items()
+            },
+            "introduced": outcome.introduced.model_dump(mode="json"),
+            "fixed": outcome.fixed.model_dump(mode="json"),
+            "residual": outcome.residual.model_dump(mode="json"),
+        }
 
     @app.post("/api/report", response_class=HTMLResponse)
     def report(
@@ -253,6 +290,25 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
 
 
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
+    return _scan_with_agents(req, cloner, agents=False)[0]
+
+
+def _agent_payload(path: Path, result: ScanResult, label: str) -> dict[str, Any]:
+    """Agent -> MCP -> tool -> operation analysis, or the reason it could not run.
+
+    Uses ``aibom-identity.yaml`` from the target when present (as the CLI does);
+    without it every verdict is ``unknown``, never guessed.
+    """
+    try:
+        report = analyze_agents(path, result.inventory, display_target=label)
+    except (InputError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
+    return report.model_dump(mode="json")
+
+
+def _scan_with_agents(
+    req: ScanRequest, cloner: Cloner, *, agents: bool = True
+) -> tuple[ScanResult, dict[str, Any] | None]:
     try:
         display = normalize_repo_url(req.repo_url)
     except CloneError as exc:
@@ -269,7 +325,8 @@ def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
                 display_target=display,
             )
             result.inventory.stats.clone_ms = clone_ms
-            return result
+            agent_report = _agent_payload(path, result, display) if agents else None
+            return result, agent_report
     except CloneError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -286,7 +343,9 @@ def _run_demo() -> ScanResult:
     )
 
 
-def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
+def _to_payload(
+    repo_url: str, result: ScanResult, agent_security: dict[str, Any] | None = None
+) -> dict[str, Any]:
     inv = result.inventory
     policy_inventory = production_view(inv)
     bom = to_cyclonedx(inv)
@@ -309,6 +368,7 @@ def _to_payload(repo_url: str, result: ScanResult) -> dict[str, Any]:
         "inventory": inv.model_dump(),
         "cyclonedx": bom,
         "minimum_elements": evaluate_cyclonedx(bom).to_dict(),
+        "agent_security": agent_security,
     }
 
 

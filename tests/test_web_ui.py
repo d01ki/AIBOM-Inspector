@@ -90,3 +90,17 @@ def test_the_page_can_be_pointed_at_a_backend(page: str) -> None:
     assert 'id="apiEndpoint"' in page
     assert "BackendUnavailable" in page
     assert "/api/health" in page
+
+
+def test_agent_security_leads_and_compliance_is_a_tab(page: str) -> None:
+    """The security graph is the default result view; SBOM conformance is secondary."""
+    tabs = re.findall(r'class="result-tab" data-tab="(\w+)"', page)
+    assert tabs[0] == "agent" and "compliance" in tabs
+    assert 'id="agentSection" data-panel="agent"' in page
+    assert 'data-panel="compliance"' in page and 'id="elementsSection"' in page
+    assert 'selectTab("agent")' in page
+    # The page renders the analyzer's verdicts and unknowns; it does not compute its own.
+    assert "capability_paths" in page and "unknowns" in page
+    assert '"/api/agent-drift/demo?scenario="' in page
+    # Browser auto-translation mixed languages into the demo UI.
+    assert '<html lang="en" translate="no">' in page
