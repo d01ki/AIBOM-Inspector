@@ -166,8 +166,9 @@ def main() -> None:
     results = [score_case(case, args.checkouts) for case in cases]
     totals = summarize(results)
     payload = {"totals": totals, "cases": results}
-    args.out.with_suffix(".json").write_text(json.dumps(payload, indent=2) + "\n", "utf-8")
-    args.out.with_suffix(".md").write_text(markdown(results, totals), "utf-8")
+    # Bytes, not write_text: on Windows text mode would turn "\n" into "\r\n".
+    args.out.with_suffix(".json").write_bytes((json.dumps(payload, indent=2) + "\n").encode())
+    args.out.with_suffix(".md").write_bytes(markdown(results, totals).encode("utf-8"))
     for category, row in totals.items():
         print(f"{category:18} P={row['precision']} R={row['recall']} "
               f"(tp={row['tp']} fp={row['fp']} fn={row['fn']})")
