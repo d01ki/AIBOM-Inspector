@@ -1,0 +1,12 @@
+# Demo-only identity mapping. The role name is fictitious; no credentials here.
+schema_version: 1
+agents:
+  - agent_ref: "agent:reviewer"
+    source: "app/agent.py:reviewer"
+    identity_ref: "aws:role/demo-review-role"
+identities:
+  - id: "aws:role/demo-review-role"
+    provider: aws
+    policies:
+      - "policy/review-role.json"
+    provenance: "explicit_manifest"

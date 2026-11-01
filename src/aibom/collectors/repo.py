@@ -365,6 +365,12 @@ class RepoCollector(Collector):
         # Bindings and steerability span files, so tools are graded last.
         link_tools(inventory)
 
+    def index_project(self) -> ProjectIndex:
+        """Parse the target into a :class:`ProjectIndex` without running detectors."""
+        self._index_project(self._iter_files())
+        assert self.project is not None
+        return self.project
+
     # -- project index ---------------------------------------------------------
 
     def _index_project(self, files: list[Path]) -> None:

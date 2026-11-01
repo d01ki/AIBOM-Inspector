@@ -189,6 +189,14 @@ The dated, source-linked competitive analysis and claim boundaries are in
 - **Reachability drift** — emits a critical `impact_path_added` when the
   component BOM is unchanged but a new trust-boundary path makes a powerful
   bound capability steerable
+- **Agent privilege drift** — maps OpenAI Agents SDK agents to an explicitly
+  declared AWS identity (`aibom-identity.yaml`), joins their bound tools'
+  boto3 operations with a bounded IAM identity-policy evaluation
+  (Allow/Deny/Unknown — `Condition`, `NotAction`, `NotResource` stay unknown),
+  and reports `permission_scope_expanded` when the AI-BOM is unchanged but a
+  policy change lets an agent's tool operation through. Verdicts cover the
+  supplied policies only, never AWS effective authorization —
+  [docs/agent-privilege-drift.md](docs/agent-privilege-drift.md)
 - **Complete dependency BOM** — every package in `requirements*.txt`,
   `pyproject.toml`, `Pipfile`, `package.json`, `go.mod`, `Cargo.toml`,
   `pom.xml`, `build.gradle`, `Gemfile`, `composer.json` and `*.csproj` with
@@ -321,6 +329,11 @@ aibom diff ./baseline ./candidate --output drift.json --fail-on high
 # checked-in demo: identical model/SDK, but the candidate taints a system prompt
 aibom diff examples/trust-boundary-drift/baseline \
   examples/trust-boundary-drift/candidate --fail-on high
+
+# agent privilege drift: same AI-BOM, the agent's role policy gains s3:PutObject
+aibom demo --scenario agent-privilege-drift --output-dir out/
+aibom diff examples/agent-privilege-drift/baseline   examples/agent-privilege-drift/candidate --agent-privileges --fail-on high
+aibom scan ./app --identity-manifest aibom-identity.yaml -o inv.json  # adds "agent_security"
 
 aibom scan --help   # everything else: confidence filter, detector/rule control, HF cache
 ```

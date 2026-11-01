@@ -1,0 +1,272 @@
+"""Versioned data model for agent identity, authorization and capability paths.
+
+Everything here lives in its own ``agent_security`` namespace so the existing
+inventory JSON, SARIF and CycloneDX outputs stay byte-for-byte unchanged.
+
+Vocabulary, kept deliberately narrow:
+
+* a *verdict* is about the **supplied** identity policies only.  It never claims
+  AWS effective authorization (SCPs, boundaries, session and resource policies
+  are out of scope), so ``potentially_allowed`` always carries constraints and
+  ``proven`` is always ``False``;
+* ``no_matching_allow_in_supplied_policies`` is **not** "cannot happen";
+* ``unknown`` always carries a machine-readable reason.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+SCHEMA_VERSION = "1.0"
+
+
+class SourceType(str, Enum):
+    """How a node or edge became known."""
+
+    OBSERVED_STATIC = "observed_static"
+    EXPLICIT_MANIFEST = "explicit_manifest"
+    INFERRED = "inferred"
+    UNKNOWN = "unknown"
+
+
+class ResolutionStatus(str, Enum):
+    RESOLVED = "resolved"
+    UNRESOLVED = "unresolved"
+    AMBIGUOUS = "ambiguous"
+    UNSUPPORTED = "unsupported"
+    MISSING = "missing"
+
+
+class Verdict(str, Enum):
+    """Bounded evaluation of one action/resource against supplied policies."""
+
+    POTENTIALLY_ALLOWED = "potentially_allowed"
+    EXPLICITLY_DENIED = "explicitly_denied"
+    NO_MATCHING_ALLOW = "no_matching_allow_in_supplied_policies"
+    UNKNOWN = "unknown"
+
+
+class SecEvidence(BaseModel):
+    """A pointer a reviewer can re-check: a source line or a JSON pointer."""
+
+    file: str
+    line: int | None = Field(default=None, ge=1)
+    pointer: str | None = Field(default=None, description="RFC 6901 pointer into a JSON file.")
+    kind: str = Field(description="ast | manifest | iam_policy")
+    detail: str | None = Field(default=None, description="Sanitized description, never secrets.")
+
+    def ref(self) -> str:
+        if self.pointer is not None:
+            return f"{self.file}#{self.pointer}"
+        if self.line is not None:
+            return f"{self.file}:{self.line}"
+        return self.file
+
+
+class UnknownItem(BaseModel):
+    """Something the analysis could not resolve — never silently treated as safe."""
+
+    subject: str
+    reason: str = Field(description="Stable machine-readable reason code.")
+    detail: str = ""
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class ToolOperation(BaseModel):
+    """A cloud operation a tool is shown (or declared) to perform."""
+
+    tool_id: str
+    tool_name: str
+    action: str = Field(description="IAM action, e.g. s3:PutObject.")
+    resource: str = Field(description="Requested ARN; '*' when unresolved.")
+    resource_resolved: bool = False
+    hazard: str = Field(description="read | list | write | delete | secrets_read | admin")
+    source_type: SourceType = SourceType.OBSERVED_STATIC
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class AgentIdentity(BaseModel):
+    """A cloud identity an agent is declared to run as."""
+
+    id: str
+    provider: str
+    policies: list[str] = Field(default_factory=list)
+    provenance: SourceType = SourceType.EXPLICIT_MANIFEST
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class PolicyStatement(BaseModel):
+    index: int
+    sid: str | None = None
+    effect: str
+    actions: list[str] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
+    unsupported: list[str] = Field(
+        default_factory=list, description="Elements present but not evaluated."
+    )
+
+
+class AuthorizationPolicy(BaseModel):
+    """A parsed identity policy document (bounded AWS subset)."""
+
+    id: str = Field(description="Workspace-relative path; stable across revisions.")
+    provider: str = "aws"
+    status: ResolutionStatus = ResolutionStatus.RESOLVED
+    error: str | None = None
+    statements: list[PolicyStatement] = Field(default_factory=list)
+
+
+class Permission(BaseModel):
+    """A grant pattern from a clean (fully evaluated) statement."""
+
+    identity_id: str
+    effect: str
+    action: str
+    resource: str
+    evidence: SecEvidence
+
+
+class AgentRecord(BaseModel):
+    id: str = Field(description="Manifest agent_ref when mapped, else agent:<file>:<symbol>.")
+    source: str = Field(description="<file>:<symbol> of the constructor assignment.")
+    display_name: str | None = None
+    framework: str = "openai-agents"
+    identity_id: str | None = None
+    identity_source_type: SourceType = SourceType.UNKNOWN
+    tool_ids: list[str] = Field(default_factory=list)
+    external_input: bool = Field(
+        default=False, description="Agent instructions proven to reach untrusted input."
+    )
+    management_status: str = "unknown"
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class CapabilityPath(BaseModel):
+    """agent -RUNS_AS-> identity, agent -BINDS_TOOL-> tool -REACHES-> operation."""
+
+    key: str = Field(description="Stable key: agent|identity|tool|action|resource.")
+    agent_id: str
+    identity_id: str | None
+    tool_id: str
+    tool_name: str
+    action: str
+    resource: str
+    hazard: str
+    verdict: Verdict
+    confidence_level: str = Field(description="conditional | unknown | n/a")
+    constraints: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    evidence: list[SecEvidence] = Field(default_factory=list)
+    external_input: bool = False
+    proven: bool = False
+
+
+class GraphNode(BaseModel):
+    id: str
+    kind: str
+    label: str
+    source_type: SourceType
+    resolution_status: ResolutionStatus = ResolutionStatus.RESOLVED
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    kind: str
+    source_type: SourceType
+    resolution_status: ResolutionStatus = ResolutionStatus.RESOLVED
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class AnalysisScope(BaseModel):
+    """What this analysis can and cannot see — part of every report."""
+
+    frameworks: list[str] = Field(default_factory=lambda: ["python:openai-agents"])
+    policy_language: str = "aws-iam-identity-policy-subset"
+    evaluated_elements: list[str] = Field(
+        default_factory=lambda: ["Effect", "Action", "Resource", "Sid"]
+    )
+    not_evaluated: list[str] = Field(
+        default_factory=lambda: [
+            "NotAction",
+            "NotResource",
+            "Condition",
+            "resource-based policies",
+            "SCP",
+            "permission boundaries",
+            "session policies",
+            "role trust policies",
+        ]
+    )
+    manifest: str | None = None
+    policies_visible: list[str] = Field(default_factory=list)
+
+
+class AgentSecurityReport(BaseModel):
+    schema_version: str = SCHEMA_VERSION
+    target: str
+    scope: AnalysisScope = Field(default_factory=AnalysisScope)
+    agents: list[AgentRecord] = Field(default_factory=list)
+    identities: list[AgentIdentity] = Field(default_factory=list)
+    policies: list[AuthorizationPolicy] = Field(default_factory=list)
+    permissions: list[Permission] = Field(default_factory=list)
+    operations: list[ToolOperation] = Field(default_factory=list)
+    capability_paths: list[CapabilityPath] = Field(default_factory=list)
+    unknowns: list[UnknownItem] = Field(default_factory=list)
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+
+
+class RemediationAdvice(BaseModel):
+    why_it_matters: str
+    conditions: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    retest_command: str
+
+
+class PrivilegeChange(BaseModel):
+    """One security-semantic change between two agent-security reports."""
+
+    id: str
+    type: str = Field(
+        description=(
+            "permission_scope_expanded | privilege_path_added | "
+            "privileged_identity_binding_added | identity_permission_expanded | "
+            "potential_privilege_removed | review_required"
+        )
+    )
+    change_status: str = Field(description="supported | review_required")
+    agent: str | None = None
+    identity: str | None = None
+    tool: str | None = None
+    action: str | None = None
+    affected_resource: str | None = None
+    before: list[str] = Field(default_factory=list)
+    after: list[str] = Field(default_factory=list)
+    before_verdict: str | None = None
+    after_verdict: str | None = None
+    severity: str = Field(description="info | low | medium | high | critical")
+    severity_reasons: list[str] = Field(default_factory=list)
+    certainty: str = Field(description="conditional | unknown")
+    evidence: list[str] = Field(default_factory=list)
+    remediation: RemediationAdvice | None = None
+    gates: bool = Field(default=False, description="Only supported additions can fail CI.")
+
+
+class PrivilegeDriftReport(BaseModel):
+    schema_version: str = SCHEMA_VERSION
+    baseline: str
+    candidate: str
+    bom_components_unchanged: bool | None = None
+    bom_differences: list[str] = Field(default_factory=list)
+    security_drift: bool
+    scope_mismatch: list[str] = Field(
+        default_factory=list, description="Visibility differences that weaken the comparison."
+    )
+    changes: list[PrivilegeChange] = Field(default_factory=list)
+    unknowns_baseline: int = 0
+    unknowns_candidate: int = 0
