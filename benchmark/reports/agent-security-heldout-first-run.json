@@ -1,0 +1,148 @@
+{
+  "totals": {
+    "agents": {
+      "tp": 49,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "delegations": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "mcp_server_tools": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 5,
+      "precision": null,
+      "recall": 0.0
+    },
+    "mcp_connections": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": null,
+      "recall": null
+    },
+    "server_links": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": null,
+      "recall": null
+    },
+    "operations": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 8,
+      "precision": null,
+      "recall": 0.0
+    }
+  },
+  "cases": [
+    {
+      "id": "oa-basic-tools-research",
+      "repository": "openai/openai-agents-python",
+      "commit": "e355d69152d4f4730dfb03b63dbce53e8d9f5d8c",
+      "root": "examples",
+      "categories": {
+        "agents": {
+          "tp": 49,
+          "fp": [],
+          "fn": []
+        },
+        "delegations": {
+          "tp": 3,
+          "fp": [],
+          "fn": []
+        },
+        "mcp_server_tools": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "mcp_connections": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "server_links": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "operations": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        }
+      },
+      "unknown_reasons": [
+        "delegate_unresolved",
+        "identity_unmapped",
+        "mcp_servers_not_a_literal_list",
+        "remote_server_tools_unknown",
+        "server_outside_analyzed_sources",
+        "tool_definition_unresolved"
+      ]
+    },
+    {
+      "id": "awslabs-cloudtrail-mcp-server",
+      "repository": "awslabs/mcp",
+      "commit": "c6951b9a09d0860550ebabd1a4ba66e36cb7212e",
+      "root": "src/cloudtrail-mcp-server",
+      "categories": {
+        "agents": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "delegations": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "mcp_server_tools": {
+          "tp": 0,
+          "fp": [],
+          "fn": [
+            "awslabs/cloudtrail_mcp_server/server.py|get_query_results",
+            "awslabs/cloudtrail_mcp_server/server.py|get_query_status",
+            "awslabs/cloudtrail_mcp_server/server.py|lake_query",
+            "awslabs/cloudtrail_mcp_server/server.py|list_event_data_stores",
+            "awslabs/cloudtrail_mcp_server/server.py|lookup_events"
+          ]
+        },
+        "mcp_connections": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "server_links": {
+          "tp": 0,
+          "fp": [],
+          "fn": []
+        },
+        "operations": {
+          "tp": 0,
+          "fp": [],
+          "fn": [
+            "awslabs/cloudtrail_mcp_server/tools.py:get_query_results|cloudtrail:DescribeQuery",
+            "awslabs/cloudtrail_mcp_server/tools.py:get_query_results|cloudtrail:GetQueryResults",
+            "awslabs/cloudtrail_mcp_server/tools.py:get_query_status|cloudtrail:DescribeQuery",
+            "awslabs/cloudtrail_mcp_server/tools.py:lake_query|cloudtrail:DescribeQuery",
+            "awslabs/cloudtrail_mcp_server/tools.py:lake_query|cloudtrail:StartQuery",
+            "awslabs/cloudtrail_mcp_server/tools.py:list_event_data_stores|cloudtrail:GetEventDataStore",
+            "awslabs/cloudtrail_mcp_server/tools.py:list_event_data_stores|cloudtrail:ListEventDataStores",
+            "awslabs/cloudtrail_mcp_server/tools.py:lookup_events|cloudtrail:LookupEvents"
+          ]
+        }
+      },
+      "unknown_reasons": []
+    }
+  ]
+}

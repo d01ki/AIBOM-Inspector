@@ -79,11 +79,15 @@ class ToolOperation(BaseModel):
 
     tool_id: str
     tool_name: str
+    tool_file: str | None = Field(default=None, description="File defining the tool.")
     action: str = Field(description="IAM action, e.g. s3:PutObject.")
     resource: str = Field(description="Requested ARN; '*' when unresolved.")
     resource_resolved: bool = False
     hazard: str = Field(description="read | list | write | delete | secrets_read | admin")
     source_type: SourceType = SourceType.OBSERVED_STATIC
+    derived_action: bool = Field(
+        default=False, description="IAM action derived from the boto3 API name."
+    )
     evidence: list[SecEvidence] = Field(default_factory=list)
 
 
@@ -202,6 +206,10 @@ class McpConnectionRecord(BaseModel):
     launch: str | None = Field(default=None, description="Command basename + repository file.")
     server_id: str | None = None
     filter_status: str = Field(description="none | static | unresolved")
+    approval: str = Field(
+        default="none",
+        description="require_approval: none | always | never | per_tool | unresolved",
+    )
     exposed_tool_ids: list[str] = Field(default_factory=list)
     unresolved_reason: str | None = None
     evidence: list[SecEvidence] = Field(default_factory=list)

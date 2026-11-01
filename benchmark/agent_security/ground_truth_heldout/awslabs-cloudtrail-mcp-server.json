@@ -1,0 +1,64 @@
+{
+  "case": "awslabs/mcp/src/cloudtrail-mcp-server \u2014 held out",
+  "review": "Labeled by reading tools.py/server.py BEFORE the scanner was run. Tools are bound methods registered call-style (mcp.tool(name=...)(self.method)) inside CloudTrailTools.register(mcp), invoked from server.py on its MCPServer. The client comes from self._get_cloudtrail_client() -> boto3.Session(...).client('cloudtrail').",
+  "agents": [],
+  "delegations": [],
+  "mcp_server_tools": [
+    [
+      "awslabs/cloudtrail_mcp_server/server.py",
+      "lookup_events"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/server.py",
+      "lake_query"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/server.py",
+      "get_query_status"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/server.py",
+      "get_query_results"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/server.py",
+      "list_event_data_stores"
+    ]
+  ],
+  "mcp_connections": [],
+  "server_links": [],
+  "operations": [
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:lookup_events",
+      "cloudtrail:LookupEvents"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:lake_query",
+      "cloudtrail:StartQuery"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:lake_query",
+      "cloudtrail:DescribeQuery"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:get_query_status",
+      "cloudtrail:DescribeQuery"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:get_query_results",
+      "cloudtrail:GetQueryResults"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:get_query_results",
+      "cloudtrail:DescribeQuery"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:list_event_data_stores",
+      "cloudtrail:ListEventDataStores"
+    ],
+    [
+      "awslabs/cloudtrail_mcp_server/tools.py:list_event_data_stores",
+      "cloudtrail:GetEventDataStore"
+    ]
+  ]
+}

@@ -58,12 +58,12 @@ The server is also listed in `.mcp.json`; that entry is recorded as a
 
 | Layer | Supported in P0 | Everything else |
 |---|---|---|
-| Agent definition | Python OpenAI Agents SDK `x = Agent(...)` (module or function scope) in production sources | Unknown / not reported |
+| Agent definition | Python OpenAI Agents SDK `x = Agent(...)` / `Agent[T](...)` (module or function scope) in production sources | Unknown / not reported |
 | Tool binding | Explicit `tools=[...]` resolved by the existing binding analysis (same tool component IDs as the inventory, incl. imported tools and `TOOLS` lists) | `tool_definition_unresolved` |
-| Tool → operation | `boto3.client("<svc>")` receiver + mapped method (S3, DynamoDB, Secrets Manager, a few IAM methods; see `operations.ACTIONS`) in the tool body **or in project helpers it calls (≤3 hops, cross-file, each hop kept as evidence)**; the client may be imported from another module; or an explicit `tools:` entry in the manifest | `boto3.resource`, sessions, dynamic dispatch: not seen. A bucket passed as a helper parameter stays `*` |
+| Tool → operation | `boto3.client("<svc>")`, `boto3.Session().client(...)`, or a factory function / `self._method()` returning one for a single known service; method mapped by `operations.ACTIONS` (S3, DynamoDB, Secrets Manager, some IAM), otherwise derived from the API name and flagged `action-derived-from-api-name`, in the tool body **or in project helpers it calls (≤3 hops, cross-file, each hop kept as evidence)**; the client may be imported from another module; or an explicit `tools:` entry in the manifest | `boto3.resource`, dynamic dispatch: not seen. A bucket passed as a helper parameter stays `*` |
 | Agent → identity | **Only** the identity manifest, matched by `<file>:<variable>` | `identity_unmapped`; never inferred from names |
-| MCP (P1-A) | Python `FastMCP(...)` servers and `@srv.tool` tools; Agents SDK `Agent(mcp_servers=[...])` with `MCPServerStdio` / `MCPServerSse` / `MCPServerStreamableHttp` (assignment, `async with … as`, or imported); stdio linked to a repository server only via literal `.py` / `-m module` args; literal `tool_filter` (`create_static_tool_filter` or dict, allowed/blocked); client configs `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `mcp_config.json` (`mcpServers` / `servers`) | Remote servers: `remote_server_tools_unknown`; non-literal filter: all tools treated as exposed + `mcp_tool_filter_unresolved`; servers outside the repo: `server_outside_analyzed_sources`. Servers are never started or enumerated |
-| Delegation (P1) | `handoffs=[a, handoff(b), handoff(agent=c)]` and `tools=[x.as_tool(...)]` in inline lists; target must be a resolvable `Agent(...)` assignment (same file or imported). One hop | `delegate_unresolved` unknown |
+| MCP (P1-A) | Python `FastMCP(...)` / `MCPServer(...)` servers; `@srv.tool` tools and call-style `srv.tool(...)(fn \| self.method)` registration (also through a `register(srv)` function or method); client passed into the agent-building function resolved one call hop back; literal `require_approval` recorded; Agents SDK `Agent(mcp_servers=[...])` with `MCPServerStdio` / `MCPServerSse` / `MCPServerStreamableHttp` (assignment, `async with … as`, or imported); stdio linked to a repository server only via literal `.py` / `-m module` args; literal `tool_filter` (`create_static_tool_filter` or dict, allowed/blocked); client configs `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `mcp_config.json` (`mcpServers` / `servers`) | Remote servers: `remote_server_tools_unknown`; non-literal filter: all tools treated as exposed + `mcp_tool_filter_unresolved`; servers outside the repo: `server_outside_analyzed_sources`. Servers are never started or enumerated |
+| Delegation (P1) | `handoffs=[a, handoff(b), handoff(agent=c)]` and `tools=[x.as_tool(...)]` in inline lists (an `as_tool` result may be a variable), plus `x.handoffs.append(...)` / `.extend([...])`; target must be a resolvable `Agent(...)` assignment (same file or imported). One hop | `delegate_unresolved` unknown |
 | Registry (P1) | `--agent-registry approved_agents.yaml` from the operator: `registered` / `unregistered` by `agent_ref` or `file:variable` alias (case-insensitive) | No registry → `unknown`. Never read from the scan target |
 | Policy | AWS identity policy JSON: `Effect`, `Action`, `Resource`, `Sid`; `*`/`?` wildcards; Deny wins | `NotAction`, `NotResource`, `Condition`, policy variables, `Principal` → **unknown** |
 
@@ -110,6 +110,12 @@ recommended actions, `retest_command`). Fixes are suggested, never applied.
   the agent's; without a mapping the verdict is `unknown`
   (`mcp_server_identity_unmapped`). Paths carry `via: "mcp"`,
   `mcp_server_id`, and the constraints `mcp-server-identity`, `tool-list-static`.
+* `require_approval` on the client (`"always"`, `"never"`, or
+  `{"always": {"tool_names": [...]}}`) is recorded as
+  `mcp_connections[].approval`. Matching paths get the constraint
+  `human-approval-required`. The verdict is unchanged, because the approval
+  callback and the reviewer are runtime facts. A non-literal value is
+  recorded as `unresolved`.
 * Only the command's base name and the resolved repository file are stored;
   other arguments, URLs and `env` values are never written to reports.
 
@@ -202,9 +208,14 @@ called.
   operations, one-hop delegation, approved-agent registry, SARIF. **Not
   implemented:** JS/TS agents and MCP servers, Graph UI; Azure/GCP/OAuth and
   runtime observation (P2).
-* Evaluation so far is the two bundled scenarios plus 57 unit/CLI tests
-  (`tests/test_agent_security*.py`); no precision/recall on external
-  repositories has been measured yet.
+* Evaluation: the two bundled scenarios, unit/CLI tests
+  (`tests/test_agent_security*.py`), and static-extraction precision/recall on
+  pinned public repositories (`benchmark/agent_security/`). Only the frozen
+  held-out first run is an independent number: agents 49/49, delegations 3/3,
+  MCP server tools 0/5 and operations 0/8 (the awslabs call-style
+  registration, fixed afterwards). The ground truth was written by the tool
+  author. Verdicts are not measured on external repositories. See
+  `docs/benchmark-methodology.md`.
 
 ## Arsenal abstract (draft)
 
