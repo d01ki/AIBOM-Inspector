@@ -2,14 +2,18 @@
 
 Supported, deliberately narrow pattern — anything else is not reported:
 
-* ``client = boto3.client("s3")`` (module level or in the tool), then
-  ``client.<method>(...)`` in the tool body; or
-* ``boto3.client("s3").<method>(...)`` directly.
+* ``client = boto3.client("s3")`` (module level or in the function), then
+  ``client.<method>(...)``; the client may also be imported from another
+  project module (``from app.clients import s3``);
+* ``boto3.client("s3").<method>(...)`` directly;
+* the call may sit in the tool body or in a project helper the tool calls,
+  followed through resolvable calls up to :data:`MAX_HELPER_DEPTH` hops.  Each
+  hop is kept as evidence so the path is auditable.
 
 Only methods in :data:`ACTIONS` are mapped to IAM actions.  ``boto3.resource``,
-sessions, ``getattr`` dispatch and helper functions are out of scope (P1).
-Argument *values* are resolved only to build a resource ARN; when the bucket
-or key is not a literal the resource keeps a ``*`` and is marked unresolved.
+sessions and ``getattr`` dispatch are out of scope.  Argument *values* are
+resolved only to build a resource ARN, and only from literals in the function
+that makes the call: a bucket passed in as a helper parameter stays ``*``.
 """
 
 from __future__ import annotations
@@ -18,8 +22,11 @@ import ast
 from dataclasses import dataclass
 
 from aibom.agent_security.models import SecEvidence, SourceType, ToolOperation
+from aibom.detectors.project import ProjectIndex
 from aibom.detectors.python.parser import PythonModule
 from aibom.detectors.python.value_resolver import ValueResolver
+
+MAX_HELPER_DEPTH = 3
 
 
 @dataclass(frozen=True)
@@ -92,51 +99,119 @@ def detect_operations(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
     tool_id: str,
     tool_name: str,
+    project: ProjectIndex | None = None,
 ) -> list[ToolOperation]:
+    """Operations performed by ``function`` or the project helpers it calls."""
+    return _walk(module, function, tool_id, tool_name, project, chain=[], visited=set())
+
+
+def _walk(
+    module: PythonModule,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    tool_id: str,
+    tool_name: str,
+    project: ProjectIndex | None,
+    *,
+    chain: list[SecEvidence],
+    visited: set[tuple[str, int]],
+) -> list[ToolOperation]:
+    key = (module.relative_path, function.lineno)
+    if key in visited or len(chain) > MAX_HELPER_DEPTH:
+        return []
+    visited.add(key)
     resolver = ValueResolver(module)
     found: list[ToolOperation] = []
     for node in ast.walk(function):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        if not isinstance(node, ast.Call):
             continue
-        service = _client_service(module, resolver, node.func.value, node)
-        if service is None:
-            continue
-        spec = ACTIONS.get((service, node.func.attr))
-        if spec is None:
-            continue
-        resource, resolved = _resource(spec, node, resolver)
-        found.append(
-            ToolOperation(
-                tool_id=tool_id,
-                tool_name=tool_name,
-                action=spec.action,
-                resource=resource,
-                resource_resolved=resolved,
-                hazard=spec.hazard,
-                source_type=SourceType.OBSERVED_STATIC,
-                evidence=[
-                    SecEvidence(
-                        file=module.relative_path,
-                        line=node.lineno,
-                        kind="ast",
-                        detail=f"boto3 {service}.{node.func.attr} -> {spec.action}",
+        if isinstance(node.func, ast.Attribute):
+            service = _client_service(module, resolver, node.func.value, node, project)
+            if service is not None:
+                spec = ACTIONS.get((service, node.func.attr))
+                if spec is not None:
+                    found.append(
+                        _operation(module, node, resolver, spec, service, tool_id, tool_name, chain)
                     )
-                ],
+                continue
+        if project is None or len(chain) >= MAX_HELPER_DEPTH:
+            continue
+        helper = project.python_function(module, node.func)
+        if helper is None or helper.info.node is function:
+            continue
+        hop = SecEvidence(
+            file=module.relative_path,
+            line=node.lineno,
+            kind="ast",
+            detail=f"calls helper {helper.module.relative_path}:{helper.info.name}",
+        )
+        found.extend(
+            _walk(
+                helper.module,
+                helper.info.node,
+                tool_id,
+                tool_name,
+                project,
+                chain=[*chain, hop],
+                visited=visited,
             )
         )
     return found
 
 
+def _operation(
+    module: PythonModule,
+    node: ast.Call,
+    resolver: ValueResolver,
+    spec: ActionSpec,
+    service: str,
+    tool_id: str,
+    tool_name: str,
+    chain: list[SecEvidence],
+) -> ToolOperation:
+    assert isinstance(node.func, ast.Attribute)
+    resource, resolved = _resource(spec, node, resolver)
+    return ToolOperation(
+        tool_id=tool_id,
+        tool_name=tool_name,
+        action=spec.action,
+        resource=resource,
+        resource_resolved=resolved,
+        hazard=spec.hazard,
+        source_type=SourceType.OBSERVED_STATIC,
+        evidence=[
+            *(item.model_copy() for item in chain),
+            SecEvidence(
+                file=module.relative_path,
+                line=node.lineno,
+                kind="ast",
+                detail=f"boto3 {service}.{node.func.attr} -> {spec.action}",
+            ),
+        ],
+    )
+
+
 def _client_service(
-    module: PythonModule, resolver: ValueResolver, receiver: ast.AST, at: ast.AST
+    module: PythonModule,
+    resolver: ValueResolver,
+    receiver: ast.AST,
+    at: ast.AST,
+    project: ProjectIndex | None = None,
 ) -> str | None:
     constructor: ast.AST | None = receiver
+    owner, owner_resolver = module, resolver
     if isinstance(receiver, ast.Name):
         assignment = module.assignment_for(receiver.id, at)
         constructor = assignment.value if assignment is not None else None
+        if constructor is None and project is not None and receiver.id in module.aliases:
+            # `from app.clients import s3`: the client is built where it is defined.
+            symbol = project.python_symbol(module, receiver.id)
+            bindings = symbol.module.assignments.get((None, symbol.name)) if symbol else None
+            if symbol is not None and bindings:
+                constructor = max(bindings, key=lambda item: item.line).value
+                owner, owner_resolver = symbol.module, ValueResolver(symbol.module)
     if not isinstance(constructor, ast.Call):
         return None
-    if (module.qualified_name(constructor.func) or "") != "boto3.client":
+    if (owner.qualified_name(constructor.func) or "") != "boto3.client":
         return None
     argument: ast.AST | None = constructor.args[0] if constructor.args else None
     for keyword in constructor.keywords:
@@ -144,7 +219,7 @@ def _client_service(
             argument = keyword.value
     if argument is None:
         return None
-    value = resolver.resolve(argument)
+    value = owner_resolver.resolve(argument)
     return value.value if value.resolved and isinstance(value.value, str) else None
 
 

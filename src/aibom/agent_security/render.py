@@ -45,6 +45,33 @@ def render_report(console: Console, report: AgentSecurityReport) -> None:
                 f"[{style}]{path.verdict.value}[/{style}]",
             )
         console.print(table)
+    for delegation in report.delegations:
+        child = delegation.child_id or f"[magenta]unresolved[/magenta] ({delegation.child_ref})"
+        reachable = [
+            p
+            for p in report.delegate_paths
+            if p.parent_id == delegation.parent_id
+            and p.child_id == delegation.child_id
+            and p.mechanism == delegation.mechanism
+        ]
+        allowed = sorted(
+            {p.action for p in reachable if p.child_verdict is Verdict.POTENTIALLY_ALLOWED}
+        )
+        console.print(
+            f"  delegation: {delegation.parent_id} -{delegation.mechanism}-> {child}; "
+            f"child potentially allowed: {allowed or 'none'} "
+            "[dim](not merged into the parent; guards unverified)[/dim]"
+        )
+    if report.scope.registry is not None:
+        unregistered = [a.id for a in report.agents if a.management_status == "unregistered"]
+        console.print(
+            f"  registry {report.scope.registry}: "
+            + (
+                f"[yellow]unregistered: {', '.join(unregistered)}[/yellow]"
+                if unregistered
+                else "[green]all agents registered[/green]"
+            )
+        )
     if report.unknowns:
         console.print(
             f"[magenta]{len(report.unknowns)} unknown(s)[/magenta] (not treated as safe):"

@@ -139,7 +139,10 @@ class AgentRecord(BaseModel):
     external_input: bool = Field(
         default=False, description="Agent instructions proven to reach untrusted input."
     )
-    management_status: str = "unknown"
+    management_status: str = Field(
+        default="unknown",
+        description="unknown (no registry supplied) | registered | unregistered",
+    )
     evidence: list[SecEvidence] = Field(default_factory=list)
 
 
@@ -161,6 +164,48 @@ class CapabilityPath(BaseModel):
     evidence: list[SecEvidence] = Field(default_factory=list)
     external_input: bool = False
     proven: bool = False
+
+
+class Delegation(BaseModel):
+    """An explicit handoff or agent-as-tool edge between two agents (one hop)."""
+
+    parent_id: str
+    child_id: str | None = Field(default=None, description="None when the target is unresolved.")
+    child_ref: str = Field(description="Source expression naming the delegate, sanitized.")
+    mechanism: str = Field(description="handoff | agent_as_tool")
+    guard_status: str = Field(
+        default="unknown",
+        description="Handoff guards, approvals and identity propagation are not analyzed.",
+    )
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class DelegateCapabilityPath(BaseModel):
+    """A child agent's capability reachable from a parent through delegation.
+
+    Never merged into the parent's own capability paths: the parent's verdict
+    is always ``unknown`` because guards and identity propagation are unverified.
+    """
+
+    key: str = Field(description="Stable key: parent|child|tool|action|resource.")
+    parent_id: str
+    child_id: str
+    mechanism: str
+    tool_id: str
+    tool_name: str
+    action: str
+    resource: str
+    hazard: str
+    child_identity_id: str | None
+    child_verdict: Verdict
+    verdict: Verdict = Verdict.UNKNOWN
+    reasons: list[str] = Field(
+        default_factory=lambda: [
+            "delegation_guard_unverified",
+            "identity_context_propagation_unknown",
+        ]
+    )
+    evidence: list[SecEvidence] = Field(default_factory=list)
 
 
 class GraphNode(BaseModel):
@@ -203,6 +248,9 @@ class AnalysisScope(BaseModel):
         ]
     )
     manifest: str | None = None
+    registry: str | None = Field(
+        default=None, description="Approved-agent registry supplied by the operator, if any."
+    )
     policies_visible: list[str] = Field(default_factory=list)
 
 
@@ -216,6 +264,8 @@ class AgentSecurityReport(BaseModel):
     permissions: list[Permission] = Field(default_factory=list)
     operations: list[ToolOperation] = Field(default_factory=list)
     capability_paths: list[CapabilityPath] = Field(default_factory=list)
+    delegations: list[Delegation] = Field(default_factory=list)
+    delegate_paths: list[DelegateCapabilityPath] = Field(default_factory=list)
     unknowns: list[UnknownItem] = Field(default_factory=list)
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
@@ -236,7 +286,8 @@ class PrivilegeChange(BaseModel):
         description=(
             "permission_scope_expanded | privilege_path_added | "
             "privileged_identity_binding_added | identity_permission_expanded | "
-            "potential_privilege_removed | review_required"
+            "potential_privilege_removed | review_required | delegate_path_added | "
+            "unregistered_agent_added"
         )
     )
     change_status: str = Field(description="supported | review_required")

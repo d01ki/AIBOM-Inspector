@@ -154,14 +154,20 @@
 - Agent → identity comes only from `aibom-identity.yaml`; source code is never
   used to guess the runtime principal. Unmapped agents produce `unknown` paths.
 - Only Python OpenAI Agents SDK `x = Agent(...)` assignments are recognized as
-  agents, and only boto3 `client(...)` method calls in the tool body (not in
-  helpers, `boto3.resource`, sessions or dynamic dispatch) are recognized as
-  operations. Missed operations mean missed paths (false negatives), so an
+  agents, and only boto3 `client(...)` method calls in the tool body or in
+  project helpers reachable through resolvable calls (≤3 hops) are recognized
+  as operations — not `boto3.resource`, sessions, dynamic dispatch, or helpers
+  reached through callbacks/attributes the call graph cannot resolve. Missed operations mean missed paths (false negatives), so an
   empty result is not a clean bill of health.
 - DynamoDB/Secrets Manager/IAM resources are not resolved to concrete ARNs, so
   resource-scoped grants on them evaluate to `unknown`.
-- Delegation (handoffs, agent-as-tool), MCP, JS/TS agents, approved-agent
-  registries and cloud-side policy retrieval are not implemented.
+- Delegation is one hop and only from inline `handoffs=[...]` /
+  `tools=[x.as_tool(...)]` lists; handoff guards, approvals and identity
+  propagation are not analyzed, so delegated capabilities are always
+  `unknown` for the parent and never gate CI.
+- Registry matching is by `agent_ref` or `file:variable` alias only; renamed
+  files or variables need an alias. MCP, JS/TS agents and cloud-side policy
+  retrieval are not implemented.
 - Accuracy has been measured only on the bundled three-stage scenario and unit
   fixtures, not on external repositories.
 - The symlink-escape test is skipped on Windows hosts without symlink

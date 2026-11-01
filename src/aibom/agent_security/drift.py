@@ -52,6 +52,8 @@ def compare_reports(
             changes.append(change)
     changes.extend(_permission_changes(baseline, candidate, changes, retest_command))
     changes.extend(_permission_removals(baseline, candidate, changes))
+    changes.extend(_delegate_changes(baseline, candidate))
+    changes.extend(_registry_changes(baseline, candidate, retest_command))
     changes.sort(key=lambda c: (-_LEVELS.index(c.severity), c.type, c.id))
     return PrivilegeDriftReport(
         baseline=baseline.target,
@@ -336,6 +338,98 @@ def _permission_removals(
             evidence=[permission.evidence.ref()],
         )
     return list(found.values())
+
+
+# -- delegation and registry ------------------------------------------------------------
+
+
+def _delegate_changes(
+    baseline: AgentSecurityReport, candidate: AgentSecurityReport
+) -> list[PrivilegeChange]:
+    """A parent newly able to *delegate to* a potentially allowed child capability.
+
+    Always ``review_required``: handoff guards, approvals and identity
+    propagation are not analyzed, so this never claims the parent can act.
+    """
+    before = {path.key: path for path in baseline.delegate_paths}
+    found: list[PrivilegeChange] = []
+    for path in candidate.delegate_paths:
+        if path.child_verdict is not _ALLOWED:
+            continue
+        old = before.get(path.key)
+        if old is not None and old.child_verdict is _ALLOWED:
+            continue
+        severity, reasons = _severity(path.hazard, False)
+        severity = min(severity, "medium", key=_LEVELS.index)
+        refs: list[str] = []
+        for evidence in path.evidence:
+            if evidence.ref() not in refs:
+                refs.append(evidence.ref())
+        found.append(
+            PrivilegeChange(
+                id=_change_id("delegate_path_added", path.key),
+                type="delegate_path_added",
+                change_status="review_required",
+                agent=path.parent_id,
+                identity=path.child_identity_id,
+                tool=path.tool_id,
+                action=path.action,
+                affected_resource=path.resource,
+                before_verdict=old.child_verdict.value if old else "absent",
+                after_verdict=f"child:{path.child_verdict.value}",
+                severity=severity,
+                severity_reasons=[
+                    *reasons,
+                    f"via {path.mechanism} to '{path.child_id}'; capped at medium: "
+                    "delegation guards and identity propagation are unverified",
+                ],
+                certainty="unknown",
+                evidence=refs,
+            )
+        )
+    return found
+
+
+def _registry_changes(
+    baseline: AgentSecurityReport, candidate: AgentSecurityReport, retest: str
+) -> list[PrivilegeChange]:
+    """Agents present in the candidate that the supplied registry does not list."""
+    if candidate.scope.registry is None:
+        return []
+    before = {agent.id: agent.management_status for agent in baseline.agents}
+    found: list[PrivilegeChange] = []
+    for agent in candidate.agents:
+        if agent.management_status != "unregistered" or before.get(agent.id) == "unregistered":
+            continue
+        found.append(
+            PrivilegeChange(
+                id=_change_id("unregistered_agent_added", agent.id),
+                type="unregistered_agent_added",
+                change_status="supported",
+                agent=agent.id,
+                identity=agent.identity_id,
+                before_verdict=before.get(agent.id, "absent"),
+                after_verdict="unregistered",
+                severity="medium",
+                severity_reasons=["agent is not listed in the supplied approved-agent registry"],
+                certainty="conditional",
+                evidence=[evidence.ref() for evidence in agent.evidence],
+                remediation=RemediationAdvice(
+                    why_it_matters=(
+                        f"Agent '{agent.id}' ({agent.source}) is not in the approved-agent "
+                        "registry, so its tools and identity have not been reviewed."
+                    ),
+                    conditions=["registry-supplied-by-operator", "name-or-alias-match-only"],
+                    recommended_actions=[
+                        "Register the agent (agent_ref or file:variable alias) after review, "
+                        "or remove it.",
+                    ],
+                    retest_command=retest,
+                ),
+                gates=True,
+            )
+        )
+    return found
 
 
 # -- helpers -------------------------------------------------------------------------
