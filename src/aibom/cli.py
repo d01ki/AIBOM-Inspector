@@ -24,7 +24,12 @@ from aibom.agent_security.render import render_drift as render_privilege_drift
 from aibom.agent_security.render import render_report as render_agent_report
 from aibom.agent_security.safeio import InputError
 from aibom.agent_security.sarif import to_sarif_json as privilege_sarif_json
-from aibom.agent_security.scenario import run_scenario, scenario_root, write_artifacts
+from aibom.agent_security.scenario import (
+    SCENARIOS,
+    run_scenario,
+    scenario_root,
+    write_artifacts,
+)
 from aibom.compliance.minimum_elements import (
     ElementOrigin,
     ElementStatus,
@@ -516,8 +521,8 @@ def demo(
         str | None,
         typer.Option(
             "--scenario",
-            help="Run one scenario: 'agent-privilege-drift'. Default: the impact + "
-            "behavioral-drift demo.",
+            help="Run one scenario: 'agent-privilege-drift' or 'mcp-tool-exposure'. "
+            "Default: the impact + behavioral-drift demo.",
         ),
     ] = None,
     output_dir: Annotated[
@@ -525,19 +530,19 @@ def demo(
         typer.Option(
             "--output-dir",
             help="Save each stage's JSON report and the drift results here "
-            "(agent-privilege-drift scenario).",
+            "(--scenario only).",
         ),
     ] = None,
 ) -> None:
     """Run the offline impact + behavioral-drift talk demo."""
     if scenario is not None:
-        if scenario != "agent-privilege-drift":
+        if scenario not in SCENARIOS:
             console.print(
                 f"[red]error:[/red] unknown scenario '{scenario}'. "
-                "Available: agent-privilege-drift"
+                f"Available: {', '.join(SCENARIOS)}"
             )
             raise typer.Exit(code=2)
-        _agent_privilege_demo(output_dir)
+        _agent_privilege_demo(scenario, output_dir)
         return
     impact_dir = impact_demo_path()
     if impact_dir is None:
@@ -563,19 +568,20 @@ def demo(
         _five_step_demo(language, *revisions)
 
 
-def _agent_privilege_demo(output_dir: Path | None) -> None:
-    """Baseline -> Candidate (policy-only change) -> Fixed, with evidence."""
-    root = scenario_root()
+def _agent_privilege_demo(name: str, output_dir: Path | None) -> None:
+    """Baseline -> Candidate (one-file change) -> Fixed, with evidence."""
+    spec = SCENARIOS[name]
+    root = scenario_root(name)
     if root is None:
-        console.print("[red]error:[/red] the agent-privilege-drift scenario is not bundled")
+        console.print(f"[red]error:[/red] the {name} scenario is not bundled")
         raise typer.Exit(code=2)
     console.print(
-        "\n[bold]Agent privilege drift demo[/bold] - the AI-BOM stays the same; the "
+        f"\n[bold]{name} demo[/bold] - the AI-BOM stays the same; the "
         "agent's potential capabilities change.\n"
         "[dim]Static analysis only: no code, agent, tool or cloud API is executed. "
         "Verdicts cover the supplied identity policy only.[/dim]"
     )
-    result = run_scenario(root)
+    result = run_scenario(root, name)
     counts = ", ".join(
         f"{count} {kind}"
         for kind, count in sorted(result.scans["baseline"].inventory.counts().items())
@@ -583,11 +589,13 @@ def _agent_privilege_demo(output_dir: Path | None) -> None:
     )
     console.print(f"\n[bold]1/5 Baseline[/bold] AI-BOM: {counts}")
     render_agent_report(console, result.reports["baseline"])
-    console.print("\n[bold]2/5 Candidate[/bold] only policy/review-role.json changed")
+    console.print(
+        f"\n[bold]2/5 Candidate[/bold] only {spec.changed} changed: {spec.change}"
+    )
     render_agent_report(console, result.reports["candidate"])
     console.print("\n[bold]3/5 + 4/5 Same AI-BOM, new capability path[/bold]")
     render_privilege_drift(console, result.introduced)
-    console.print("\n[bold]5/5 Fix -> retest[/bold] policy restored to least privilege")
+    console.print(f"\n[bold]5/5 Fix -> retest[/bold] {spec.fix}")
     render_privilege_drift(console, result.fixed)
     remaining = [change for change in result.residual.changes if change.gates]
     unknowns = len(result.reports["fixed"].unknowns)

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "storage": {
+      "command": "python",
+      "args": ["servers/storage_server.py"],
+      "env": {"AWS_PROFILE": "demo"}
+    }
+  }
+}

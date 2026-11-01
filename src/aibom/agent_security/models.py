@@ -136,6 +136,9 @@ class AgentRecord(BaseModel):
     identity_id: str | None = None
     identity_source_type: SourceType = SourceType.UNKNOWN
     tool_ids: list[str] = Field(default_factory=list)
+    mcp_tool_ids: list[str] = Field(
+        default_factory=list, description="MCP tools exposed through connected servers."
+    )
     external_input: bool = Field(
         default=False, description="Agent instructions proven to reach untrusted input."
     )
@@ -163,7 +166,45 @@ class CapabilityPath(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     evidence: list[SecEvidence] = Field(default_factory=list)
     external_input: bool = False
+    via: str = Field(default="direct", description="direct | mcp")
+    mcp_server_id: str | None = None
     proven: bool = False
+
+
+class McpToolRecord(BaseModel):
+    tool_id: str
+    name: str
+    capability_kinds: list[str] = Field(
+        default_factory=list, description="Inventory capabilities, e.g. command_execution."
+    )
+    capability_severity: str | None = None
+
+
+class McpServerRecord(BaseModel):
+    """An MCP server defined in the analyzed sources (never started)."""
+
+    id: str
+    file: str
+    name: str | None = None
+    identity_id: str | None = None
+    status: str = Field(description="connected | configured | defined")
+    tools: list[McpToolRecord] = Field(default_factory=list)
+    evidence: list[SecEvidence] = Field(default_factory=list)
+
+
+class McpConnectionRecord(BaseModel):
+    """A client (analyzed agent or client config file) declaring an MCP server."""
+
+    client_kind: str = Field(description="agent | config")
+    client_ref: str
+    server_label: str
+    transport: str
+    launch: str | None = Field(default=None, description="Command basename + repository file.")
+    server_id: str | None = None
+    filter_status: str = Field(description="none | static | unresolved")
+    exposed_tool_ids: list[str] = Field(default_factory=list)
+    unresolved_reason: str | None = None
+    evidence: list[SecEvidence] = Field(default_factory=list)
 
 
 class Delegation(BaseModel):
@@ -265,6 +306,8 @@ class AgentSecurityReport(BaseModel):
     operations: list[ToolOperation] = Field(default_factory=list)
     capability_paths: list[CapabilityPath] = Field(default_factory=list)
     delegations: list[Delegation] = Field(default_factory=list)
+    mcp_servers: list[McpServerRecord] = Field(default_factory=list)
+    mcp_connections: list[McpConnectionRecord] = Field(default_factory=list)
     delegate_paths: list[DelegateCapabilityPath] = Field(default_factory=list)
     unknowns: list[UnknownItem] = Field(default_factory=list)
     nodes: list[GraphNode] = Field(default_factory=list)
@@ -287,7 +330,7 @@ class PrivilegeChange(BaseModel):
             "permission_scope_expanded | privilege_path_added | "
             "privileged_identity_binding_added | identity_permission_expanded | "
             "potential_privilege_removed | review_required | delegate_path_added | "
-            "unregistered_agent_added"
+            "unregistered_agent_added | mcp_tool_exposure_added"
         )
     )
     change_status: str = Field(description="supported | review_required")

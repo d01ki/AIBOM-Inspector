@@ -39,12 +39,30 @@ def render_report(console: Console, report: AgentSecurityReport) -> None:
             table.add_row(
                 path.agent_id,
                 path.identity_id or "[magenta]unmapped[/magenta]",
-                path.tool_name,
+                path.tool_name + (" [dim](mcp)[/dim]" if path.via == "mcp" else ""),
                 path.action,
                 path.resource,
                 f"[{style}]{path.verdict.value}[/{style}]",
             )
         console.print(table)
+    names = {tool.tool_id: tool for server in report.mcp_servers for tool in server.tools}
+    for server in report.mcp_servers:
+        clients = sorted({c.client_ref for c in report.mcp_connections if c.server_id == server.id})
+        console.print(
+            f"  mcp server {server.name or server.id} ({server.file}, {server.status}): "
+            f"tools {[t.name for t in server.tools]}; clients {clients or 'none'}; "
+            f"runs as {server.identity_id or '[magenta]unmapped[/magenta]'}"
+        )
+    for agent in report.agents:
+        if agent.mcp_tool_ids:
+            exposed = []
+            for tool_id in agent.mcp_tool_ids:
+                tool = names.get(tool_id)
+                label = tool.name if tool else tool_id
+                if tool and tool.capability_kinds:
+                    label += f" [{','.join(tool.capability_kinds)}]"
+                exposed.append(label)
+            console.print(f"  {agent.id} exposed MCP tools: {', '.join(exposed)}")
     for delegation in report.delegations:
         child = delegation.child_id or f"[magenta]unresolved[/magenta] ({delegation.child_ref})"
         reachable = [

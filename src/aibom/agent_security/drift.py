@@ -54,6 +54,7 @@ def compare_reports(
     changes.extend(_permission_removals(baseline, candidate, changes))
     changes.extend(_delegate_changes(baseline, candidate))
     changes.extend(_registry_changes(baseline, candidate, retest_command))
+    changes.extend(_mcp_exposure_changes(baseline, candidate, retest_command))
     changes.sort(key=lambda c: (-_LEVELS.index(c.severity), c.type, c.id))
     return PrivilegeDriftReport(
         baseline=baseline.target,
@@ -429,6 +430,91 @@ def _registry_changes(
                 gates=True,
             )
         )
+    return found
+
+
+def _mcp_exposure_changes(
+    baseline: AgentSecurityReport, candidate: AgentSecurityReport, retest: str
+) -> list[PrivilegeChange]:
+    """An MCP tool newly exposed to an analyzed agent (connection or tool filter widened).
+
+    Independent of cloud identity: the tool's own inventory capabilities
+    (command execution, file writes, …) set the severity.
+    """
+    before = {agent.id: set(agent.mcp_tool_ids) for agent in baseline.agents}
+    tools = {
+        tool.tool_id: (server, tool) for server in candidate.mcp_servers for tool in server.tools
+    }
+    names = {
+        tool.tool_id: tool.name
+        for report in (baseline, candidate)
+        for server in report.mcp_servers
+        for tool in server.tools
+    }
+
+    def label(tool_id: str) -> str:
+        return names.get(tool_id, tool_id)
+
+    found: list[PrivilegeChange] = []
+    for agent in candidate.agents:
+        for tool_id in agent.mcp_tool_ids:
+            if tool_id in before.get(agent.id, set()):
+                continue
+            server, tool = tools.get(tool_id, (None, None))
+            base = tool.capability_severity if tool and tool.capability_severity else "low"
+            reasons = [
+                f"tool capabilities {tool.capability_kinds} -> {base}"
+                if tool and tool.capability_kinds
+                else "no inventory capability proven for this tool -> low"
+            ]
+            if agent.external_input:
+                base = _LEVELS[min(_LEVELS.index(base) + 1, len(_LEVELS) - 1)]
+                reasons.append("agent instructions reach untrusted input -> +1")
+            connection = next(
+                (
+                    c
+                    for c in candidate.mcp_connections
+                    if c.client_ref == agent.id and tool_id in c.exposed_tool_ids
+                ),
+                None,
+            )
+            evidence = [e.ref() for e in connection.evidence] if connection else []
+            name = tool.name if tool else tool_id
+            server_name = server.name or server.id if server else "unknown server"
+            found.append(
+                PrivilegeChange(
+                    id=_change_id("mcp_tool_exposure_added", f"{agent.id}|{tool_id}"),
+                    type="mcp_tool_exposure_added",
+                    change_status="supported",
+                    agent=agent.id,
+                    identity=server.identity_id if server else None,
+                    tool=tool_id,
+                    action=f"mcp:{name}",
+                    affected_resource=f"mcp-server:{server_name}",
+                    before=sorted(label(t) for t in before.get(agent.id, set())),
+                    after=sorted(label(t) for t in agent.mcp_tool_ids),
+                    before_verdict="not_exposed",
+                    after_verdict="exposed",
+                    severity=base,
+                    severity_reasons=reasons,
+                    certainty="conditional",
+                    evidence=evidence,
+                    remediation=RemediationAdvice(
+                        why_it_matters=(
+                            f"Agent '{agent.id}' can now call MCP tool '{name}' on "
+                            f"'{server_name}'; the model chooses its arguments."
+                        ),
+                        conditions=["static-tool-list", "server-not-started"],
+                        recommended_actions=[
+                            f"Restrict the connection with create_static_tool_filter("
+                            f"allowed_tool_names=[...]) excluding '{name}', or remove the "
+                            "server from mcp_servers.",
+                        ],
+                        retest_command=retest,
+                    ),
+                    gates=True,
+                )
+            )
     return found
 
 

@@ -48,6 +48,10 @@ RULES: dict[str, tuple[str, str]] = {
         "AIBOM-AGENT-007",
         "An agent is not listed in the supplied approved-agent registry.",
     ),
+    "mcp_tool_exposure_added": (
+        "AIBOM-AGENT-008",
+        "An MCP tool became exposed to an analyzed agent.",
+    ),
 }
 _LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "info": "note"}
 _SECURITY_SEVERITY = {

@@ -180,6 +180,7 @@ Inventory (run_scan) ──────────────►│  tool comp
 | `analyzer.py` | Evidence-only edge construction and capability-path verdicts |
 | `drift.py` | Stable-key comparison, severity vs certainty, remediation |
 | `scenario.py` | Bundled Baseline → Candidate → Fixed scenario and artifact export |
+| `mcp.py` | Static MCP server / client / config graph and tool-filter evaluation (P1-A) |
 | `registry.py` | Operator-supplied approved-agent registry (P1) |
 | `sarif.py` | SARIF 2.1.0 log for privilege-drift additions (P1) |
 

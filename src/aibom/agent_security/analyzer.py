@@ -29,6 +29,13 @@ from aibom.agent_security.manifest import (
     IdentityManifest,
     load_manifest,
 )
+from aibom.agent_security.mcp import (
+    Connection,
+    ServerDef,
+    agent_connections,
+    config_connections,
+    find_servers,
+)
 from aibom.agent_security.models import (
     AgentIdentity,
     AgentRecord,
@@ -40,6 +47,9 @@ from aibom.agent_security.models import (
     Delegation,
     GraphEdge,
     GraphNode,
+    McpConnectionRecord,
+    McpServerRecord,
+    McpToolRecord,
     ResolutionStatus,
     SecEvidence,
     SourceType,
@@ -51,7 +61,11 @@ from aibom.agent_security.operations import detect_operations, hazard_for_action
 from aibom.agent_security.registry import AgentRegistry, load_registry, normalize
 from aibom.collectors.repo import RepoCollector
 from aibom.detectors.project import ProjectIndex
-from aibom.detectors.python.parser import PythonModule, classify_source_context
+from aibom.detectors.python.parser import (
+    FunctionInfo,
+    PythonModule,
+    classify_source_context,
+)
 from aibom.detectors.python.prompt_flow import (
     _OPENAI_AGENT_CONSTRUCTORS,
     _bound_tools,
@@ -101,12 +115,13 @@ def analyze(
     if registry is not None:
         approved, registry_display = load_registry(registry)
 
-    project = RepoCollector(root).index_project()
+    collector = RepoCollector(root)
+    project = collector.index_project()
     report = AgentSecurityReport(
         target=display_target or root.name,
         scope=AnalysisScope(manifest=manifest_display, registry=registry_display),
     )
-    _Builder(root, project, inventory, loaded, report, approved).run()
+    _Builder(root, project, inventory, loaded, report, approved, collector.files()).run()
     return report
 
 
@@ -119,8 +134,12 @@ class _Builder:
         manifest: IdentityManifest | None,
         report: AgentSecurityReport,
         registry: AgentRegistry | None = None,
+        files: list[Path] | None = None,
     ) -> None:
         self.root = root
+        self.files = files or []
+        self.servers: dict[str, list[ServerDef]] = {}
+        self.connections: list[Connection] = []
         self.registry = registry
         self._pending: list[tuple[str, _AgentSite, str, ast.AST, ast.AST]] = []
         self.project = project
@@ -128,10 +147,12 @@ class _Builder:
         self.manifest = manifest
         self.report = report
         self.tool_ids: dict[str, str] = {}
+        self.tool_entities: dict[str, Tool] = {}
         if inventory is not None:
             for entity in inventory.entities:
                 if isinstance(entity, Tool):
                     self.tool_ids[entity.name] = entity.id
+                    self.tool_entities[entity.id] = entity
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}
 
@@ -145,6 +166,7 @@ class _Builder:
         ]
         operations = self._tool_operations(modules)
         identities, policies = self._identities()
+        self.servers = find_servers(modules)
         agents = self._agents(modules, identities)
         self.report.operations = [op for ops in operations.values() for op in ops]
         self.report.identities = list(identities.values())
@@ -160,6 +182,7 @@ class _Builder:
             self.report.agents.append(agent)
             self._agent_paths(agent, operations, identities, policies)
         self._delegations(agents)
+        self._mcp_records(operations)
         self.report.nodes = sorted(self.nodes.values(), key=lambda n: n.id)
         self.report.edges = sorted(self.edges.values(), key=lambda e: e.id)
         self.report.capability_paths.sort(key=lambda p: p.key)
@@ -382,6 +405,34 @@ class _Builder:
                 continue
             tool_ids.append(self._tool_id(bound.name, bound.module.relative_path))
 
+        mcp_tool_ids: list[str] = []
+        for connection in agent_connections(
+            site.module, site.call, agent_id, self.project, self.servers
+        ):
+            self.connections.append(connection)
+            if connection.unresolved_reason is not None:
+                self.report.unknowns.append(
+                    UnknownItem(
+                        subject=f"{agent_id}:mcp:{connection.server_label}",
+                        reason=connection.unresolved_reason,
+                        detail="MCP server tools could not be enumerated statically",
+                        evidence=connection.evidence,
+                    )
+                )
+            if connection.filter_status == "unresolved":
+                self.report.unknowns.append(
+                    UnknownItem(
+                        subject=f"{agent_id}:mcp:{connection.server_label}",
+                        reason="mcp_tool_filter_unresolved",
+                        detail="tool_filter is not a literal; every server tool is "
+                        "treated as potentially exposed",
+                        evidence=connection.evidence,
+                    )
+                )
+            for tool_id in self._exposed(connection):
+                if tool_id not in mcp_tool_ids:
+                    mcp_tool_ids.append(tool_id)
+
         return AgentRecord(
             id=agent_id,
             source=site.source,
@@ -389,6 +440,7 @@ class _Builder:
             identity_id=identity_id,
             identity_source_type=identity_source,
             tool_ids=tool_ids,
+            mcp_tool_ids=mcp_tool_ids,
             external_input=self._external_input(site),
             management_status=self._management_status(agent_id, site.source),
             evidence=evidence,
@@ -399,6 +451,148 @@ class _Builder:
             return "unknown"
         refs = self.registry.refs()
         return "registered" if {normalize(agent_id), normalize(source)} & refs else "unregistered"
+
+    # -- MCP ---------------------------------------------------------------------
+
+    def _server(self, server_id: str | None) -> ServerDef | None:
+        for servers in self.servers.values():
+            for server in servers:
+                if server.id == server_id:
+                    return server
+        return None
+
+    def _exposed(self, connection: Connection) -> list[str]:
+        server = self._server(connection.server_id)
+        if server is None:
+            return []
+        return [
+            self._tool_id(info.name, server.file)
+            for info in server.tools
+            if connection.exposes(info.name)
+        ]
+
+    def _server_identity(self, server: ServerDef) -> str | None:
+        if self.manifest is None:
+            return None
+        for mapping in self.manifest.mcp_servers:
+            if mapping.source == server.file:
+                return mapping.identity_ref
+        return None
+
+    def _mcp_records(self, operations: dict[str, list[ToolOperation]]) -> None:
+        configs, problems = config_connections(self.root, self.files, self.project, self.servers)
+        for file, reason in problems:
+            self.report.unknowns.append(
+                UnknownItem(
+                    subject=f"mcp-client:{file}",
+                    reason=reason,
+                    evidence=[SecEvidence(file=file, kind="config")],
+                )
+            )
+        self.connections.extend(configs)
+        for connection in self.connections:
+            exposed = self._exposed(connection)
+            self.report.mcp_connections.append(
+                McpConnectionRecord(
+                    client_kind=connection.client_kind,
+                    client_ref=connection.client_ref,
+                    server_label=connection.server_label,
+                    transport=connection.transport,
+                    launch=connection.launch,
+                    server_id=connection.server_id,
+                    filter_status=connection.filter_status,
+                    exposed_tool_ids=exposed,
+                    unresolved_reason=connection.unresolved_reason,
+                    evidence=connection.evidence,
+                )
+            )
+            if connection.server_id is None:
+                continue
+            if connection.client_kind == "config":
+                self._node(
+                    connection.client_ref,
+                    "mcp_client",
+                    connection.client_ref,
+                    SourceType.OBSERVED_STATIC,
+                )
+                self._edge(
+                    connection.client_ref,
+                    connection.server_id,
+                    "CONFIGURES_MCP",
+                    SourceType.OBSERVED_STATIC,
+                    evidence=connection.evidence,
+                )
+            else:
+                self._edge(
+                    connection.client_ref,
+                    connection.server_id,
+                    "CONNECTS_MCP",
+                    SourceType.OBSERVED_STATIC,
+                    evidence=connection.evidence,
+                )
+        for file in sorted(self.servers):
+            for server in self.servers[file]:
+                kinds = {c.client_kind for c in self.connections if c.server_id == server.id}
+                status = "connected" if "agent" in kinds else "configured" if kinds else "defined"
+                identity_id = self._server_identity(server)
+                tools: list[McpToolRecord] = []
+                self._node(
+                    server.id,
+                    "mcp_server",
+                    server.name or server.id,
+                    SourceType.OBSERVED_STATIC,
+                    evidence=server.evidence,
+                )
+                if identity_id is not None:
+                    self._edge(
+                        server.id,
+                        identity_id,
+                        "RUNS_AS",
+                        SourceType.EXPLICIT_MANIFEST,
+                        evidence=[
+                            SecEvidence(
+                                file=self._manifest_file(),
+                                kind="manifest",
+                                detail=f"mcp_servers[{server.file}]",
+                            )
+                        ],
+                    )
+                for info in server.tools:
+                    tool_id = self._tool_id(info.name, server.file)
+                    entity = self.tool_entities.get(tool_id)
+                    capabilities = entity.capabilities if entity is not None else []
+                    severities = [c.severity for c in capabilities]
+                    tools.append(
+                        McpToolRecord(
+                            tool_id=tool_id,
+                            name=info.name,
+                            capability_kinds=sorted({c.kind for c in capabilities}),
+                            capability_severity=max(severities, key=_RANK.index)
+                            if severities
+                            else None,
+                        )
+                    )
+                    self._node(tool_id, "tool", info.name, SourceType.OBSERVED_STATIC)
+                    self._edge(
+                        server.id,
+                        tool_id,
+                        "EXPOSES_TOOL",
+                        SourceType.OBSERVED_STATIC,
+                        evidence=[_ast_evidence_info(server.file, info)],
+                    )
+                    for op in operations.get(tool_id, []):
+                        self._operation_node(tool_id, op)
+                self.report.mcp_servers.append(
+                    McpServerRecord(
+                        id=server.id,
+                        file=server.file,
+                        name=server.name,
+                        identity_id=identity_id,
+                        status=status,
+                        tools=tools,
+                        evidence=server.evidence,
+                    )
+                )
 
     # -- delegation --------------------------------------------------------------
 
@@ -518,36 +712,75 @@ class _Builder:
                 agent.id, tool_id, "BINDS_TOOL", SourceType.OBSERVED_STATIC, evidence=agent.evidence
             )
             for op in ops:
-                op_id = f"operation:{op.action}|{op.resource}"
-                self._node(
-                    op_id,
-                    "operation",
-                    f"{op.action} {op.resource}",
-                    op.source_type,
-                    ResolutionStatus.RESOLVED
-                    if op.resource_resolved
-                    else ResolutionStatus.UNRESOLVED,
+                self._operation_node(tool_id, op)
+                self.report.capability_paths.append(
+                    self._path(agent, agent.identity_id, identity, attached, op)
                 )
-                self._edge(
-                    tool_id, op_id, "REACHES_OPERATION", op.source_type, evidence=op.evidence
-                )
-                self.report.capability_paths.append(self._path(agent, identity, attached, op))
+
+        for connection in self.connections:
+            if connection.client_ref != agent.id or connection.client_kind != "agent":
+                continue
+            server = self._server(connection.server_id)
+            if server is None:
+                continue
+            server_identity_id = self._server_identity(server)
+            server_identity = identities.get(server_identity_id) if server_identity_id else None
+            server_attached = (
+                [policies[p] for p in server_identity.policies if p in policies]
+                if server_identity
+                else []
+            )
+            extra = ["mcp-server-identity", "tool-list-static"]
+            if connection.filter_status == "unresolved":
+                extra.append("tool-filter-unresolved")
+            for tool_id in self._exposed(connection):
+                for op in operations.get(tool_id, []):
+                    self.report.capability_paths.append(
+                        self._path(
+                            agent,
+                            server_identity_id,
+                            server_identity,
+                            server_attached,
+                            op,
+                            via="mcp",
+                            server_id=server.id,
+                            extra=extra,
+                            unmapped="mcp_server_identity_unmapped",
+                        )
+                    )
+
+    def _operation_node(self, tool_id: str, op: ToolOperation) -> None:
+        op_id = f"operation:{op.action}|{op.resource}"
+        self._node(
+            op_id,
+            "operation",
+            f"{op.action} {op.resource}",
+            op.source_type,
+            ResolutionStatus.RESOLVED if op.resource_resolved else ResolutionStatus.UNRESOLVED,
+        )
+        self._edge(tool_id, op_id, "REACHES_OPERATION", op.source_type, evidence=op.evidence)
 
     def _path(
         self,
         agent: AgentRecord,
+        identity_id: str | None,
         identity: AgentIdentity | None,
         attached: list[AuthorizationPolicy],
         op: ToolOperation,
+        *,
+        via: str = "direct",
+        server_id: str | None = None,
+        extra: list[str] | None = None,
+        unmapped: str = "identity_unmapped",
     ) -> CapabilityPath:
-        constraints = list(iam.STANDARD_CONSTRAINTS)
+        constraints = [*iam.STANDARD_CONSTRAINTS, *(extra or [])]
         if not op.resource_resolved:
             constraints.append("resource-partially-resolved")
         if op.source_type is SourceType.EXPLICIT_MANIFEST:
             constraints.append("operation-declared-in-manifest")
         evidence: list[SecEvidence]
-        if agent.identity_id is None:
-            verdict, reasons, evidence = Verdict.UNKNOWN, ["identity_unmapped"], []
+        if identity_id is None:
+            verdict, reasons, evidence = Verdict.UNKNOWN, [unmapped], []
         elif identity is None:
             verdict, reasons, evidence = Verdict.UNKNOWN, ["identity_undefined"], []
         else:
@@ -562,7 +795,7 @@ class _Builder:
         return CapabilityPath(
             key="|".join([agent.id, op.tool_id, op.action, op.resource]),
             agent_id=agent.id,
-            identity_id=agent.identity_id,
+            identity_id=identity_id,
             tool_id=op.tool_id,
             tool_name=op.tool_name,
             action=op.action,
@@ -574,6 +807,8 @@ class _Builder:
             reasons=reasons,
             evidence=[*agent.evidence, *op.evidence, *evidence],
             external_input=agent.external_input,
+            via=via,
+            mcp_server_id=server_id,
             proven=False,
         )
 
@@ -741,6 +976,13 @@ def _assigned_symbol(module: PythonModule, call: ast.Call) -> str | None:
     if isinstance(parent, ast.AnnAssign) and isinstance(parent.target, ast.Name):
         return parent.target.id
     return None
+
+
+_RANK = ["info", "low", "medium", "high", "critical"]
+
+
+def _ast_evidence_info(file: str, info: FunctionInfo) -> SecEvidence:
+    return SecEvidence(file=file, line=info.node.lineno, kind="ast", detail=f"tool {info.name}")
 
 
 def _ast_evidence(module: PythonModule, node: ast.AST, detail: str) -> SecEvidence:

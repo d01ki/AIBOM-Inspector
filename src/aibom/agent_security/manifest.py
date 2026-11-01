@@ -88,11 +88,27 @@ class ToolDeclaration(_Strict):
         return value
 
 
+class McpServerMapping(_Strict):
+    """Identity an MCP server *process* runs as (it is not the agent's process)."""
+
+    source: str = Field(description="Workspace-relative .py file defining the server.")
+    identity_ref: str = Field(min_length=1, max_length=300)
+
+    @field_validator("source")
+    @classmethod
+    def _source_shape(cls, value: str) -> str:
+        value = value.replace("\\", "/")
+        if not re.fullmatch(r"[^:]+\.py", value):
+            raise ValueError("source must be a workspace-relative .py file")
+        return value
+
+
 class IdentityManifest(_Strict):
     schema_version: int
     agents: list[AgentMapping] = Field(default_factory=list, max_length=MAX_ENTRIES)
     identities: list[IdentityDefinition] = Field(default_factory=list, max_length=MAX_ENTRIES)
     tools: list[ToolDeclaration] = Field(default_factory=list, max_length=MAX_ENTRIES)
+    mcp_servers: list[McpServerMapping] = Field(default_factory=list, max_length=MAX_ENTRIES)
 
     @field_validator("schema_version")
     @classmethod
