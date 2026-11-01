@@ -84,7 +84,7 @@ function Invoke-Cli([string[]]$commandArgs) {
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     $mapped = @()
     foreach ($item in $commandArgs) { $mapped += (Convert-Arg $item) }
-    $tty = Get-TtyFlags '-it'
+    $tty = @(Get-TtyFlags '-it')  # @() keeps a 1-item array; splatting a bare string splits it into characters
     docker run --rm @tty -v "${work}:/work:ro" -v "${out}:/out" -w /work $image aibom @mapped
     exit $LASTEXITCODE
 }
@@ -97,7 +97,7 @@ $first = if ($CliArgs.Count -gt 0) { $CliArgs[0] } else { '' }
 switch -Regex ($first) {
     '^(ui|serve|web)$' {
         Write-Host "AIBOM Inspector UI -> http://localhost:$port   (Ctrl-C to stop)"
-        $tty = Get-TtyFlags '-t'
+        $tty = @(Get-TtyFlags '-t')
         docker run --rm @tty -p "${port}:8000" -e "AIBOM_PORT=$port" $image
         exit $LASTEXITCODE
     }
