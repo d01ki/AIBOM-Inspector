@@ -150,6 +150,37 @@ contains them.
 - `manifest.dependencies`: Python/npm dependency declarations.
 - `generic.weight-file`: serialized local model files.
 
+## Agent identity and privilege drift
+
+`src/aibom/agent_security/` is a separate, opt-in layer
+([agent-privilege-drift.md](agent-privilege-drift.md)). It never changes the
+inventory, findings, CycloneDX or SARIF; its output lives under the
+`agent_security` / `agent_privileges` JSON keys only.
+
+```text
+RepoCollector.index_project()  ──► analyzer.py ──► AgentSecurityReport (schema 1.0)
+  (same ProjectIndex as a scan)     │  Agent(...) sites + _bound_tools()   (reuses prompt_flow)
+                                    │  operations.py: boto3 call -> IAM action
+                                    │  manifest.py + safeio.py: RUNS_AS (explicit only)
+                                    │  iam.py: bounded Allow/Deny/Unknown
+Inventory (run_scan) ──────────────►│  tool component IDs, untrusted-instruction flag
+                                    ▼
+             drift.py: compare_reports(baseline, candidate, bom_identical=compare_boms(...))
+                                    ▼
+                         PrivilegeDriftReport ──► render.py / JSON / demo (scenario.py)
+```
+
+| Module | Responsibility |
+|---|---|
+| `models.py` | Versioned Pydantic schema: agents, identities, policies, permissions, operations, capability paths, unknowns, graph, privilege changes, remediation |
+| `safeio.py` | Workspace-confined path resolution, size limits, strict YAML subset |
+| `manifest.py` | `aibom-identity.yaml` schema (extra keys forbidden, credential keys rejected) |
+| `iam.py` | AWS identity-policy subset parser/evaluator; unsupported elements → unknown |
+| `operations.py` | boto3 method → IAM action/hazard dictionary; resource ARN resolution |
+| `analyzer.py` | Evidence-only edge construction and capability-path verdicts |
+| `drift.py` | Stable-key comparison, severity vs certainty, remediation |
+| `scenario.py` | Bundled Baseline → Candidate → Fixed scenario and artifact export |
+
 ## Backward-compatibility risks
 
 - JSON consumers using strict `additionalProperties: false` must allow the new

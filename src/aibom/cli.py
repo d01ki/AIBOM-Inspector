@@ -17,6 +17,13 @@ from rich.console import Console
 from rich.table import Table
 
 from aibom import __version__
+from aibom.agent_security.analyzer import analyze as analyze_agents
+from aibom.agent_security.drift import compare_reports as compare_privileges
+from aibom.agent_security.models import AgentSecurityReport
+from aibom.agent_security.render import render_drift as render_privilege_drift
+from aibom.agent_security.render import render_report as render_agent_report
+from aibom.agent_security.safeio import InputError
+from aibom.agent_security.scenario import run_scenario, scenario_root, write_artifacts
 from aibom.compliance.minimum_elements import (
     ElementOrigin,
     ElementStatus,
@@ -244,6 +251,15 @@ def scan(
             help="Scan the bundled deliberately-vulnerable demo app (offline, no setup).",
         ),
     ] = False,
+    identity_manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--identity-manifest",
+            help="Agent -> identity -> policy mapping (aibom-identity.yaml). Enables "
+            "agent capability analysis; the result is added to --output under "
+            "'agent_security'. Relative paths resolve inside TARGET.",
+        ),
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
@@ -318,6 +334,12 @@ def scan(
     else:
         result = _scan(local_path)
     inventory, findings, score = result.inventory, result.findings, result.score
+    agent_report = None
+    if identity_manifest is not None:
+        if is_url:
+            console.print("[red]error:[/red] --identity-manifest needs a local TARGET")
+            raise typer.Exit(code=2)
+        agent_report = _agent_security_or_exit(local_path, inventory, identity_manifest)
 
     if not quiet:
         _render(inventory)
@@ -358,8 +380,17 @@ def scan(
                 "SBOM minimum-elements report",
             )
 
+    if agent_report is not None and not quiet:
+        render_agent_report(console, agent_report)
+
     if output is not None:
-        _write_or_exit(output, inventory.model_dump_json(indent=2), "inventory")
+        payload = inventory.model_dump_json(indent=2)
+        if agent_report is not None:
+            # Additive namespace: every existing inventory key stays as before.
+            merged = json.loads(payload)
+            merged["agent_security"] = agent_report.model_dump(mode="json")
+            payload = json.dumps(merged, indent=2, ensure_ascii=False)
+        _write_or_exit(output, payload, "inventory")
 
     if cyclonedx is not None:
         _write_or_exit(
@@ -467,8 +498,34 @@ def _menu() -> None:
 
 
 @app.command()
-def demo() -> None:
+def demo(
+    scenario: Annotated[
+        str | None,
+        typer.Option(
+            "--scenario",
+            help="Run one scenario: 'agent-privilege-drift'. Default: the impact + "
+            "behavioral-drift demo.",
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help="Save each stage's JSON report and the drift results here "
+            "(agent-privilege-drift scenario).",
+        ),
+    ] = None,
+) -> None:
     """Run the offline impact + behavioral-drift talk demo."""
+    if scenario is not None:
+        if scenario != "agent-privilege-drift":
+            console.print(
+                f"[red]error:[/red] unknown scenario '{scenario}'. "
+                "Available: agent-privilege-drift"
+            )
+            raise typer.Exit(code=2)
+        _agent_privilege_demo(output_dir)
+        return
     impact_dir = impact_demo_path()
     if impact_dir is None:
         console.print("[red]error:[/red] the sample app is not bundled in this installation")
@@ -491,6 +548,60 @@ def demo() -> None:
         if revisions is None:
             continue
         _five_step_demo(language, *revisions)
+
+
+def _agent_privilege_demo(output_dir: Path | None) -> None:
+    """Baseline -> Candidate (policy-only change) -> Fixed, with evidence."""
+    root = scenario_root()
+    if root is None:
+        console.print("[red]error:[/red] the agent-privilege-drift scenario is not bundled")
+        raise typer.Exit(code=2)
+    console.print(
+        "\n[bold]Agent privilege drift demo[/bold] - the AI-BOM stays the same; the "
+        "agent's potential capabilities change.\n"
+        "[dim]Static analysis only: no code, agent, tool or cloud API is executed. "
+        "Verdicts cover the supplied identity policy only.[/dim]"
+    )
+    result = run_scenario(root)
+    counts = ", ".join(
+        f"{count} {kind}"
+        for kind, count in sorted(result.scans["baseline"].inventory.counts().items())
+        if kind != "prompt"
+    )
+    console.print(f"\n[bold]1/5 Baseline[/bold] AI-BOM: {counts}")
+    render_agent_report(console, result.reports["baseline"])
+    console.print("\n[bold]2/5 Candidate[/bold] only policy/review-role.json changed")
+    render_agent_report(console, result.reports["candidate"])
+    console.print("\n[bold]3/5 + 4/5 Same AI-BOM, new capability path[/bold]")
+    render_privilege_drift(console, result.introduced)
+    console.print("\n[bold]5/5 Fix -> retest[/bold] policy restored to least privilege")
+    render_privilege_drift(console, result.fixed)
+    remaining = [change for change in result.residual.changes if change.gates]
+    unknowns = len(result.reports["fixed"].unknowns)
+    verdict = "[green]fixed[/green]" if not remaining else "[red]not fixed[/red]"
+    note = " (unknowns are never counted as fixed)" if unknowns else ""
+    console.print(
+        f"  verify (baseline vs fixed): {len(remaining)} privilege addition(s) remain, "
+        f"{unknowns} unknown(s) -> {verdict}{note}"
+    )
+    if output_dir is not None:
+        try:
+            written = write_artifacts(result, output_dir)
+        except OSError as exc:
+            console.print(f"[red]error:[/red] cannot write demo artifacts: {exc}")
+            raise typer.Exit(code=2) from None
+        for path in written:
+            console.print(f"[green]written[/green] {path}")
+
+
+def _agent_security_or_exit(
+    target: Path, inventory: Inventory, manifest: Path
+) -> AgentSecurityReport:
+    try:
+        return analyze_agents(target, inventory, manifest=manifest, display_target=str(target))
+    except (InputError, FileNotFoundError) as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(code=2) from None
 
 
 def _five_step_demo(language: str, baseline: Path, candidate: Path) -> None:
@@ -615,6 +726,21 @@ def diff_scans(
         bool,
         typer.Option("--quiet", "-q", help="Suppress the drift summary table."),
     ] = False,
+    agent_privileges: Annotated[
+        bool,
+        typer.Option(
+            "--agent-privileges",
+            help="Also compare agent capability paths (identity manifest + bounded IAM "
+            "policy subset). Adds 'agent_privileges' to --output.",
+        ),
+    ] = False,
+    identity_manifest: Annotated[
+        str,
+        typer.Option(
+            "--identity-manifest",
+            help="Manifest path relative to each revision (used with --agent-privileges).",
+        ),
+    ] = "aibom-identity.yaml",
 ) -> None:
     """Compare two AIBOM scans, including trust-boundary and usage drift.
 
@@ -635,14 +761,47 @@ def diff_scans(
     baseline_result = run_scan(baseline, min_confidence=min_confidence)
     candidate_result = run_scan(candidate, min_confidence=min_confidence)
     report = compare_scan_results(baseline_result, candidate_result)
+    privilege_report = None
+    if agent_privileges:
+        manifest = Path(identity_manifest)
+        before = _agent_security_or_exit(baseline, baseline_result.inventory, manifest)
+        after = _agent_security_or_exit(candidate, candidate_result.inventory, manifest)
+        privilege_report = compare_privileges(
+            before,
+            after,
+            bom_identical=report.bom.identical if report.bom else None,
+            bom_differences=(
+                [*report.bom.added, *report.bom.removed, *report.bom.changed]
+                if report.bom
+                else []
+            ),
+            retest_command=f"aibom diff {baseline} {candidate} --agent-privileges",
+        )
 
     if not quiet:
         _render_drift(report)
+        if privilege_report is not None:
+            render_privilege_drift(console, privilege_report)
     if output is not None:
-        _write_or_exit(output, report.model_dump_json(indent=2), "AIBOM drift report")
+        payload = report.model_dump_json(indent=2)
+        if privilege_report is not None:
+            merged = json.loads(payload)
+            merged["agent_privileges"] = privilege_report.model_dump(mode="json")
+            payload = json.dumps(merged, indent=2, ensure_ascii=False)
+        _write_or_exit(output, payload, "AIBOM drift report")
     # An `unknown` path change is shown but never gates: it is not a proof.
     if threshold is not None and any(
         change.gates and change.severity.rank >= threshold.rank for change in report.changes
+    ):
+        raise typer.Exit(code=1)
+    # Only supported privilege additions gate; review_required never does.
+    if (
+        threshold is not None
+        and privilege_report is not None
+        and any(
+            change.gates and Severity(change.severity).rank >= threshold.rank
+            for change in privilege_report.changes
+        )
     ):
         raise typer.Exit(code=1)
 

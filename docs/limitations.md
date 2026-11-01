@@ -141,3 +141,28 @@
   Component inventory accuracy and path accuracy must not be conflated.
 - The scanner identifies references and risky configuration; it does not load,
   sandbox, or behaviorally test models.
+
+## Agent identity and privilege drift
+
+- Verdicts reflect only the **supplied identity policies**. SCPs, permission
+  boundaries, session policies, resource-based and KMS key policies, role
+  trust policies and `Condition` are not evaluated; `potentially_allowed` is not
+  AWS effective authorization and `no_matching_allow_in_supplied_policies` is
+  not proof that an operation is impossible.
+- `NotAction`, `NotResource`, `Condition`, policy variables and `Principal` in
+  an identity policy make a statement *unknown* whenever it could apply.
+- Agent → identity comes only from `aibom-identity.yaml`; source code is never
+  used to guess the runtime principal. Unmapped agents produce `unknown` paths.
+- Only Python OpenAI Agents SDK `x = Agent(...)` assignments are recognized as
+  agents, and only boto3 `client(...)` method calls in the tool body (not in
+  helpers, `boto3.resource`, sessions or dynamic dispatch) are recognized as
+  operations. Missed operations mean missed paths (false negatives), so an
+  empty result is not a clean bill of health.
+- DynamoDB/Secrets Manager/IAM resources are not resolved to concrete ARNs, so
+  resource-scoped grants on them evaluate to `unknown`.
+- Delegation (handoffs, agent-as-tool), MCP, JS/TS agents, approved-agent
+  registries and cloud-side policy retrieval are not implemented.
+- Accuracy has been measured only on the bundled three-stage scenario and unit
+  fixtures, not on external repositories.
+- The symlink-escape test is skipped on Windows hosts without symlink
+  privilege; the containment check itself is platform-independent.
