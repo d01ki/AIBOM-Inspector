@@ -164,9 +164,9 @@ class _Builder:
             for path, module in sorted(self.project.python.items())
             if classify_source_context(path) is SourceContext.PRODUCTION
         ]
+        self.servers = find_servers(modules, self.project)
         operations = self._tool_operations(modules)
         identities, policies = self._identities()
-        self.servers = find_servers(modules)
         agents = self._agents(modules, identities)
         self.report.operations = [op for ops in operations.values() for op in ops]
         self.report.identities = list(identities.values())
@@ -204,6 +204,16 @@ class _Builder:
                 found[tool_id].extend(
                     detect_operations(module, info.node, tool_id, info.name, self.project)
                 )
+        for servers in self.servers.values():  # call-style registrations (not decorated)
+            for server in servers:
+                for tool in server.tools:
+                    tool_id = self._tool_id(tool.name, tool.file)
+                    owner = self.project.python.get(tool.file)
+                    if tool_id in found or owner is None:
+                        continue
+                    found[tool_id] = detect_operations(
+                        owner, tool.info.node, tool_id, tool.name, self.project
+                    )
         if self.manifest is None:
             return found
         for declaration in self.manifest.tools:
@@ -228,6 +238,7 @@ class _Builder:
                         ToolOperation(
                             tool_id=tool_id,
                             tool_name=function,
+                            tool_file=file,
                             action=action,
                             resource=resource,
                             resource_resolved="*" not in resource and "?" not in resource,
@@ -304,7 +315,8 @@ class _Builder:
                 continue
             local: list[_AgentSite] = []
             for call in module.calls:
-                if (module.qualified_name(call.func) or "") not in _OPENAI_AGENT_CONSTRUCTORS:
+                func = call.func.value if isinstance(call.func, ast.Subscript) else call.func
+                if (module.qualified_name(func) or "") not in _OPENAI_AGENT_CONSTRUCTORS:
                     continue
                 local.append(_AgentSite(module, call, _assigned_symbol(module, call)))
             counts: dict[str | None, int] = defaultdict(int)
@@ -338,6 +350,7 @@ class _Builder:
                     )
                 )
             records.append(self._agent_record(site, mapping, identities))
+        self._appended_handoffs(sites, records)
         for source in sorted(set(mappings) - used):
             self.report.unknowns.append(
                 UnknownItem(
@@ -348,6 +361,40 @@ class _Builder:
                 )
             )
         return records
+
+    def _appended_handoffs(self, sites: list[_AgentSite], records: list[AgentRecord]) -> None:
+        """``x.handoffs.append(handoff(agent=y))`` / ``.extend([...])`` on a known agent."""
+        by_source = {
+            site.source: (site, record)
+            for site, record in zip(sites, records, strict=True)
+            if site.symbol and not site.ambiguous
+        }
+        for module in {site.module.relative_path: site.module for site in sites}.values():
+            for call in module.calls:
+                func = call.func
+                if not (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in {"append", "extend"}
+                    and isinstance(func.value, ast.Attribute)
+                    and func.value.attr == "handoffs"
+                    and isinstance(func.value.value, ast.Name)
+                    and call.args
+                ):
+                    continue
+                owner = by_source.get(f"{module.relative_path}:{func.value.value.id}")
+                if owner is None:
+                    continue
+                site, record = owner
+                argument = call.args[0]
+                items = (
+                    list(argument.elts)
+                    if func.attr == "extend" and isinstance(argument, (ast.List, ast.Tuple))
+                    else [argument]
+                )
+                for item in items:
+                    target = _handoff_target(module, item)
+                    if target is not None:
+                        self._pending.append((record.id, site, "handoff", target, call))
 
     def _agent_record(
         self,
@@ -392,7 +439,9 @@ class _Builder:
         tool_ids: list[str] = []
         for mechanism, target, at in _delegate_targets(site.module, site.call):
             self._pending.append((agent_id, site, mechanism, target, at))
-        for bound in _bound_tools(site.module, _without_agent_tools(site.call), self.project):
+        for bound in _bound_tools(
+            site.module, _without_agent_tools(site.module, site.call), self.project
+        ):
             if bound.function is None:
                 self.report.unknowns.append(
                     UnknownItem(
@@ -466,9 +515,9 @@ class _Builder:
         if server is None:
             return []
         return [
-            self._tool_id(info.name, server.file)
-            for info in server.tools
-            if connection.exposes(info.name)
+            self._tool_id(tool.name, tool.file)
+            for tool in server.tools
+            if connection.exposes(tool.name)
         ]
 
     def _server_identity(self, server: ServerDef) -> str | None:
@@ -501,6 +550,7 @@ class _Builder:
                     launch=connection.launch,
                     server_id=connection.server_id,
                     filter_status=connection.filter_status,
+                    approval=connection.approval,
                     exposed_tool_ids=exposed,
                     unresolved_reason=connection.unresolved_reason,
                     evidence=connection.evidence,
@@ -557,8 +607,9 @@ class _Builder:
                             )
                         ],
                     )
-                for info in server.tools:
-                    tool_id = self._tool_id(info.name, server.file)
+                for tool in server.tools:
+                    info = tool.info
+                    tool_id = self._tool_id(info.name, tool.file)
                     entity = self.tool_entities.get(tool_id)
                     capabilities = entity.capabilities if entity is not None else []
                     severities = [c.severity for c in capabilities]
@@ -578,7 +629,7 @@ class _Builder:
                         tool_id,
                         "EXPOSES_TOOL",
                         SourceType.OBSERVED_STATIC,
-                        evidence=[_ast_evidence_info(server.file, info)],
+                        evidence=[_ast_evidence_info(tool.file, info)],
                     )
                     for op in operations.get(tool_id, []):
                         self._operation_node(tool_id, op)
@@ -733,7 +784,12 @@ class _Builder:
             extra = ["mcp-server-identity", "tool-list-static"]
             if connection.filter_status == "unresolved":
                 extra.append("tool-filter-unresolved")
+            names = {self._tool_id(tool.name, tool.file): tool.name for tool in server.tools}
             for tool_id in self._exposed(connection):
+                approved = connection.approval == "always" or (
+                    connection.approval == "per_tool"
+                    and names.get(tool_id) in connection.approval_tools
+                )
                 for op in operations.get(tool_id, []):
                     self.report.capability_paths.append(
                         self._path(
@@ -744,7 +800,7 @@ class _Builder:
                             op,
                             via="mcp",
                             server_id=server.id,
-                            extra=extra,
+                            extra=[*extra, *(["human-approval-required"] if approved else [])],
                             unmapped="mcp_server_identity_unmapped",
                         )
                     )
@@ -778,6 +834,8 @@ class _Builder:
             constraints.append("resource-partially-resolved")
         if op.source_type is SourceType.EXPLICIT_MANIFEST:
             constraints.append("operation-declared-in-manifest")
+        if op.derived_action:
+            constraints.append("action-derived-from-api-name")
         evidence: list[SecEvidence]
         if identity_id is None:
             verdict, reasons, evidence = Verdict.UNKNOWN, [unmapped], []
@@ -911,22 +969,35 @@ def _delegate_targets(module: PythonModule, call: ast.Call) -> list[tuple[str, a
             continue
         for item in keyword.value.elts:
             if keyword.arg == "handoffs":
-                if isinstance(item, ast.Call):
-                    if not (module.qualified_name(item.func) or "").endswith("handoff"):
-                        continue
-                    target = item.args[0] if item.args else None
-                    for inner in item.keywords:
-                        if inner.arg == "agent":
-                            target = inner.value
-                    if target is not None:
-                        found.append(("handoff", target, item))
-                else:
-                    found.append(("handoff", item, item))
-            elif keyword.arg == "tools" and isinstance(item, ast.Call):
-                func = item.func
-                if isinstance(func, ast.Attribute) and func.attr == "as_tool":
-                    found.append(("agent_as_tool", func.value, item))
+                target = _handoff_target(module, item)
+                if target is not None:
+                    found.append(("handoff", target, item))
+            elif keyword.arg == "tools":
+                as_tool = _as_tool_call(module, item)
+                if as_tool is not None:
+                    assert isinstance(as_tool.func, ast.Attribute)
+                    found.append(("agent_as_tool", as_tool.func.value, as_tool))
     return found
+
+
+def _handoff_target(module: PythonModule, item: ast.AST) -> ast.AST | None:
+    if isinstance(item, ast.Call):
+        if not (module.qualified_name(item.func) or "").endswith("handoff"):
+            return None
+        target = item.args[0] if item.args else None
+        for inner in item.keywords:
+            if inner.arg == "agent":
+                target = inner.value
+        return target
+    return item
+
+
+def _as_tool_call(module: PythonModule, item: ast.AST) -> ast.Call | None:
+    """``x.as_tool(...)`` inline, or a name assigned from one in the same scope."""
+    if isinstance(item, ast.Name):
+        assignment = module.assignment_for(item.id, item)
+        item = assignment.value if assignment is not None else item
+    return item if _is_as_tool(item) else None  # type: ignore[return-value]
 
 
 def _is_as_tool(item: ast.AST) -> bool:
@@ -937,7 +1008,7 @@ def _is_as_tool(item: ast.AST) -> bool:
     )
 
 
-def _without_agent_tools(call: ast.Call) -> ast.Call:
+def _without_agent_tools(module: PythonModule, call: ast.Call) -> ast.Call:
     """The constructor with ``x.as_tool(...)`` entries removed from an inline ``tools``.
 
     The binding analysis gives up on a list containing calls; agents-as-tools
@@ -948,7 +1019,7 @@ def _without_agent_tools(call: ast.Call) -> ast.Call:
     for keyword in call.keywords:
         value = keyword.value
         if keyword.arg == "tools" and isinstance(value, (ast.List, ast.Tuple)):
-            kept = [item for item in value.elts if not _is_as_tool(item)]
+            kept = [item for item in value.elts if _as_tool_call(module, item) is None]
             if len(kept) != len(value.elts):
                 changed = True
                 value = ast.copy_location(ast.List(elts=kept, ctx=ast.Load()), value)

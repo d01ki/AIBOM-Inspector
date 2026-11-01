@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "note": "Held-out cases: ground truth was written before the scanner was run on these paths. The first run is frozen in benchmark/reports/agent-security-heldout-first-run.*; later runs are regression evidence only.",
+  "cases": [
+    {
+      "id": "oa-basic-tools-research",
+      "repository": "openai/openai-agents-python",
+      "checkout": "openai-agents-python",
+      "commit": "e355d69152d4f4730dfb03b63dbce53e8d9f5d8c",
+      "root": "examples",
+      "include": ["research_bot/", "basic/", "tools/"],
+      "ground_truth": "ground_truth_heldout/oa-basic-tools-research.json"
+    },
+    {
+      "id": "awslabs-cloudtrail-mcp-server",
+      "repository": "awslabs/mcp",
+      "checkout": "mcp",
+      "commit": "c6951b9a09d0860550ebabd1a4ba66e36cb7212e",
+      "root": "src/cloudtrail-mcp-server",
+      "include": ["awslabs/"],
+      "ground_truth": "ground_truth_heldout/awslabs-cloudtrail-mcp-server.json"
+    }
+  ]
+}

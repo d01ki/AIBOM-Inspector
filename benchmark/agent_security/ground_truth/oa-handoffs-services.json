@@ -1,0 +1,35 @@
+{
+  "case": "openai-agents-python/examples (handoffs, customer_service, financial_research_agent)",
+  "review": "Manual review. customer_service adds two handoffs by mutating .handoffs.append(...) after construction; financial_research_agent exposes two agents as tools on writer_agent.clone(tools=[...]) — both are recorded as true delegations to measure what the scanner misses.",
+  "agents": [
+    "handoffs/message_filter.py:first_agent",
+    "handoffs/message_filter.py:spanish_agent",
+    "handoffs/message_filter.py:second_agent",
+    "handoffs/message_filter_streaming.py:first_agent",
+    "handoffs/message_filter_streaming.py:spanish_agent",
+    "handoffs/message_filter_streaming.py:second_agent",
+    "customer_service/main.py:faq_agent",
+    "customer_service/main.py:seat_booking_agent",
+    "customer_service/main.py:triage_agent",
+    "financial_research_agent/agents/financials_agent.py:financials_agent",
+    "financial_research_agent/agents/planner_agent.py:planner_agent",
+    "financial_research_agent/agents/risk_agent.py:risk_agent",
+    "financial_research_agent/agents/search_agent.py:search_agent",
+    "financial_research_agent/agents/verifier_agent.py:verifier_agent",
+    "financial_research_agent/agents/writer_agent.py:writer_agent"
+  ],
+  "delegations": [
+    ["handoffs/message_filter.py:second_agent", "handoffs/message_filter.py:spanish_agent", "handoff"],
+    ["handoffs/message_filter_streaming.py:second_agent", "handoffs/message_filter_streaming.py:spanish_agent", "handoff"],
+    ["customer_service/main.py:triage_agent", "customer_service/main.py:faq_agent", "handoff"],
+    ["customer_service/main.py:triage_agent", "customer_service/main.py:seat_booking_agent", "handoff"],
+    ["customer_service/main.py:faq_agent", "customer_service/main.py:triage_agent", "handoff"],
+    ["customer_service/main.py:seat_booking_agent", "customer_service/main.py:triage_agent", "handoff"],
+    ["financial_research_agent/agents/writer_agent.py:writer_agent", "financial_research_agent/agents/financials_agent.py:financials_agent", "agent_as_tool"],
+    ["financial_research_agent/agents/writer_agent.py:writer_agent", "financial_research_agent/agents/risk_agent.py:risk_agent", "agent_as_tool"]
+  ],
+  "mcp_server_tools": [],
+  "mcp_connections": [],
+  "server_links": [],
+  "operations": []
+}

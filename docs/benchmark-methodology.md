@@ -57,3 +57,79 @@ number.
 
 Do not claim broad external-repository support until at least 20 pinned public
 repositories, including negative cases, are present and reviewed.
+
+## Agent-security extraction accuracy
+
+`benchmark/agent_security/` scores the *static extraction* that agent
+privilege-drift analysis builds on, against hand-reviewed ground truth on
+pinned public repositories (`openai/openai-agents-python`,
+`modelcontextprotocol/python-sdk`, `awslabs/mcp`). Verdicts are **not**
+scored: public repositories ship no identity manifests or policies, so
+`potentially_allowed` / `unknown` cannot be checked against reality.
+
+```bash
+# shallow clones at the pinned commits in cases*.json, under benchmark/checkouts/ (git-ignored)
+python -m benchmark.agent_security.evaluate                                   # development cases
+python -m benchmark.agent_security.evaluate --cases benchmark/agent_security/cases_heldout.json \
+    --out benchmark/reports/agent-security-heldout-latest
+```
+
+The scanned code is parsed, never imported, installed or executed. The
+evaluator refuses a checkout that is not at the pinned commit.
+
+Six categories, each an exact set comparison:
+
+| Category | Tuple |
+|---|---|
+| `agents` | `file:symbol` of each `Agent(...)` construction |
+| `delegations` | parent source, child source, `handoff` / `agent_as_tool` |
+| `mcp_server_tools` | server file, tool function |
+| `mcp_connections` | agent source, transport |
+| `server_links` | agent source, repository server file |
+| `operations` | `file:tool`, IAM action |
+
+### Two case sets, and which numbers count
+
+* **Development cases** (`cases.json`, 5 cases). The ground truth was written,
+  the tool was run, and the misses were then fixed. Their post-fix numbers
+  are regression evidence, **not** an accuracy estimate.
+* **Held-out cases** (`cases_heldout.json`, 2 cases). Ground truth was written
+  and committed **before** the scanner was ever run on these paths. The first
+  run is frozen in `reports/agent-security-heldout-first-run.*` and is the only
+  independent measurement. Fixes made after looking at it turn later runs into
+  regression evidence as well.
+
+| Category | Dev, first run | Dev, after fixes | **Held-out, first run (frozen)** | Held-out, after fixes |
+|---|---|---|---|---|
+| agents | 1.0 / 0.937 | 1.0 / 1.0 | **1.0 / 1.0** (49) | 1.0 / 1.0 |
+| delegations | 1.0 / 0.632 | 1.0 / 0.895 | **1.0 / 1.0** (3) | 1.0 / 1.0 |
+| mcp_server_tools | n/a / 0.0 | 1.0 / 1.0 | **n/a / 0.0** (5) | 1.0 / 1.0 |
+| mcp_connections | 0.4 / 0.4 | 0.9 / 0.9 | – | – |
+| server_links | n/a / 0.0 | n/a / 0.0 | – | – |
+| operations | n/a / 0.0 | 1.0 / 1.0 | **n/a / 0.0** (8) | 1.0 / 1.0 |
+
+Precision / recall; held-out ground-truth sizes in parentheses; "–" means the
+held-out set contains no items of that category. The held-out first run
+missed every MCP tool and every operation of the awslabs CloudTrail server
+because its tools are registered with `srv.tool(...)(self.method)` from a
+class and use a `self._get_client()` factory; awslabs uses that registration
+style in 16 of its 63 servers. That miss is the honest headline number.
+
+Still missed after fixes (development set): agents passed to `clone(tools=[...])`
+(2 delegations), a server list built dynamically (one connection reported as
+`unknown` transport), and links from an agent to a repository server reached
+over a URL (`server_links`, 3) — a URL cannot be statically tied to a file.
+
+### Bias
+
+* **The ground truth was written by the tool's author.** Ambiguous cases may be
+  resolved in the tool's favor without anyone noticing. A second, independent
+  reviewer has not checked these files yet.
+* The held-out set is small (2 cases, 65 items) and all Python. It covers the
+  OpenAI Agents SDK and one awslabs MCP server, not LangChain, CrewAI or
+  TypeScript.
+* Every precision of 1.0 rests on a small number of items. It shows that no
+  false positives were seen on these cases. It is not a bound on the false-positive rate.
+
+Do not quote the development-set numbers as accuracy. Quote the frozen
+held-out first run, with its size and the author-bias caveat.

@@ -22,7 +22,7 @@ import ast
 from dataclasses import dataclass
 
 from aibom.agent_security.models import SecEvidence, SourceType, ToolOperation
-from aibom.detectors.project import ProjectIndex
+from aibom.detectors.project import ProjectIndex, PyFunctionRef, python_returns
 from aibom.detectors.python.parser import PythonModule
 from aibom.detectors.python.value_resolver import ValueResolver
 
@@ -36,6 +36,7 @@ class ActionSpec:
     resource: str  # s3_object | s3_bucket | dynamodb_table | any
     bucket_arg: tuple[str, int] = ("Bucket", -1)  # keyword, positional index
     key_arg: tuple[str, int] = ("Key", -1)
+    derived: bool = False  # action derived from the API name, not from the table
 
 
 ACTIONS: dict[tuple[str, str], ActionSpec] = {
@@ -66,6 +67,55 @@ ACTIONS: dict[tuple[str, str], ActionSpec] = {
     ("iam", "put_role_policy"): ActionSpec("iam:PutRolePolicy", "admin", "any"),
 }
 
+# boto3 methods that are not API operations (no IAM action) or need an override.
+_NOT_API = {
+    "get_paginator",
+    "get_waiter",
+    "can_paginate",
+    "close",
+    "generate_presigned_url",
+    "generate_presigned_post",
+}
+_OVERRIDES: dict[tuple[str, str], str] = {
+    ("s3", "list_buckets"): "s3:ListAllMyBuckets",
+    ("s3", "head_object"): "s3:GetObject",
+    ("s3", "head_bucket"): "s3:ListBucket",
+    ("s3", "upload_fileobj"): "s3:PutObject",
+    ("s3", "download_fileobj"): "s3:GetObject",
+    ("s3", "list_object_versions"): "s3:ListBucketVersions",
+}
+# boto3 service name -> IAM action prefix, where they differ.
+_PREFIX = {
+    "stepfunctions": "states",
+    "elbv2": "elasticloadbalancing",
+    "elb": "elasticloadbalancing",
+    "sesv2": "ses",
+    "iot-data": "iot",
+    "s3control": "s3",
+    "opensearch": "es",
+    "logs": "logs",
+}
+
+
+def spec_for(service: str, method: str) -> ActionSpec | None:
+    """Table entry, else an IAM action derived from the API name (flagged as derived).
+
+    boto3 method ``create_user`` is the ``CreateUser`` API; for most services the
+    IAM action has the same name.  Exceptions are tabled; derived actions carry
+    ``derived=True`` so verdicts mark them ``action-derived-from-api-name``.
+    """
+    spec = ACTIONS.get((service, method))
+    if spec is not None:
+        return spec
+    if method.startswith("_") or method in _NOT_API or not method.islower():
+        return None
+    action = _OVERRIDES.get((service, method))
+    if action is None:
+        prefix = _PREFIX.get(service, service)
+        action = f"{prefix}:{''.join(part.capitalize() for part in method.split('_'))}"
+    return ActionSpec(action, hazard_for_action(action), "any", derived=True)
+
+
 HAZARD_SEVERITY = {
     "list": "low",
     "read": "medium",
@@ -82,16 +132,24 @@ def hazard_for_action(action: str) -> str:
         if spec.action.lower() == action.lower():
             return spec.hazard
     lowered = action.lower()
-    if lowered == "*" or lowered.startswith("iam:") or lowered.endswith(":*"):
+    if lowered == "*" or lowered.endswith(":*"):
         return "admin"
-    verb = lowered.split(":", 1)[-1]
-    if verb.startswith(("delete", "remove", "terminate")):
-        return "delete"
-    if verb.startswith(("put", "create", "update", "attach", "write", "copy")):
-        return "write"
-    if verb.startswith("list"):
-        return "list"
-    return "read"
+    service, _, verb = lowered.partition(":")
+    if verb.startswith(("delete", "remove", "terminate", "detach")):
+        hazard = "delete"
+    elif verb.startswith(
+        ("put", "create", "update", "attach", "write", "copy", "add", "pass", "set")
+    ):
+        hazard = "write"
+    elif verb.startswith("list"):
+        hazard = "list"
+    else:
+        hazard = "read"
+    if service in {"iam", "sts", "organizations"} and hazard in {"write", "delete"}:
+        return "admin"  # identity changes are privilege changes
+    if service == "secretsmanager" and verb.startswith("getsecretvalue"):
+        return "secrets_read"
+    return hazard
 
 
 def detect_operations(
@@ -102,7 +160,10 @@ def detect_operations(
     project: ProjectIndex | None = None,
 ) -> list[ToolOperation]:
     """Operations performed by ``function`` or the project helpers it calls."""
-    return _walk(module, function, tool_id, tool_name, project, chain=[], visited=set())
+    found = _walk(module, function, tool_id, tool_name, project, chain=[], visited=set())
+    for operation in found:
+        operation.tool_file = module.relative_path
+    return found
 
 
 def _walk(
@@ -127,7 +188,7 @@ def _walk(
         if isinstance(node.func, ast.Attribute):
             service = _client_service(module, resolver, node.func.value, node, project)
             if service is not None:
-                spec = ACTIONS.get((service, node.func.attr))
+                spec = spec_for(service, node.func.attr)
                 if spec is not None:
                     found.append(
                         _operation(module, node, resolver, spec, service, tool_id, tool_name, chain)
@@ -178,6 +239,7 @@ def _operation(
         resource_resolved=resolved,
         hazard=spec.hazard,
         source_type=SourceType.OBSERVED_STATIC,
+        derived_action=spec.derived,
         evidence=[
             *(item.model_copy() for item in chain),
             SecEvidence(
@@ -197,8 +259,9 @@ def _client_service(
     at: ast.AST,
     project: ProjectIndex | None = None,
 ) -> str | None:
+    """The boto3 service of a client expression, when statically certain."""
     constructor: ast.AST | None = receiver
-    owner, owner_resolver = module, resolver
+    owner = module
     if isinstance(receiver, ast.Name):
         assignment = module.assignment_for(receiver.id, at)
         constructor = assignment.value if assignment is not None else None
@@ -208,19 +271,110 @@ def _client_service(
             bindings = symbol.module.assignments.get((None, symbol.name)) if symbol else None
             if symbol is not None and bindings:
                 constructor = max(bindings, key=lambda item: item.line).value
-                owner, owner_resolver = symbol.module, ValueResolver(symbol.module)
+                owner = symbol.module
     if not isinstance(constructor, ast.Call):
         return None
-    if (owner.qualified_name(constructor.func) or "") != "boto3.client":
+    return _constructor_service(owner, constructor, project, {}, 0)
+
+
+def _constructor_service(
+    module: PythonModule,
+    call: ast.Call,
+    project: ProjectIndex | None,
+    bindings: dict[str, ast.AST],
+    depth: int,
+) -> str | None:
+    """``boto3.client("s3")``, ``<boto3 Session>.client("s3")`` or a factory returning one.
+
+    A factory is a project function whose every ``return`` is such a client;
+    ``boto3.client(service_name)`` with ``service_name`` a factory parameter is
+    resolved from the literal argument at this call site.  All returns must
+    agree on one service.
+    """
+    if depth > MAX_HELPER_DEPTH:
         return None
-    argument: ast.AST | None = constructor.args[0] if constructor.args else None
-    for keyword in constructor.keywords:
-        if keyword.arg == "service_name":
-            argument = keyword.value
-    if argument is None:
+    qualified = module.qualified_name(call.func) or ""
+    is_session_client = (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "client"
+        and _is_session(module, call.func.value, call)
+    )
+    if qualified == "boto3.client" or is_session_client:
+        argument: ast.AST | None = call.args[0] if call.args else None
+        for keyword in call.keywords:
+            if keyword.arg == "service_name":
+                argument = keyword.value
+        if argument is None:
+            return None
+        value = ValueResolver(module).resolve(argument, bindings=bindings)
+        return value.value if value.resolved and isinstance(value.value, str) else None
+    if project is None:
         return None
-    value = owner_resolver.resolve(argument)
-    return value.value if value.resolved and isinstance(value.value, str) else None
+    factory = project.python_function(module, call.func) or _self_method(module, call)
+    if factory is None:
+        return None
+    returns = python_returns(factory.info.node)
+    if not returns:
+        return None
+    parameters = [
+        a.arg for a in [*factory.info.node.args.posonlyargs, *factory.info.node.args.args]
+    ]
+    if parameters[:1] == ["self"] and isinstance(call.func, ast.Attribute):
+        parameters = parameters[1:]
+    passed: dict[str, ast.AST] = {}
+    for index, positional in enumerate(call.args):
+        if index < len(parameters) and not isinstance(positional, ast.Starred):
+            passed[parameters[index]] = _literal_node(module, positional, bindings)
+    for keyword in call.keywords:
+        if keyword.arg:
+            passed[keyword.arg] = _literal_node(module, keyword.value, bindings)
+    services: set[str | None] = set()
+    for returned in returns:
+        if not isinstance(returned, ast.Call):
+            return None
+        services.add(_constructor_service(factory.module, returned, project, passed, depth + 1))
+    if len(services) != 1:
+        return None
+    return services.pop()
+
+
+def _self_method(module: PythonModule, call: ast.Call) -> PyFunctionRef | None:
+    """``self.factory(...)`` inside a method resolves to the same class's method."""
+    func = call.func
+    if not (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "self"
+    ):
+        return None
+    enclosing = module.enclosing_function(call)
+    if enclosing is None or "." not in enclosing.qualified_name:
+        return None
+    owner = enclosing.qualified_name.rsplit(".", 1)[0]
+    info = module.functions.get(f"{owner}.{func.attr}")
+    return PyFunctionRef(module, info) if info is not None else None
+
+
+def _literal_node(module: PythonModule, node: ast.AST, bindings: dict[str, ast.AST]) -> ast.AST:
+    """Freeze a call-site argument to a literal so it can cross into the factory."""
+    value = ValueResolver(module).resolve(node, bindings=bindings)
+    if value.resolved and isinstance(value.value, str):
+        return ast.Constant(value=value.value)
+    return node
+
+
+def _is_session(module: PythonModule, node: ast.AST, at: ast.AST) -> bool:
+    sessions = {"boto3.Session", "boto3.session.Session"}
+    if isinstance(node, ast.Call):
+        return (module.qualified_name(node.func) or "") in sessions
+    if isinstance(node, ast.Name):
+        assignment = module.assignment_for(node.id, at)
+        return (
+            assignment is not None
+            and isinstance(assignment.value, ast.Call)
+            and (module.qualified_name(assignment.value.func) or "") in sessions
+        )
+    return False
 
 
 def _argument(call: ast.Call, keyword: str, position: int) -> ast.AST | None:

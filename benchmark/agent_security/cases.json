@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "note": "Pinned public repositories for agent-security extraction accuracy. Checkouts live in benchmark/checkouts/<name> (shallow clone at the pinned commit). Nothing in them is executed or installed. 'root' is the scan target inside the checkout; 'include' limits scoring to these path prefixes (relative to root).",
+  "cases": [
+    {
+      "id": "oa-mcp-examples",
+      "repository": "openai/openai-agents-python",
+      "checkout": "openai-agents-python",
+      "commit": "e355d69152d4f4730dfb03b63dbce53e8d9f5d8c",
+      "root": "examples/mcp",
+      "include": [""],
+      "ground_truth": "ground_truth/oa-mcp-examples.json"
+    },
+    {
+      "id": "oa-agent-patterns",
+      "repository": "openai/openai-agents-python",
+      "checkout": "openai-agents-python",
+      "commit": "e355d69152d4f4730dfb03b63dbce53e8d9f5d8c",
+      "root": "examples/agent_patterns",
+      "include": [""],
+      "ground_truth": "ground_truth/oa-agent-patterns.json"
+    },
+    {
+      "id": "oa-handoffs-services",
+      "repository": "openai/openai-agents-python",
+      "checkout": "openai-agents-python",
+      "commit": "e355d69152d4f4730dfb03b63dbce53e8d9f5d8c",
+      "root": "examples",
+      "include": ["handoffs/", "customer_service/", "financial_research_agent/"],
+      "ground_truth": "ground_truth/oa-handoffs-services.json"
+    },
+    {
+      "id": "mcp-python-sdk-servers",
+      "repository": "modelcontextprotocol/python-sdk",
+      "checkout": "python-sdk",
+      "commit": "d7845c073a2b9ba5ab2817ecf93d3e45ef24cd14",
+      "root": "examples/mcpserver",
+      "include": [""],
+      "ground_truth": "ground_truth/mcp-python-sdk-servers.json"
+    },
+    {
+      "id": "awslabs-iam-mcp-server",
+      "repository": "awslabs/mcp",
+      "checkout": "mcp",
+      "commit": "c6951b9a09d0860550ebabd1a4ba66e36cb7212e",
+      "root": "src/iam-mcp-server",
+      "include": ["awslabs/"],
+      "ground_truth": "ground_truth/awslabs-iam-mcp-server.json"
+    }
+  ]
+}

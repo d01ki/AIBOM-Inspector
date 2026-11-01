@@ -1,0 +1,50 @@
+{
+  "case": "openai-agents-python/examples/mcp",
+  "review": "Manual review of every Agent(...), MCPServer* client and @mcp.tool in the directory (grep-located, read in full). server_links lists only links that are true per the example's own code (main.py starts its sibling server.py via subprocess and connects by URL).",
+  "agents": [
+    "filesystem_example/main.py:agent",
+    "get_all_mcp_tools_example/main.py:agent",
+    "get_all_mcp_tools_example/main.py:prefetched_agent",
+    "get_all_mcp_tools_example/main.py:filtered_agent",
+    "git_example/main.py:agent",
+    "manager_example/app.py:agent",
+    "prompt_server/main.py:agent",
+    "sse_example/main.py:agent",
+    "sse_remote_example/main.py:agent",
+    "streamablehttp_custom_client_example/main.py:agent",
+    "streamablehttp_example/main.py:agent",
+    "streamable_http_remote_example/main.py:agent",
+    "tool_filter_example/main.py:agent"
+  ],
+  "delegations": [],
+  "mcp_server_tools": [
+    ["manager_example/mcp_server.py", "add"],
+    ["manager_example/mcp_server.py", "echo"],
+    ["sse_example/server.py", "add"],
+    ["sse_example/server.py", "get_secret_word"],
+    ["sse_example/server.py", "get_current_weather"],
+    ["streamablehttp_custom_client_example/server.py", "add"],
+    ["streamablehttp_custom_client_example/server.py", "get_secret_word"],
+    ["streamablehttp_example/server.py", "add"],
+    ["streamablehttp_example/server.py", "get_secret_word"],
+    ["streamablehttp_example/server.py", "get_current_weather"]
+  ],
+  "mcp_connections": [
+    ["filesystem_example/main.py:agent", "stdio"],
+    ["get_all_mcp_tools_example/main.py:agent", "stdio"],
+    ["git_example/main.py:agent", "stdio"],
+    ["manager_example/app.py:agent", "streamable_http"],
+    ["sse_example/main.py:agent", "sse"],
+    ["sse_remote_example/main.py:agent", "sse"],
+    ["streamablehttp_custom_client_example/main.py:agent", "streamable_http"],
+    ["streamablehttp_example/main.py:agent", "streamable_http"],
+    ["streamable_http_remote_example/main.py:agent", "streamable_http"],
+    ["tool_filter_example/main.py:agent", "stdio"]
+  ],
+  "server_links": [
+    ["sse_example/main.py:agent", "sse_example/server.py"],
+    ["streamablehttp_custom_client_example/main.py:agent", "streamablehttp_custom_client_example/server.py"],
+    ["streamablehttp_example/main.py:agent", "streamablehttp_example/server.py"]
+  ],
+  "operations": []
+}

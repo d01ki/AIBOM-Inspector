@@ -153,28 +153,48 @@
   an identity policy make a statement *unknown* whenever it could apply.
 - Agent → identity comes only from `aibom-identity.yaml`; source code is never
   used to guess the runtime principal. Unmapped agents produce `unknown` paths.
-- Only Python OpenAI Agents SDK `x = Agent(...)` assignments are recognized as
-  agents, and only boto3 `client(...)` method calls in the tool body or in
-  project helpers reachable through resolvable calls (≤3 hops) are recognized
-  as operations — not `boto3.resource`, sessions, dynamic dispatch, or helpers
-  reached through callbacks/attributes the call graph cannot resolve. Missed operations mean missed paths (false negatives), so an
-  empty result is not a clean bill of health.
+- Only Python OpenAI Agents SDK `x = Agent(...)` / `x = Agent[T](...)`
+  assignments are recognized as agents. Only boto3 client method calls in the
+  tool body or in project helpers reachable through resolvable calls (≤3 hops)
+  are recognized as operations. The client may come from `boto3.client(...)`,
+  `boto3.Session().client(...)`, or a project factory function or
+  `self._method()` whose every `return` is such a client for one statically
+  known service. `boto3.resource`, dynamic dispatch, and helpers reached
+  through callbacks or attributes the call graph cannot resolve are not seen.
+  Missed operations mean missed paths (false negatives), so an empty result is
+  not a clean bill of health.
+- IAM actions for boto3 methods outside the built-in table are derived from
+  the API name (`start_execution` → `states:StartExecution`) and carry the
+  constraint `action-derived-from-api-name`. A few APIs need a different or
+  additional IAM action, and the derived action can then be wrong.
 - DynamoDB/Secrets Manager/IAM resources are not resolved to concrete ARNs, so
   resource-scoped grants on them evaluate to `unknown`.
 - Delegation is one hop and only from inline `handoffs=[...]` /
-  `tools=[x.as_tool(...)]` lists; handoff guards, approvals and identity
+  `tools=[x.as_tool(...)]` lists (an `as_tool` result may be held in a
+  variable first) or `x.handoffs.append(...)` / `.extend([...])` on a known
+  agent. Agents built by `clone(...)` and dynamically assembled lists are not
+  followed; handoff guards, approvals and identity
   propagation are not analyzed, so delegated capabilities are always
   `unknown` for the parent and never gate CI.
 - MCP analysis is Python-only and static: servers are never started, so
-  only `@srv.tool` functions on a `FastMCP(...)` defined in the repository are
-  known. Remote (SSE / streamable HTTP) servers, servers launched from outside
+  only tools of a `FastMCP(...)` / `MCPServer(...)` defined in the repository
+  are known: `@srv.tool` functions, and `srv.tool(...)(fn)` /
+  `srv.tool(...)(self.method)` calls where `srv` is the module-level server or
+  is passed into a registration function or method one call away. An MCP client
+  passed into the function that builds the agent is resolved one call hop
+  back; all callers must agree on the transport. A literal `require_approval`
+  is recorded and marks matching paths `human-approval-required`. Whether a
+  human actually reviews the call is not verified, and the verdict does not
+  change. Remote (SSE / streamable HTTP) servers, servers launched from outside
   the repository, dynamically registered tools and non-literal launch
   parameters stay unknown. A non-literal `tool_filter` is treated as exposing
   every tool (conservative). TypeScript MCP servers are not linked yet.
 - Registry matching is by `agent_ref` or `file:variable` alias only; renamed
   files or variables need an alias. MCP, JS/TS agents and cloud-side policy
   retrieval are not implemented.
-- Accuracy has been measured only on the bundled three-stage scenario and unit
-  fixtures, not on external repositories.
+- Extraction accuracy on external repositories has been measured only on a
+  small held-out set (2 pinned cases, 65 items, ground truth by the tool
+  author); see `docs/benchmark-methodology.md`, *Agent-security extraction
+  accuracy*. Verdict accuracy is not measured on external repositories.
 - The symlink-escape test is skipped on Windows hosts without symlink
   privilege; the containment check itself is platform-independent.
