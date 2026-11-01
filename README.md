@@ -196,7 +196,9 @@ The dated, source-linked competitive analysis and claim boundaries are in
   and reports `permission_scope_expanded` when the AI-BOM is unchanged but a
   policy change lets an agent's tool operation through. Verdicts cover the
   supplied policies only, never AWS effective authorization. Also follows
-  helpers across files, records handoff / agent-as-tool delegation without
+  helpers across files, maps MCP client -> server -> tool (incl. `tool_filter`
+  and `.mcp.json`, never starting a server), records handoff / agent-as-tool
+  delegation without
   merging privileges, checks an approved-agent registry, and emits SARIF —
   [docs/agent-privilege-drift.md](docs/agent-privilege-drift.md)
 - **Complete dependency BOM** — every package in `requirements*.txt`,
@@ -334,6 +336,7 @@ aibom diff examples/trust-boundary-drift/baseline \
 
 # agent privilege drift: same AI-BOM, the agent's role policy gains s3:PutObject
 aibom demo --scenario agent-privilege-drift --output-dir out/
+aibom demo --scenario mcp-tool-exposure    # same AI-BOM, MCP tool_filter removed
 aibom diff examples/agent-privilege-drift/baseline   examples/agent-privilege-drift/candidate --agent-privileges --fail-on high
 aibom scan ./app --identity-manifest aibom-identity.yaml -o inv.json  # adds "agent_security"
 

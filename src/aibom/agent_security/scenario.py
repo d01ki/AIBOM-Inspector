@@ -1,4 +1,4 @@
-"""The offline Baseline -> Candidate -> Fixed agent-privilege-drift scenario."""
+"""Offline Baseline -> Candidate -> Fixed scenarios for agent privilege drift."""
 
 from __future__ import annotations
 
@@ -15,11 +15,39 @@ from aibom.service import ScanResult, run_scan
 STAGES = ("baseline", "candidate", "fixed")
 
 
-def scenario_root() -> Path | None:
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    bundled: str  # directory name inside the installed package
+    changed: str  # the only file that differs, for the narration
+    change: str  # what the candidate changes
+    fix: str  # what the fixed revision restores
+
+
+SCENARIOS: dict[str, Scenario] = {
+    "agent-privilege-drift": Scenario(
+        "agent-privilege-drift",
+        "agent_privilege_demo",
+        "policy/review-role.json",
+        "the agent role policy gains s3:PutObject and s3:DeleteObject",
+        "policy restored to least privilege",
+    ),
+    "mcp-tool-exposure": Scenario(
+        "mcp-tool-exposure",
+        "mcp_exposure_demo",
+        "app/agent.py",
+        "the agent's MCP tool_filter (allowed_tool_names=['read_asset']) is removed",
+        "tool_filter restored",
+    ),
+}
+
+
+def scenario_root(name: str = "agent-privilege-drift") -> Path | None:
+    scenario = SCENARIOS[name]
     here = Path(__file__).resolve()
     for candidate in (
-        here.parent.parent / "agent_privilege_demo",
-        here.parents[3] / "examples" / "agent-privilege-drift",
+        here.parent.parent / scenario.bundled,
+        here.parents[3] / "examples" / scenario.name,
     ):
         if all((candidate / stage / "app" / "agent.py").is_file() for stage in STAGES):
             return candidate
@@ -40,13 +68,11 @@ def scan_with_agents(path: Path, label: str) -> tuple[ScanResult, AgentSecurityR
     return result, analyze(path, result.inventory, display_target=label)
 
 
-def run_scenario(root: Path) -> ScenarioResult:
+def run_scenario(root: Path, name: str = "agent-privilege-drift") -> ScenarioResult:
     scans: dict[str, ScanResult] = {}
     reports: dict[str, AgentSecurityReport] = {}
     for stage in STAGES:
-        scans[stage], reports[stage] = scan_with_agents(
-            root / stage, f"built-in://agent-privilege-drift/{stage}"
-        )
+        scans[stage], reports[stage] = scan_with_agents(root / stage, f"built-in://{name}/{stage}")
 
     def diff(left: str, right: str) -> PrivilegeDriftReport:
         bom = compare_boms(scans[left], scans[right])
@@ -55,7 +81,7 @@ def run_scenario(root: Path) -> ScenarioResult:
             reports[right],
             bom_identical=bom.identical,
             bom_differences=[*bom.added, *bom.removed, *bom.changed],
-            retest_command="aibom demo --scenario agent-privilege-drift",
+            retest_command=f"aibom demo --scenario {name}",
         )
 
     return ScenarioResult(

@@ -16,6 +16,7 @@ is not supported.
 ```bash
 aibom demo --scenario agent-privilege-drift                    # Baseline -> Candidate -> Fixed
 aibom demo --scenario agent-privilege-drift --output-dir out/  # also save every JSON artifact
+aibom demo --scenario mcp-tool-exposure                        # MCP tool_filter removed
 
 aibom scan examples/agent-privilege-drift/baseline --identity-manifest aibom-identity.yaml -o inv.json
 aibom diff examples/agent-privilege-drift/baseline examples/agent-privilege-drift/candidate \
@@ -37,6 +38,22 @@ identical `app/agent.py`, `requirements.txt` and `aibom-identity.yaml`. Only
 | candidate | `+ s3:PutObject, s3:DeleteObject` | AI-BOM unchanged; **`permission_scope_expanded`** (high) for PutObject via `publish_review`; `identity_permission_expanded` (medium) for DeleteObject, because the only tool that deletes (`purge_asset`) is **not bound** |
 | fixed | back to `s3:GetObject` | `potential_privilege_removed` ×2; baseline vs fixed: 0 changes, 0 unknowns |
 
+### Second scenario: `mcp-tool-exposure`
+
+`examples/mcp-tool-exposure/` keeps the MCP server, packages, identity
+manifest and both role policies identical. The agent's own role denies `s3:*`;
+the **MCP server process** runs as a separate role that may read and delete
+assets. Only the agent's `tool_filter` changes:
+
+| Stage | `MCPServerStdio(tool_filter=...)` | Result (measured with the bundled scenario) |
+|---|---|---|
+| baseline | `allowed_tool_names=["read_asset"]` | 1 exposed MCP tool; `read_asset -> s3:GetObject` potentially allowed via `aws:role/demo-storage-mcp` |
+| candidate | removed | AI-BOM unchanged; `mcp_tool_exposure_added` **critical** for `run_maintenance` (inventory capability `command_execution`), `low` for `purge_asset`; `privilege_path_added` **high** for `purge_asset -> s3:DeleteObject` under the server's role |
+| fixed | restored | `potential_privilege_removed`; baseline vs fixed: 0 changes, 0 unknowns |
+
+The server is also listed in `.mcp.json`; that entry is recorded as a
+*configured* client and never creates capability paths.
+
 ## What is supported
 
 | Layer | Supported in P0 | Everything else |
@@ -45,6 +62,7 @@ identical `app/agent.py`, `requirements.txt` and `aibom-identity.yaml`. Only
 | Tool binding | Explicit `tools=[...]` resolved by the existing binding analysis (same tool component IDs as the inventory, incl. imported tools and `TOOLS` lists) | `tool_definition_unresolved` |
 | Tool → operation | `boto3.client("<svc>")` receiver + mapped method (S3, DynamoDB, Secrets Manager, a few IAM methods; see `operations.ACTIONS`) in the tool body **or in project helpers it calls (≤3 hops, cross-file, each hop kept as evidence)**; the client may be imported from another module; or an explicit `tools:` entry in the manifest | `boto3.resource`, sessions, dynamic dispatch: not seen. A bucket passed as a helper parameter stays `*` |
 | Agent → identity | **Only** the identity manifest, matched by `<file>:<variable>` | `identity_unmapped`; never inferred from names |
+| MCP (P1-A) | Python `FastMCP(...)` servers and `@srv.tool` tools; Agents SDK `Agent(mcp_servers=[...])` with `MCPServerStdio` / `MCPServerSse` / `MCPServerStreamableHttp` (assignment, `async with … as`, or imported); stdio linked to a repository server only via literal `.py` / `-m module` args; literal `tool_filter` (`create_static_tool_filter` or dict, allowed/blocked); client configs `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `mcp_config.json` (`mcpServers` / `servers`) | Remote servers: `remote_server_tools_unknown`; non-literal filter: all tools treated as exposed + `mcp_tool_filter_unresolved`; servers outside the repo: `server_outside_analyzed_sources`. Servers are never started or enumerated |
 | Delegation (P1) | `handoffs=[a, handoff(b), handoff(agent=c)]` and `tools=[x.as_tool(...)]` in inline lists; target must be a resolvable `Agent(...)` assignment (same file or imported). One hop | `delegate_unresolved` unknown |
 | Registry (P1) | `--agent-registry approved_agents.yaml` from the operator: `registered` / `unregistered` by `agent_ref` or `file:variable` alias (case-insensitive) | No registry → `unknown`. Never read from the scan target |
 | Policy | AWS identity policy JSON: `Effect`, `Action`, `Resource`, `Sid`; `*`/`?` wildcards; Deny wins | `NotAction`, `NotResource`, `Condition`, policy variables, `Principal` → **unknown** |
@@ -68,6 +86,7 @@ identical `app/agent.py`, `requirements.txt` and `aibom-identity.yaml`. Only
 | `identity_permission_expanded` | New grant no analyzed bound tool uses (severity capped at medium; does **not** claim the agent can act) | yes |
 | `review_required` | `unknown` ↔ `potentially_allowed`; certainty `unknown`, severity capped | **no** |
 | `potential_privilege_removed` | Path or grant no longer potentially allowed | no |
+| `mcp_tool_exposure_added` | An MCP tool newly exposed to an analyzed agent (new connection or widened filter); severity from the tool's inventory capabilities (`command_execution` → critical), +1 for untrusted instructions | yes |
 | `delegate_path_added` | A parent can now delegate to a child whose operation is potentially allowed; `review_required`, severity capped at medium | **no** |
 | `unregistered_agent_added` | Agent not in the supplied registry (new, or newly unlisted) | yes |
 
@@ -78,6 +97,21 @@ critical), +1 when the agent's instructions are proven to reach untrusted input
 `agent|tool|action|resource` — line numbers and JSON formatting never cause drift.
 Every supported addition carries `remediation` (`why_it_matters`, conditions,
 recommended actions, `retest_command`). Fixes are suggested, never applied.
+
+## MCP semantics (P1-A)
+
+* Graph: `agent -CONNECTS_MCP-> mcp_server -EXPOSES_TOOL-> tool`,
+  `mcp_client(config) -CONFIGURES_MCP-> mcp_server`, `mcp_server -RUNS_AS-> identity`.
+* A tool's *existence* on a server (`mcp_servers[].tools`) is kept separate
+  from its *exposure* to an agent (`agents[].mcp_tool_ids`,
+  `mcp_connections[].exposed_tool_ids`).
+* An MCP tool's cloud operations are evaluated against the **server's**
+  identity from the manifest (`mcp_servers: [{source, identity_ref}]`), never
+  the agent's; without a mapping the verdict is `unknown`
+  (`mcp_server_identity_unmapped`). Paths carry `via: "mcp"`,
+  `mcp_server_id`, and the constraints `mcp-server-identity`, `tool-list-static`.
+* Only the command's base name and the resolved repository file are stored;
+  other arguments, URLs and `env` values are never written to reports.
 
 ## Delegation semantics (P1)
 
@@ -103,8 +137,8 @@ agents:
 ## SARIF (P1)
 
 `--agent-sarif` writes additions and reviews (never removals) with rule IDs
-`AIBOM-AGENT-001` (`permission_scope_expanded`) … `AIBOM-AGENT-007`
-(`unregistered_agent_added`), a `security-severity`, the stable change ID as
+`AIBOM-AGENT-001` (`permission_scope_expanded`) … `AIBOM-AGENT-008`
+(`mcp_tool_exposure_added`), a `security-severity`, the stable change ID as
 `partialFingerprints.aibomChangeId`, and the operation's source line (else the
 policy file) relative to the candidate root. The existing findings SARIF is
 unchanged.
@@ -122,6 +156,9 @@ identities:
     provider: aws
     policies: ["policy/review-role.json"] # workspace-relative
     provenance: explicit_manifest
+mcp_servers:                              # optional: identity of an MCP server process
+  - source: "servers/storage_server.py"
+    identity_ref: "aws:role/demo-storage-mcp"
 tools:                                    # optional explicit tool -> action mapping
   - source: "app/agent.py:sync_assets"
     actions: ["s3:PutObject"]
@@ -161,12 +198,13 @@ called.
 * Source code alone never establishes the runtime principal.
 * Agents are never labeled "shadow": `management_status` is `unknown` (no
   approved-agent registry in P0).
-* Implemented from P1: helper/cross-file operations, one-hop delegation,
-  approved-agent registry, SARIF. **Not implemented:** MCP capability graph,
-  JS/TS agents, Graph UI; Azure/GCP/OAuth and runtime observation (P2).
-* Evaluation so far is the bundled scenario plus 44 unit/CLI tests
-  (`tests/test_agent_security.py`, `tests/test_agent_security_p1.py`); no
-  precision/recall on external repositories has been measured yet.
+* Implemented from P1: MCP capability graph (Python), helper/cross-file
+  operations, one-hop delegation, approved-agent registry, SARIF. **Not
+  implemented:** JS/TS agents and MCP servers, Graph UI; Azure/GCP/OAuth and
+  runtime observation (P2).
+* Evaluation so far is the two bundled scenarios plus 57 unit/CLI tests
+  (`tests/test_agent_security*.py`); no precision/recall on external
+  repositories has been measured yet.
 
 ## Arsenal abstract (draft)
 

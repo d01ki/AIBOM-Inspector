@@ -25,6 +25,7 @@ COPY tests/fixtures/impact-demo-ts ./tests/fixtures/impact-demo-ts
 COPY tests/fixtures/impact-demo-ts-baseline ./tests/fixtures/impact-demo-ts-baseline
 COPY examples/trust-boundary-drift ./examples/trust-boundary-drift
 COPY examples/agent-privilege-drift ./examples/agent-privilege-drift
+COPY examples/mcp-tool-exposure ./examples/mcp-tool-exposure
 COPY tests/fixtures/xfile-py-baseline ./tests/fixtures/xfile-py-baseline
 COPY tests/fixtures/xfile-py-candidate ./tests/fixtures/xfile-py-candidate
 COPY tests/fixtures/xfile-ts-baseline ./tests/fixtures/xfile-ts-baseline

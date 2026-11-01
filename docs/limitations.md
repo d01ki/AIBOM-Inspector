@@ -165,6 +165,12 @@
   `tools=[x.as_tool(...)]` lists; handoff guards, approvals and identity
   propagation are not analyzed, so delegated capabilities are always
   `unknown` for the parent and never gate CI.
+- MCP analysis is Python-only and static: servers are never started, so
+  only `@srv.tool` functions on a `FastMCP(...)` defined in the repository are
+  known. Remote (SSE / streamable HTTP) servers, servers launched from outside
+  the repository, dynamically registered tools and non-literal launch
+  parameters stay unknown. A non-literal `tool_filter` is treated as exposing
+  every tool (conservative). TypeScript MCP servers are not linked yet.
 - Registry matching is by `agent_ref` or `file:variable` alias only; renamed
   files or variables need an alias. MCP, JS/TS agents and cloud-side policy
   retrieval are not implemented.

@@ -365,6 +365,10 @@ class RepoCollector(Collector):
         # Bindings and steerability span files, so tools are graded last.
         link_tools(inventory)
 
+    def files(self) -> list[Path]:
+        """Every file a scan would read (ignore-dirs and root-escaping links excluded)."""
+        return self._iter_files()
+
     def index_project(self) -> ProjectIndex:
         """Parse the target into a :class:`ProjectIndex` without running detectors."""
         self._index_project(self._iter_files())
