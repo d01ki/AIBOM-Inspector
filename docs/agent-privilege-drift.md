@@ -1,4 +1,4 @@
-# Agent Identity & Privilege Drift (P0)
+# Agent Identity & Privilege Drift (P0 + P1 subset)
 
 > **The AI-BOM stays the same. The agent's effective capabilities change.**
 
@@ -20,6 +20,11 @@ aibom demo --scenario agent-privilege-drift --output-dir out/  # also save every
 aibom scan examples/agent-privilege-drift/baseline --identity-manifest aibom-identity.yaml -o inv.json
 aibom diff examples/agent-privilege-drift/baseline examples/agent-privilege-drift/candidate \
   --agent-privileges -o drift.json --fail-on high             # exits 1
+
+# P1: SARIF for Code Scanning, and an operator-supplied approved-agent registry
+aibom diff <baseline> <candidate> --agent-privileges --agent-sarif agents.sarif \
+  --agent-registry approved_agents.yaml
+aibom scan <dir> --agent-registry approved_agents.yaml -o inv.json
 ```
 
 The scenario (`examples/agent-privilege-drift/`) has three revisions with an
@@ -38,8 +43,10 @@ identical `app/agent.py`, `requirements.txt` and `aibom-identity.yaml`. Only
 |---|---|---|
 | Agent definition | Python OpenAI Agents SDK `x = Agent(...)` (module or function scope) in production sources | Unknown / not reported |
 | Tool binding | Explicit `tools=[...]` resolved by the existing binding analysis (same tool component IDs as the inventory, incl. imported tools and `TOOLS` lists) | `tool_definition_unresolved` |
-| Tool → operation | `boto3.client("<svc>")` receiver + mapped method in the tool body (S3, DynamoDB, Secrets Manager, a few IAM methods; see `operations.ACTIONS`), or an explicit `tools:` entry in the manifest | Helpers, `boto3.resource`, sessions, dynamic dispatch: not seen |
+| Tool → operation | `boto3.client("<svc>")` receiver + mapped method (S3, DynamoDB, Secrets Manager, a few IAM methods; see `operations.ACTIONS`) in the tool body **or in project helpers it calls (≤3 hops, cross-file, each hop kept as evidence)**; the client may be imported from another module; or an explicit `tools:` entry in the manifest | `boto3.resource`, sessions, dynamic dispatch: not seen. A bucket passed as a helper parameter stays `*` |
 | Agent → identity | **Only** the identity manifest, matched by `<file>:<variable>` | `identity_unmapped`; never inferred from names |
+| Delegation (P1) | `handoffs=[a, handoff(b), handoff(agent=c)]` and `tools=[x.as_tool(...)]` in inline lists; target must be a resolvable `Agent(...)` assignment (same file or imported). One hop | `delegate_unresolved` unknown |
+| Registry (P1) | `--agent-registry approved_agents.yaml` from the operator: `registered` / `unregistered` by `agent_ref` or `file:variable` alias (case-insensitive) | No registry → `unknown`. Never read from the scan target |
 | Policy | AWS identity policy JSON: `Effect`, `Action`, `Resource`, `Sid`; `*`/`?` wildcards; Deny wins | `NotAction`, `NotResource`, `Condition`, policy variables, `Principal` → **unknown** |
 
 ## Verdicts (per agent → tool → action → resource)
@@ -61,6 +68,8 @@ identical `app/agent.py`, `requirements.txt` and `aibom-identity.yaml`. Only
 | `identity_permission_expanded` | New grant no analyzed bound tool uses (severity capped at medium; does **not** claim the agent can act) | yes |
 | `review_required` | `unknown` ↔ `potentially_allowed`; certainty `unknown`, severity capped | **no** |
 | `potential_privilege_removed` | Path or grant no longer potentially allowed | no |
+| `delegate_path_added` | A parent can now delegate to a child whose operation is potentially allowed; `review_required`, severity capped at medium | **no** |
+| `unregistered_agent_added` | Agent not in the supplied registry (new, or newly unlisted) | yes |
 
 Severity and certainty are separate axes. Severity = operation hazard
 (`list` low, `read` medium, `write`/`delete`/`secrets_read` high, `admin`
@@ -69,6 +78,36 @@ critical), +1 when the agent's instructions are proven to reach untrusted input
 `agent|tool|action|resource` — line numbers and JSON formatting never cause drift.
 Every supported addition carries `remediation` (`why_it_matters`, conditions,
 recommended actions, `retest_command`). Fixes are suggested, never applied.
+
+## Delegation semantics (P1)
+
+A delegation edge (`DELEGATES_TO`) is recorded with `guard_status: unknown`.
+For each capability path of the child, a `delegate_paths` entry is emitted with
+the child's verdict and the parent's verdict fixed at `unknown`
+(`delegation_guard_unverified`, `identity_context_propagation_unknown`). The
+child's capabilities are **never added to the parent's own capability paths**:
+whether a handoff happens, which guard or approval applies, and which identity
+the child runs under at that moment are runtime facts.
+
+## Approved-agent registry (P1)
+
+```yaml
+# approved_agents.yaml — supplied by you, never auto-discovered in the target
+schema_version: 1
+agents:
+  - agent_ref: "agent:reviewer"
+    aliases: ["app/agent.py:reviewer"]
+    owner: "platform-security"
+```
+
+## SARIF (P1)
+
+`--agent-sarif` writes additions and reviews (never removals) with rule IDs
+`AIBOM-AGENT-001` (`permission_scope_expanded`) … `AIBOM-AGENT-007`
+(`unregistered_agent_added`), a `security-severity`, the stable change ID as
+`partialFingerprints.aibomChangeId`, and the operation's source line (else the
+policy file) relative to the candidate root. The existing findings SARIF is
+unchanged.
 
 ## Identity manifest (`aibom-identity.yaml`)
 
@@ -122,12 +161,12 @@ called.
 * Source code alone never establishes the runtime principal.
 * Agents are never labeled "shadow": `management_status` is `unknown` (no
   approved-agent registry in P0).
-* Agent-to-agent delegation / handoffs, MCP capability graphs, JS/TS, Graph UI
-  and SARIF output for privilege drift are P1; Azure/GCP/OAuth and runtime
-  observation are P2. None of these are implemented.
-* Evaluation so far is the bundled scenario plus 36 unit/CLI tests
-  (`tests/test_agent_security.py`); no precision/recall on external
-  repositories has been measured yet.
+* Implemented from P1: helper/cross-file operations, one-hop delegation,
+  approved-agent registry, SARIF. **Not implemented:** MCP capability graph,
+  JS/TS agents, Graph UI; Azure/GCP/OAuth and runtime observation (P2).
+* Evaluation so far is the bundled scenario plus 44 unit/CLI tests
+  (`tests/test_agent_security.py`, `tests/test_agent_security_p1.py`); no
+  precision/recall on external repositories has been measured yet.
 
 ## Arsenal abstract (draft)
 

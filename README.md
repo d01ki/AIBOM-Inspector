@@ -195,7 +195,9 @@ The dated, source-linked competitive analysis and claim boundaries are in
   (Allow/Deny/Unknown — `Condition`, `NotAction`, `NotResource` stay unknown),
   and reports `permission_scope_expanded` when the AI-BOM is unchanged but a
   policy change lets an agent's tool operation through. Verdicts cover the
-  supplied policies only, never AWS effective authorization —
+  supplied policies only, never AWS effective authorization. Also follows
+  helpers across files, records handoff / agent-as-tool delegation without
+  merging privileges, checks an approved-agent registry, and emits SARIF —
   [docs/agent-privilege-drift.md](docs/agent-privilege-drift.md)
 - **Complete dependency BOM** — every package in `requirements*.txt`,
   `pyproject.toml`, `Pipfile`, `package.json`, `go.mod`, `Cargo.toml`,

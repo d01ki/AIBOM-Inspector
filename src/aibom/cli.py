@@ -23,6 +23,7 @@ from aibom.agent_security.models import AgentSecurityReport
 from aibom.agent_security.render import render_drift as render_privilege_drift
 from aibom.agent_security.render import render_report as render_agent_report
 from aibom.agent_security.safeio import InputError
+from aibom.agent_security.sarif import to_sarif_json as privilege_sarif_json
 from aibom.agent_security.scenario import run_scenario, scenario_root, write_artifacts
 from aibom.compliance.minimum_elements import (
     ElementOrigin,
@@ -260,6 +261,14 @@ def scan(
             "'agent_security'. Relative paths resolve inside TARGET.",
         ),
     ] = None,
+    agent_registry: Annotated[
+        Path | None,
+        typer.Option(
+            "--agent-registry",
+            help="Approved-agent registry (approved_agents.yaml) supplied by you; marks "
+            "agents registered/unregistered. Never read from TARGET automatically.",
+        ),
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Suppress the summary tables.")
     ] = False,
@@ -335,11 +344,15 @@ def scan(
         result = _scan(local_path)
     inventory, findings, score = result.inventory, result.findings, result.score
     agent_report = None
-    if identity_manifest is not None:
+    if identity_manifest is not None or agent_registry is not None:
         if is_url:
-            console.print("[red]error:[/red] --identity-manifest needs a local TARGET")
+            console.print(
+                "[red]error:[/red] --identity-manifest/--agent-registry need a local TARGET"
+            )
             raise typer.Exit(code=2)
-        agent_report = _agent_security_or_exit(local_path, inventory, identity_manifest)
+        agent_report = _agent_security_or_exit(
+            local_path, inventory, identity_manifest, agent_registry
+        )
 
     if not quiet:
         _render(inventory)
@@ -595,10 +608,17 @@ def _agent_privilege_demo(output_dir: Path | None) -> None:
 
 
 def _agent_security_or_exit(
-    target: Path, inventory: Inventory, manifest: Path
+    target: Path, inventory: Inventory, manifest: Path | None, registry: Path | None = None
 ) -> AgentSecurityReport:
+    """``manifest=None`` uses ``aibom-identity.yaml`` in the target when present."""
     try:
-        return analyze_agents(target, inventory, manifest=manifest, display_target=str(target))
+        return analyze_agents(
+            target,
+            inventory,
+            manifest=manifest,
+            display_target=str(target),
+            registry=registry,
+        )
     except (InputError, FileNotFoundError) as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=2) from None
@@ -741,6 +761,20 @@ def diff_scans(
             help="Manifest path relative to each revision (used with --agent-privileges).",
         ),
     ] = "aibom-identity.yaml",
+    agent_registry: Annotated[
+        Path | None,
+        typer.Option(
+            "--agent-registry",
+            help="Approved-agent registry applied to both revisions (--agent-privileges).",
+        ),
+    ] = None,
+    agent_sarif: Annotated[
+        Path | None,
+        typer.Option(
+            "--agent-sarif",
+            help="Write privilege-drift additions as SARIF 2.1.0 (--agent-privileges).",
+        ),
+    ] = None,
 ) -> None:
     """Compare two AIBOM scans, including trust-boundary and usage drift.
 
@@ -764,8 +798,12 @@ def diff_scans(
     privilege_report = None
     if agent_privileges:
         manifest = Path(identity_manifest)
-        before = _agent_security_or_exit(baseline, baseline_result.inventory, manifest)
-        after = _agent_security_or_exit(candidate, candidate_result.inventory, manifest)
+        before = _agent_security_or_exit(
+            baseline, baseline_result.inventory, manifest, agent_registry
+        )
+        after = _agent_security_or_exit(
+            candidate, candidate_result.inventory, manifest, agent_registry
+        )
         privilege_report = compare_privileges(
             before,
             after,
@@ -789,6 +827,11 @@ def diff_scans(
             merged["agent_privileges"] = privilege_report.model_dump(mode="json")
             payload = json.dumps(merged, indent=2, ensure_ascii=False)
         _write_or_exit(output, payload, "AIBOM drift report")
+    if agent_sarif is not None:
+        if privilege_report is None:
+            console.print("[red]error:[/red] --agent-sarif requires --agent-privileges")
+            raise typer.Exit(code=2)
+        _write_or_exit(agent_sarif, privilege_sarif_json(privilege_report), "agent SARIF log")
     # An `unknown` path change is shown but never gates: it is not a proof.
     if threshold is not None and any(
         change.gates and change.severity.rank >= threshold.rank for change in report.changes

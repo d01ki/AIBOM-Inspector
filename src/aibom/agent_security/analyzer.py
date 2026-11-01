@@ -36,6 +36,8 @@ from aibom.agent_security.models import (
     AnalysisScope,
     AuthorizationPolicy,
     CapabilityPath,
+    DelegateCapabilityPath,
+    Delegation,
     GraphEdge,
     GraphNode,
     ResolutionStatus,
@@ -46,6 +48,7 @@ from aibom.agent_security.models import (
     Verdict,
 )
 from aibom.agent_security.operations import detect_operations, hazard_for_action
+from aibom.agent_security.registry import AgentRegistry, load_registry, normalize
 from aibom.collectors.repo import RepoCollector
 from aibom.detectors.project import ProjectIndex
 from aibom.detectors.python.parser import PythonModule, classify_source_context
@@ -80,6 +83,7 @@ def analyze(
     manifest: str | Path | None = None,
     auto_manifest: bool = True,
     display_target: str | None = None,
+    registry: str | Path | None = None,
 ) -> AgentSecurityReport:
     """Analyze ``target``; raises :class:`~aibom.agent_security.safeio.InputError`."""
     root = Path(target).resolve()
@@ -92,12 +96,17 @@ def analyze(
     elif auto_manifest and (root / DEFAULT_MANIFEST).is_file():
         loaded, manifest_display = load_manifest(root, DEFAULT_MANIFEST)
 
+    approved: AgentRegistry | None = None
+    registry_display: str | None = None
+    if registry is not None:
+        approved, registry_display = load_registry(registry)
+
     project = RepoCollector(root).index_project()
     report = AgentSecurityReport(
         target=display_target or root.name,
-        scope=AnalysisScope(manifest=manifest_display),
+        scope=AnalysisScope(manifest=manifest_display, registry=registry_display),
     )
-    _Builder(root, project, inventory, loaded, report).run()
+    _Builder(root, project, inventory, loaded, report, approved).run()
     return report
 
 
@@ -109,8 +118,11 @@ class _Builder:
         inventory: Inventory | None,
         manifest: IdentityManifest | None,
         report: AgentSecurityReport,
+        registry: AgentRegistry | None = None,
     ) -> None:
         self.root = root
+        self.registry = registry
+        self._pending: list[tuple[str, _AgentSite, str, ast.AST, ast.AST]] = []
         self.project = project
         self.inventory = inventory
         self.manifest = manifest
@@ -147,9 +159,11 @@ class _Builder:
         for agent in agents:
             self.report.agents.append(agent)
             self._agent_paths(agent, operations, identities, policies)
+        self._delegations(agents)
         self.report.nodes = sorted(self.nodes.values(), key=lambda n: n.id)
         self.report.edges = sorted(self.edges.values(), key=lambda e: e.id)
         self.report.capability_paths.sort(key=lambda p: p.key)
+        self.report.delegate_paths.sort(key=lambda p: p.key)
 
     # -- tools and operations ----------------------------------------------------
 
@@ -164,7 +178,9 @@ class _Builder:
                 if tool_framework(module, info.node) is None:
                     continue
                 tool_id = self._tool_id(info.name, module.relative_path)
-                found[tool_id].extend(detect_operations(module, info.node, tool_id, info.name))
+                found[tool_id].extend(
+                    detect_operations(module, info.node, tool_id, info.name, self.project)
+                )
         if self.manifest is None:
             return found
         for declaration in self.manifest.tools:
@@ -351,7 +367,9 @@ class _Builder:
             )
 
         tool_ids: list[str] = []
-        for bound in _bound_tools(site.module, site.call, self.project):
+        for mechanism, target, at in _delegate_targets(site.module, site.call):
+            self._pending.append((agent_id, site, mechanism, target, at))
+        for bound in _bound_tools(site.module, _without_agent_tools(site.call), self.project):
             if bound.function is None:
                 self.report.unknowns.append(
                     UnknownItem(
@@ -372,8 +390,72 @@ class _Builder:
             identity_source_type=identity_source,
             tool_ids=tool_ids,
             external_input=self._external_input(site),
+            management_status=self._management_status(agent_id, site.source),
             evidence=evidence,
         )
+
+    def _management_status(self, agent_id: str, source: str) -> str:
+        if self.registry is None:
+            return "unknown"
+        refs = self.registry.refs()
+        return "registered" if {normalize(agent_id), normalize(source)} & refs else "unregistered"
+
+    # -- delegation --------------------------------------------------------------
+
+    def _delegations(self, agents: list[AgentRecord]) -> None:
+        """One-hop handoff / agent-as-tool edges; capabilities are never merged."""
+        counts: dict[str, int] = defaultdict(int)
+        for agent in agents:
+            counts[agent.source] += 1
+        by_source = {agent.source: agent for agent in agents if counts[agent.source] == 1}
+        for parent_id, site, mechanism, target, at in self._pending:
+            ref = site.module.source_segment(target, limit=80)
+            evidence = [_ast_evidence(site.module, at, mechanism)]
+            source = _delegate_source(site.module, target, self.project)
+            child = by_source.get(source) if source else None
+            self.report.delegations.append(
+                Delegation(
+                    parent_id=parent_id,
+                    child_id=child.id if child else None,
+                    child_ref=ref,
+                    mechanism=mechanism,
+                    evidence=evidence,
+                )
+            )
+            if child is None:
+                self.report.unknowns.append(
+                    UnknownItem(
+                        subject=f"{parent_id}:delegate:{ref}",
+                        reason="delegate_unresolved",
+                        detail=f"{mechanism} target is not a resolvable Agent(...) assignment",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            self._edge(
+                parent_id, child.id, "DELEGATES_TO", SourceType.OBSERVED_STATIC, evidence=evidence
+            )
+            for path in self.report.capability_paths:
+                if path.agent_id != child.id:
+                    continue
+                self.report.delegate_paths.append(
+                    DelegateCapabilityPath(
+                        key="|".join(
+                            [parent_id, child.id, path.tool_id, path.action, path.resource]
+                        ),
+                        parent_id=parent_id,
+                        child_id=child.id,
+                        mechanism=mechanism,
+                        tool_id=path.tool_id,
+                        tool_name=path.tool_name,
+                        action=path.action,
+                        resource=path.resource,
+                        hazard=path.hazard,
+                        child_identity_id=path.identity_id,
+                        child_verdict=path.verdict,
+                        evidence=[*evidence, *path.evidence],
+                    )
+                )
 
     def _external_input(self, site: _AgentSite) -> bool:
         if self.inventory is None:
@@ -584,6 +666,70 @@ class _Builder:
             resolution_status=status,
             evidence=list(evidence or []),
         )
+
+
+def _delegate_targets(module: PythonModule, call: ast.Call) -> list[tuple[str, ast.AST, ast.AST]]:
+    """``handoffs=[a, handoff(b)]`` and ``tools=[c.as_tool(...)]`` (inline lists only)."""
+    found: list[tuple[str, ast.AST, ast.AST]] = []
+    for keyword in call.keywords:
+        if not isinstance(keyword.value, (ast.List, ast.Tuple)):
+            continue
+        for item in keyword.value.elts:
+            if keyword.arg == "handoffs":
+                if isinstance(item, ast.Call):
+                    if not (module.qualified_name(item.func) or "").endswith("handoff"):
+                        continue
+                    target = item.args[0] if item.args else None
+                    for inner in item.keywords:
+                        if inner.arg == "agent":
+                            target = inner.value
+                    if target is not None:
+                        found.append(("handoff", target, item))
+                else:
+                    found.append(("handoff", item, item))
+            elif keyword.arg == "tools" and isinstance(item, ast.Call):
+                func = item.func
+                if isinstance(func, ast.Attribute) and func.attr == "as_tool":
+                    found.append(("agent_as_tool", func.value, item))
+    return found
+
+
+def _is_as_tool(item: ast.AST) -> bool:
+    return (
+        isinstance(item, ast.Call)
+        and isinstance(item.func, ast.Attribute)
+        and item.func.attr == "as_tool"
+    )
+
+
+def _without_agent_tools(call: ast.Call) -> ast.Call:
+    """The constructor with ``x.as_tool(...)`` entries removed from an inline ``tools``.
+
+    The binding analysis gives up on a list containing calls; agents-as-tools
+    are delegation edges, not function tools, so they are analyzed separately.
+    """
+    changed = False
+    keywords: list[ast.keyword] = []
+    for keyword in call.keywords:
+        value = keyword.value
+        if keyword.arg == "tools" and isinstance(value, (ast.List, ast.Tuple)):
+            kept = [item for item in value.elts if not _is_as_tool(item)]
+            if len(kept) != len(value.elts):
+                changed = True
+                value = ast.copy_location(ast.List(elts=kept, ctx=ast.Load()), value)
+        keywords.append(ast.copy_location(ast.keyword(arg=keyword.arg, value=value), keyword))
+    if not changed:
+        return call
+    return ast.copy_location(ast.Call(func=call.func, args=call.args, keywords=keywords), call)
+
+
+def _delegate_source(module: PythonModule, target: ast.AST, project: ProjectIndex) -> str | None:
+    if not isinstance(target, ast.Name):
+        return None
+    if target.id in module.aliases:
+        symbol = project.python_symbol(module, target.id)
+        return f"{symbol.module.relative_path}:{symbol.name}" if symbol else None
+    return f"{module.relative_path}:{target.id}"
 
 
 def _assigned_symbol(module: PythonModule, call: ast.Call) -> str | None:
