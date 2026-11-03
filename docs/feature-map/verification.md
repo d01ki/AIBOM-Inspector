@@ -64,6 +64,11 @@ pytest output, plus a sample `verify-out/<run>/report.md`.
 
 Glob mistakes in a new feature file. `test_feature_map.py` catches them.
 
+Stacked branches: a feature file that names a path added only by a later
+commit (here `CLAUDE.md`) passes at the top of the stack but fails
+`test_every_glob_matches_a_file` on the lower PR. Run pytest on every branch
+of a stack before pushing, not only on the last one.
+
 ```json verify
 {
   "id": "verification",
