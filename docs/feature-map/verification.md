@@ -77,7 +77,8 @@ of a stack before pushing, not only on the last one.
     "scripts/verify_ui.py",
     ".claude/skills/verify/**",
     "docs/feature-map.md",
-    "docs/feature-map/*.md"
+    "docs/feature-map/*.md",
+    "CLAUDE.md"
   ],
   "tests": [
     "tests/test_verify_script.py",
