@@ -286,6 +286,9 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
         "production_ai_components": production_ai_component_count(inv),
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": len(result.findings),
+        # The revision's dependency map, so the drift and compare demos can show
+        # what is connected to what, not only what changed.
+        "graph": build_graph(inv, result.findings),
     }
 
 

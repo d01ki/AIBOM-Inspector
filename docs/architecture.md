@@ -50,7 +50,11 @@ only draws an edge that a scanned line proves:
 | `package -depends_on-> package` | `LockfileCollector` | the lockfile line declaring the dependency; only between packages that lockfile resolved |
 | `model -served_by-> service` | `linking.py` | the line where the model's provider was attributed; the service must also have been found |
 | `model/service/dataset -depends_on-> package` | `linking.py` | the import of the package in a file that evidences the component; package and component must share a provider family, and dataset loaders link only to datasets |
-| `prompt -flows_to-> model`, `prompt -invokes-> tool` | prompt-flow detectors | data-flow evidence |
+| `prompt -flows_to-> model` | prompt-flow detectors | data-flow evidence |
+| `prompt -invokes-> tool` | `tools.py` (`link_tools`) | the agent constructor whose `tools=` binds the tool |
+| `mcp tool -served_by-> mcp server` | `linking.py` | the tool's `@mcp.tool()` definition, in the one file that creates the server |
+| `mcp server -depends_on-> package` | `linking.py` | the SDK import in the server file (`mcp`, `@modelcontextprotocol/*`) |
+| `mcp config/prompt -invokes-> mcp server` | `linking.py` | the line naming the server script's repo-relative path (config 0.8; a prompt's file is co-location, 0.5); `my_server.py` does not match `server.py` |
 | `agent -invokes/uses_prompt-> ...` | repo collector | the agent's construction line (co-location, confidence 0.5) |
 
 Plain (non-AI) packages are drawn only when flagged or directly depended on by

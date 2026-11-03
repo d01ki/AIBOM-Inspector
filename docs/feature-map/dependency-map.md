@@ -15,14 +15,20 @@ proves it. The edge rules are in
 - CLI: `aibom scan <path> -o inv.json` writes `relationships[]`;
   `-c bom.json` writes `dependencies[]`; `-r report.html` draws the graph.
 - API: `POST /api/scan`, `POST /api/demo` → `graph.nodes`, `graph.edges[]`
-  (`source`, `target`, `type`, `evidence[]`).
-- UI: results → **Dependencies** tab → click a node → *Connections*.
+  (`source`, `target`, `type`, `evidence[]`). The demo APIs carry one map per
+  revision: `/api/agent-drift/demo` → `revisions.<stage>.graph`,
+  `/api/diff/demo` → `baseline.graph` / `candidate.graph`.
+- UI: results → **Dependencies** tab → click a node → *Connections*. The
+  privilege-drift and MCP demos draw a *Dependency map* that follows the
+  Baseline / Candidate / Fixed toggle; the Compare demo draws the candidate's.
 
 ## Source
 
 - `src/aibom/collectors/dependencies.py`: manifests (11 ecosystems), AI flag
 - `src/aibom/collectors/lockfiles.py`: lockfile packages and `depends_on` edges
-- `src/aibom/linking.py`: `model → service` and `component → SDK package`
+- `src/aibom/linking.py`: `model → service`, `component → SDK package`, and MCP
+  `tool → server`, `config/prompt → server`
+- `src/aibom/tools.py` (`link_tools`): `prompt -invokes-> tool`, citing the agent constructor
 - `src/aibom/collectors/repo.py` (`_link_intra_file`): prompt→model and agent co-location
 - `src/aibom/graph.py`: projection into nodes and edges, plus visibility rules
 - `src/aibom/export/cyclonedx.py` (`_dependencies`), `src/aibom/report/html.py` (`_graph_section`)
@@ -42,6 +48,8 @@ graph is built.
 - A model, service, or dataset in a file that imports a same-provider AI
   package yields `-depends_on-> package`, citing the import line.
 - A plain package directly required by an AI package is drawn (one hop).
+- An MCP tool registered in a server file is `served_by` that server; a config
+  or agent file naming the server script `invokes` it.
 
 ## Error paths
 
@@ -71,6 +79,7 @@ graph is built.
 | `pytest tests/test_dependency_edges.py tests/test_linking.py tests/test_graph.py tests/test_lockfiles.py tests/test_dependencies.py` | edge rules, negatives, graph visibility, report arrows |
 | smoke `scan` of `locked-ai-app` with `-c` | CycloneDX `dependsOn` is non-empty for locked packages |
 | `python scripts/verify_ui.py --fixture vulnerable-ai-app` | the real browser draws directed edges, a legend, and the Connections panel, with no console errors |
+| `python scripts/verify_ui.py --fixture demos` | the sample, privilege-drift, MCP and Compare demos each draw a non-empty map whose edges all carry evidence |
 
 ## Expected results
 
@@ -79,6 +88,8 @@ graph is built.
 - `vulnerable-ai-app`: `gpt-4o-mini -served_by-> openai` and `-depends_on->
   openai (package)` citing `app.py:8`. No `gpt-4o-mini → transformers`.
 - UI: `edges == edges_with_arrow`, a non-empty legend, and no console errors.
+- Demos: sample 5 nodes / 5 edges, privilege drift 7 / 6, MCP 8 / 6 (only the
+  unused `openai-agents` is unlinked), Compare 5 / 5.
 
 ## Evidence
 
@@ -93,6 +104,10 @@ counts, the panel text, and console errors).
 - PHP and Ruby source imports are not linked (`openai-php/client`,
   `ruby-openai` stay unlinked to models).
 - Model IDs chosen at run time (gateway catalogs) cannot be linked.
+- An MCP server started by a built artefact (`dist/server.js`) or a package
+  name rather than its source path is not linked to its launcher.
+- A new edge rule that forgets `source_evidence`: the demo UI check and
+  `test_prompt_tool_bindings_cite_the_agent_constructor` fail.
 - The service `openai` and the package `openai` share a label. Read the type
   shown in the panel.
 
@@ -103,6 +118,7 @@ counts, the panel text, and console errors).
     "src/aibom/collectors/dependencies.py",
     "src/aibom/collectors/lockfiles.py",
     "src/aibom/linking.py",
+    "src/aibom/tools.py",
     "src/aibom/graph.py",
     "src/aibom/inventory.py",
     "src/aibom/models/entities.py",
@@ -135,7 +151,7 @@ counts, the panel text, and console errors).
       "expect_output": "component dependsOn edges:"
     }
   ],
-  "ui": ["vulnerable-ai-app", "locked-ai-app"],
+  "ui": ["vulnerable-ai-app", "locked-ai-app", "demos"],
   "manual": []
 }
 ```

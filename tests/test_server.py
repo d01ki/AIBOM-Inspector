@@ -301,3 +301,31 @@ def test_agent_drift_demo_is_offline_and_verifies_the_fix(
 
 def test_agent_drift_demo_rejects_an_unknown_scenario(client: TestClient) -> None:
     assert client.post("/api/agent-drift/demo?scenario=nope").status_code == 400
+
+
+def _assert_evidenced_graph(graph: dict) -> None:
+    ids = {n["id"] for n in graph["nodes"]}
+    assert graph["edges"], "a demo dependency map must not be empty"
+    for edge in graph["edges"]:
+        assert {edge["source"], edge["target"]} <= ids
+        assert edge["evidence"], f"edge without evidence: {edge}"
+
+
+@pytest.mark.parametrize("scenario", ["agent-privilege-drift", "mcp-tool-exposure"])
+def test_agent_drift_demo_returns_a_dependency_map_per_revision(
+    client: TestClient, scenario: str
+) -> None:
+    data = client.post(f"/api/agent-drift/demo?scenario={scenario}").json()
+    for stage in ("baseline", "candidate", "fixed"):
+        _assert_evidenced_graph(data["revisions"][stage]["graph"])
+
+
+@pytest.mark.parametrize("language", ["python", "typescript"])
+def test_compare_demo_returns_both_dependency_maps(client: TestClient, language: str) -> None:
+    data = client.post(f"/api/diff/demo?language={language}&scenario=cross-file").json()
+    for side in ("baseline", "candidate"):
+        _assert_evidenced_graph(data[side]["graph"])
+
+
+def test_sample_demo_graph_edges_all_cite_evidence(client: TestClient) -> None:
+    _assert_evidenced_graph(client.post("/api/demo").json()["graph"])

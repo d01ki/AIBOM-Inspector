@@ -1103,6 +1103,24 @@ code { background: #1d3045; color: #c5e4ed; }
 .sec-detail dd { margin: 0; word-break: break-word; }
 .sec-detail ul { margin: 6px 0 0; padding-left: 18px; }
 .sec-detail li { margin: 3px 0; }
+.dep-map { margin-top: 4px; }
+.dep-graph { width: 100%; }
+.dep-graph svg { width: 100%; height: auto; display: block; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
+.dep-graph .node { cursor: pointer; }
+.dep-graph .node:focus { outline: none; }
+.dep-graph .node:focus circle { stroke: var(--accent); stroke-width: 4; }
+.dep-graph .node text { font-size: 11px; fill: var(--fg); pointer-events: none; }
+.dep-graph .edge { stroke-opacity: .55; stroke-width: 1.3; }
+.dep-graph circle { stroke: var(--card); stroke-width: 1.5; }
+.dep-detail { align-self: start; padding: 13px; font-size: 13px; }
+.dep-detail .dt-type { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.dep-detail h3 { margin: 2px 0 8px; font-size: 15px; word-break: break-all; }
+.dep-detail .dt-find { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+.dep-detail .muted { color: var(--muted); }
+.dep-detail .dt-links { margin: 6px 0 0; padding-left: 16px; }
+.dep-detail .dt-links li { margin: 2px 0; word-break: break-all; }
+.graphgrid.is-empty .legend, .graphgrid.is-empty .dep-detail { display: none; }
 .sec-detail h4 { margin: 12px 0 4px; font-size: 12px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
 .sec-unknowns { margin-top: 14px; }
 .sec-unknowns:empty { display: none; }
@@ -1542,6 +1560,17 @@ code { background: #1d3045; color: #c5e4ed; }
             <span class="muted">Select a node to see its file-and-line evidence.</span>
           </div>
         </div>
+        <h3 class="compare-heading" id="driftDepTitle">Dependency map · candidate</h3>
+        <p class="compare-note">What each component is connected to: model &rarr;
+          service, component &rarr; SDK package, MCP tool &rarr; server, prompt &rarr; tool.
+          Every edge cites a scanned file and line; select a node to see it.</p>
+        <div class="graphgrid dep-map">
+          <div>
+            <div id="driftDepGraph" class="dep-graph"></div>
+            <div class="legend" id="driftDepLegend" aria-label="Edge types" hidden></div>
+          </div>
+          <div class="card dep-detail" id="driftDepDetail"></div>
+        </div>
         <h3 class="compare-heading">What changed: impact · evidence · fix</h3>
         <div id="driftChanges"></div>
         <p class="compare-note">Looking for a new path from untrusted input to a bound tool
@@ -1601,6 +1630,17 @@ code { background: #1d3045; color: #c5e4ed; }
           <article class="revision" id="baselineCard" aria-label="Baseline revision"></article>
           <span class="revision-arrow" aria-hidden="true">→</span>
           <article class="revision" id="candidateCard" aria-label="Candidate revision"></article>
+        </div>
+        <h3 class="compare-heading" id="compareDepTitle">Dependency map · candidate</h3>
+        <p class="compare-note">What each component is connected to: model &rarr;
+          service, component &rarr; SDK package, MCP tool &rarr; server, prompt &rarr; tool.
+          Every edge cites a scanned file and line; select a node to see it.</p>
+        <div class="graphgrid dep-map">
+          <div>
+            <div id="compareDepGraph" class="dep-graph"></div>
+            <div class="legend" id="compareDepLegend" aria-label="Edge types" hidden></div>
+          </div>
+          <div class="card dep-detail" id="compareDepDetail"></div>
         </div>
         <h3 class="compare-heading">Path changes</h3>
         <p class="compare-note">Severity is the potential impact of the operation the tool can
@@ -2285,18 +2325,31 @@ function svgEl(name, attrs) {
   return el;
 }
 
-function renderGraph(graph, findings) {
-  graphFindings = findings;
-  graphExposurePaths = graph.exposure_paths || [];
-  graphImpactPaths = graph.impact_paths || [];
-  renderImpactPaths(graphImpactPaths);
-  renderExposurePaths(graphExposurePaths);
-  const host = $("graph");
+// Where a graph is drawn. The scan tab owns the impact/exposure path panels;
+// the drift and compare demos draw a plain dependency map with its own panel.
+const MAIN_GRAPH = { host: "graph", legend: "edgeLegend", detail: "graphDetail", main: true };
+const DRIFT_GRAPH = { host: "driftDepGraph", legend: "driftDepLegend", detail: "driftDepDetail" };
+const COMPARE_GRAPH = { host: "compareDepGraph", legend: "compareDepLegend", detail: "compareDepDetail" };
+
+function renderGraph(graph, findings, view = MAIN_GRAPH) {
+  const ctx = { detail: view.detail, findings: findings || [], exposure: graph.exposure_paths || [] };
+  if (view.main) {
+    graphFindings = ctx.findings;
+    graphExposurePaths = ctx.exposure;
+    graphImpactPaths = graph.impact_paths || [];
+    renderImpactPaths(graphImpactPaths);
+    renderExposurePaths(graphExposurePaths);
+  }
+  const host = $(view.host);
   const grid = host.closest(".graphgrid");
   host.innerHTML = "";
-  detailReset();
+  detailReset(ctx);
   grid.classList.toggle("is-empty", !graph.nodes.length);
-  if (!graph.nodes.length) { host.innerHTML = "<p class='muted'>No components to graph.</p>"; return; }
+  if (!graph.nodes.length) {
+    host.innerHTML = "<p class='muted'>No components to graph.</p>";
+    renderEdgeLegend([], view.legend);
+    return;
+  }
 
   const W = 800, H = 520, PAD = 46;
   const nodes = graph.nodes.map((n, i) => {
@@ -2318,7 +2371,7 @@ function renderGraph(graph, findings) {
   const defs = svgEl("defs", {});
   const types = [...new Set(links.map(l => l.type))];
   types.forEach(type => {
-    const marker = svgEl("marker", { id: `arrow-${type}`, viewBox: "0 0 10 10", refX: "9", refY: "5",
+    const marker = svgEl("marker", { id: `arrow-${view.host}-${type}`, viewBox: "0 0 10 10", refX: "9", refY: "5",
       markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" });
     marker.appendChild(svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: edgeStyle(type).color }));
     defs.appendChild(marker);
@@ -2330,7 +2383,7 @@ function renderGraph(graph, findings) {
   const lineEls = links.map(l => {
     const style = edgeStyle(l.type);
     const ln = svgEl("line", { class: "edge", "data-type": l.type, stroke: style.color,
-      "marker-end": `url(#arrow-${l.type})` });
+      "marker-end": `url(#arrow-${view.host}-${l.type})` });
     if (style.dash) ln.setAttribute("stroke-dasharray", style.dash);
     const title = svgEl("title", {});
     title.textContent = `${l.s.label} ${style.label} ${l.t.label}`
@@ -2338,7 +2391,7 @@ function renderGraph(graph, findings) {
     ln.appendChild(title);
     gEdges.appendChild(ln); l.el = ln; placeEdge(l); return ln;
   });
-  renderEdgeLegend(types);
+  renderEdgeLegend(types, view.legend);
 
   nodes.forEach(n => {
     const g = svgEl("g", { class: "node", role: "button", tabindex: "0",
@@ -2351,24 +2404,24 @@ function renderGraph(graph, findings) {
     g.appendChild(c); g.appendChild(t);
     gNodes.appendChild(g);
     n.circle = c; n.text = t;
-    g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj); });
+    g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj, ctx); });
     g.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") {
         ev.preventDefault();
         ev.stopPropagation();
-        selectNode(n, nodes, links, adj);
+        selectNode(n, nodes, links, adj, ctx);
       }
     });
     enableDrag(g, n, svg, W, H, links);
   });
 
-  svg.addEventListener("click", () => clearSelection(nodes, lineEls));
+  svg.addEventListener("click", () => clearSelection(nodes, lineEls, ctx));
   host.appendChild(svg);
   host._nodes = nodes; host._lines = lineEls; host._links = links;
 }
 
-function renderEdgeLegend(types) {
-  const host = $("edgeLegend");
+function renderEdgeLegend(types, legendId = "edgeLegend") {
+  const host = $(legendId);
   host.hidden = !types.length;
   host.innerHTML = types.map(type => {
     const style = edgeStyle(type);
@@ -2462,7 +2515,7 @@ function fit(nodes, W, H, pad) {
   });
 }
 
-function selectNode(node, nodes, links, adj) {
+function selectNode(node, nodes, links, adj, ctx) {
   const keep = adj[node.id];
   nodes.forEach(n => {
     const on = n.id === node.id || keep.has(n.id);
@@ -2473,13 +2526,13 @@ function selectNode(node, nodes, links, adj) {
     const on = l.s.id === node.id || l.t.id === node.id;
     l.el.setAttribute("stroke-opacity", on ? 0.85 : 0.06);
   });
-  detailShow(node, links);
+  detailShow(node, links, ctx);
 }
 
-function clearSelection(nodes, lineEls) {
+function clearSelection(nodes, lineEls, ctx) {
   nodes.forEach(n => { n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1); });
   lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.55));
-  detailReset();
+  detailReset(ctx);
 }
 
 function enableDrag(g, n, svg, W, H, links) {
@@ -2501,8 +2554,8 @@ function enableDrag(g, n, svg, W, H, links) {
   g.addEventListener("pointerup", (ev) => { dragging = false; g.releasePointerCapture(ev.pointerId); });
 }
 
-function detailReset() {
-  $("graphDetail").innerHTML =
+function detailReset(ctx) {
+  $(ctx ? ctx.detail : "graphDetail").innerHTML =
     "<span class='muted'>Select a node to inspect its evidence and related findings.</span>";
 }
 
@@ -2521,9 +2574,10 @@ function connectionsHtml(node, links) {
   return html + `</ul></div>`;
 }
 
-function detailShow(node, links) {
-  const mine = graphFindings.filter(f => f.entity_id === node.id);
-  const paths = graphExposurePaths.filter(path =>
+function detailShow(node, links, ctx) {
+  ctx = ctx || { detail: "graphDetail", findings: graphFindings, exposure: graphExposurePaths };
+  const mine = ctx.findings.filter(f => f.entity_id === node.id);
+  const paths = ctx.exposure.filter(path =>
     path.prompt_id === node.id || (path.model_ids || []).includes(node.id));
   let html = `<span class="dt-type">${esc(node.type)}</span><h3>${esc(node.label)}</h3>`;
   if (node.provider) html += `<div class="muted">Provider: ${esc(node.provider)}</div>`;
@@ -2552,7 +2606,7 @@ function detailShow(node, links) {
         + `<strong>${esc(f.title)}</strong><div class="muted">${esc(loc)}</div></div>`;
     }
   }
-  $("graphDetail").innerHTML = html;
+  $(ctx.detail).innerHTML = html;
 }
 
 function filterRows(tableId, searchId, selectId, dataKey, emptyMessage, extraMatch) {
@@ -2710,6 +2764,7 @@ function renderCompare(body) {
   renderVerdicts(drift);
   renderRevision($("baselineCard"), "Baseline", body.baseline, body.baseline_paths);
   renderRevision($("candidateCard"), "Candidate", body.candidate, body.candidate_paths);
+  renderGraph((body.candidate || {}).graph || { nodes: [], edges: [] }, [], COMPARE_GRAPH);
   const changes = drift.changes || [];
   const paths = changes.filter(c => PATH_KINDS.includes(c.kind));
   const others = changes.filter(c => !PATH_KINDS.includes(c.kind));
@@ -3526,6 +3581,9 @@ function showDriftStage(stage) {
   const base = secModel(driftBody.reports.baseline);
   const model = secModel(driftBody.reports[stage]);
   renderSecGraph($("driftGraph"), $("driftDetail"), model, stage === "baseline" ? null : base);
+  const revision = (driftBody.revisions || {})[stage] || {};
+  $("driftDepTitle").textContent = "Dependency map \u00b7 " + stage;
+  renderGraph(revision.graph || { nodes: [], edges: [] }, [], DRIFT_GRAPH);
 }
 document.querySelectorAll(".stage-toggle button").forEach(b => {
   b.addEventListener("click", () => showDriftStage(b.dataset.stage));

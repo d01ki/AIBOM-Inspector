@@ -72,7 +72,7 @@ yet covered by a browser check.
     "tests/test_web_ui.py"
   ],
   "smoke": [],
-  "ui": ["vulnerable-ai-app", "vulnerable-ts-agent"],
+  "ui": ["vulnerable-ai-app", "vulnerable-ts-agent", "demos"],
   "manual": [
     "A human reviews the screenshot for layout and readability."
   ]
