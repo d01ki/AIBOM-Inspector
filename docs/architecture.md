@@ -13,7 +13,8 @@ CLI / HTTP API / web UI
            each with ScanContext.project for bounded cross-file resolution
         -> legacy regex compatibility detector
         -> generic model-file detector
-     -> DependencyCollector / LockfileCollector
+     -> DependencyCollector / LockfileCollector (packages + lockfile depends_on edges)
+     -> component linker (model -> provider service, component -> imported SDK package)
      -> Inventory normalization and deduplication
      -> optional metadata/vulnerability resolvers
      -> exposure + agent capability impact paths (evidence level, nodes)
@@ -38,6 +39,24 @@ flowchart TD
     F --> G[Behavioral drift comparison]
     G --> H[CLI / API / web UI / SARIF / CycloneDX]
 ```
+
+## Dependency map
+
+The graph (`graph.py`, the UI's Dependencies tab, CycloneDX `dependencies`)
+only draws an edge that a scanned line proves:
+
+| Edge | Source | Evidence |
+|---|---|---|
+| `package -depends_on-> package` | `LockfileCollector` | the lockfile line declaring the dependency; only between packages that lockfile resolved |
+| `model -served_by-> service` | `linking.py` | the line where the model's provider was attributed; the service must also have been found |
+| `model/service/dataset -depends_on-> package` | `linking.py` | the import of the package in a file that evidences the component; package and component must share a provider family, and dataset loaders link only to datasets |
+| `prompt -flows_to-> model`, `prompt -invokes-> tool` | prompt-flow detectors | data-flow evidence |
+| `agent -invokes/uses_prompt-> ...` | repo collector | the agent's construction line (co-location, confidence 0.5) |
+
+Plain (non-AI) packages are drawn only when flagged or directly depended on by
+an AI package, so a large lockfile does not flood the map; edges are drawn only
+between drawn nodes. Not linked yet: `pnpm-lock.yaml` / `yarn.lock`,
+PHP/Ruby imports, and models whose ID is chosen at run time.
 
 ## Detector boundary
 

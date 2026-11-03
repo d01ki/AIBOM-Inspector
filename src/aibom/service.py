@@ -17,6 +17,7 @@ from aibom.collectors.lockfiles import LockfileCollector
 from aibom.collectors.repo import RepoCollector
 from aibom.config import ignored
 from aibom.inventory import Inventory, ScanMetadata
+from aibom.linking import link_components
 from aibom.models.findings import Finding, SecurityScore
 from aibom.policy import production_view
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
@@ -77,6 +78,9 @@ def run_scan(
         # adding transitive components, exact versions and artifact digests
         # (CISA 2026 coverage + Component Hash).
         LockfileCollector(target).collect(inventory)
+    # Last collector step: every component and package is known, so the
+    # linker can connect them (only where a scanned line proves the edge).
+    link_components(inventory, target)
 
     if resolve or hf_cache is not None:
         client = HFClient(cache_dir=hf_cache, offline=not resolve)

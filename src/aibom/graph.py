@@ -14,6 +14,7 @@ from typing import Any
 from aibom.exposure import build_exposure_paths
 from aibom.impact import build_impact_paths
 from aibom.inventory import Inventory
+from aibom.models.entities import RelationshipType
 from aibom.models.findings import Finding, Severity
 from aibom.policy import production_view
 
@@ -31,12 +32,30 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         if current is None or f.severity.rank > current.rank:
             worst[f.entity_id] = f.severity
 
+    # Keep the graph readable: a plain (non-AI) dependency appears only when
+    # something is wrong with it or an AI package depends on it directly — one
+    # hop, so a large lockfile does not flood the map. The full list lives in
+    # the inventory.
+    ai_packages = {
+        e.id
+        for e in inventory.entities
+        if e.type.value == "package" and bool(getattr(e, "ai", False))
+    }
+    pulled_in = {
+        r.target_id
+        for r in inventory.relationships
+        if r.relationship is RelationshipType.DEPENDS_ON and r.source_id in ai_packages
+    }
+
     nodes: list[dict[str, Any]] = []
     for e in inventory.entities:
         sev = worst.get(e.id)
-        # Keep the graph readable: plain (non-AI) dependencies only appear when
-        # something is wrong with them; the full list lives in the inventory.
-        if e.type.value == "package" and not bool(getattr(e, "ai", False)) and sev is None:
+        if (
+            e.type.value == "package"
+            and e.id not in ai_packages
+            and sev is None
+            and e.id not in pulled_in
+        ):
             continue
         location = e.source_evidence[0].location() if e.source_evidence else None
         nodes.append(
@@ -58,8 +77,10 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
             }
         )
 
-    known = {e.id for e in inventory.entities}
-    edges: list[dict[str, str]] = []
+    # Only edges between drawn nodes: an edge into a hidden package would point
+    # at nothing in the UI.
+    known = {n["id"] for n in nodes}
+    edges: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for r in inventory.relationships:
         if r.source_id not in known or r.target_id not in known:
@@ -68,7 +89,14 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         if key in seen:
             continue
         seen.add(key)
-        edges.append({"source": r.source_id, "target": r.target_id, "type": r.relationship.value})
+        edges.append(
+            {
+                "source": r.source_id,
+                "target": r.target_id,
+                "type": r.relationship.value,
+                "evidence": [ev.location() for ev in r.source_evidence],
+            }
+        )
 
     exposure_paths = [
         path.model_dump(mode="json") for path in build_exposure_paths(inventory)

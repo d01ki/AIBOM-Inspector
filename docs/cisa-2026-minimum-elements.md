@@ -60,7 +60,7 @@ produced previously.
 | **Component Hash** | **2026 new** | ❌ absent | ⚠️ / declared | lockfile digests (npm SRI decoded to hex, poetry/uv/Pipfile/Cargo/composer, hash-pinned requirements) and the SHA-256 of every prompt |
 | **Component Hash Algorithm** | **2026 new** | ❌ absent | ⚠️ / declared | emitted with every digest; a digest whose length does not match a known algorithm is dropped rather than mislabeled |
 | **Component License** | **2026 new** | ⚠️ models/datasets only | ⚠️ / declared | plus npm and composer lockfile licenses |
-| Component Dependency Relationship | 2026 clarified | ⚠️ non-empty edges only | ✅ | every component gets a `dependencies` entry, including leaves with `dependsOn: []`, rooted at the primary component |
+| Component Dependency Relationship | 2026 clarified | ⚠️ non-empty edges only | ✅ with lockfile / ⚠️ without | every component gets a `dependencies` entry, rooted at the primary component. Package → package edges come from lockfiles that record the graph (npm, poetry, uv, Cargo, composer, Gemfile; not Pipfile.lock or hashed requirements, which flatten it). AI component → SDK package and model → provider service edges come from the linker, each citing the import or attribution line. A leaf's `dependsOn: []` therefore means *no edge was proven*, not that none exists |
 | Known Unknowns | 2026 clarified | ❌ absent | ✅ | `cisa:known-unknown` property naming the field **and the reason** |
 | Coverage | 2026 (was depth) | ❌ top level only | ✅ with lockfile / ⚠️ without | `LockfileCollector` resolves the transitive graph; the achieved coverage is declared in `cisa:coverage` |
 | Automation Support | 2026 clarified | ✅ | ✅ | CycloneDX 1.6 JSON |

@@ -79,6 +79,8 @@ class Inventory(BaseModel):
     # inventory quadratic in the size of the dependency graph.
     _index: dict[tuple[str, str], Entity] = PrivateAttr(default_factory=dict)
     _indexed: tuple[int, int] = PrivateAttr(default=(0, 0))
+    _rel_index: dict[tuple[str, str, str], Relationship] = PrivateAttr(default_factory=dict)
+    _rel_indexed: tuple[int, int] = PrivateAttr(default=(0, 0))
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.
@@ -107,15 +109,20 @@ class Inventory(BaseModel):
 
     def add_relationship(self, relationship: Relationship) -> None:
         """Add an edge, deduplicating on (source, target, type)."""
-        for existing in self.relationships:
-            if (
-                existing.source_id == relationship.source_id
-                and existing.target_id == relationship.target_id
-                and existing.relationship == relationship.relationship
-            ):
-                existing.source_evidence.extend(relationship.source_evidence)
-                return
-        self.relationships.append(relationship)
+        stamp = (id(self.relationships), len(self.relationships))
+        if stamp != self._rel_indexed:
+            # Rebuilt if ``relationships`` was replaced or filtered elsewhere.
+            self._rel_index = {}
+            for rel in self.relationships:
+                self._rel_index.setdefault(_rel_key(rel), rel)
+        key = _rel_key(relationship)
+        existing = self._rel_index.get(key)
+        if existing is not None:
+            existing.source_evidence.extend(relationship.source_evidence)
+        else:
+            self.relationships.append(relationship)
+            self._rel_index[key] = relationship
+        self._rel_indexed = (id(self.relationships), len(self.relationships))
 
     def add_signal(self, signal: RiskSignal) -> None:
         """Add a risk signal, deduplicating on (kind, file, line)."""
@@ -268,3 +275,7 @@ def _extend_unique(target: list[T], values: Iterable[T]) -> None:
     for value in values:
         if value not in target:
             target.append(value)
+
+
+def _rel_key(rel: Relationship) -> tuple[str, str, str]:
+    return (rel.source_id, rel.target_id, rel.relationship.value)

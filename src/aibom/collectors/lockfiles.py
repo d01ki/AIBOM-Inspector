@@ -15,6 +15,13 @@ Supported lockfiles: ``package-lock.json`` (npm), ``Pipfile.lock``,
 ``Cargo.lock`` (crates.io), ``composer.lock`` (Packagist) and ``Gemfile.lock``
 (RubyGems). Everything is parsed as text — nothing is installed or executed.
 
+Each lockfile that records the resolved graph (all but ``Pipfile.lock`` and
+hash-pinned requirements) also yields ``depends_on`` edges between the packages
+*it* resolved, each pinned to the line that declares the dependency. A
+requirement on something the lockfile does not resolve (a platform package such
+as ``php``, an extra that was not installed) is not an edge: no evidence, no
+claim.
+
 Entities merge into the ones the :class:`~aibom.collectors.dependencies.
 DependencyCollector` already emitted (same natural key), so a package declared
 in a manifest *and* resolved in a lockfile stays one component that now carries
@@ -35,7 +42,7 @@ from aibom.collectors.dependencies import _IGNORE_DIRS, _is_ai_package, _load_to
 from aibom.detectors.python.parser import classify_source_context
 from aibom.inventory import Inventory
 from aibom.models.analysis import ConfidenceFactors, UsageState
-from aibom.models.entities import DependencyScope, Package
+from aibom.models.entities import DependencyScope, Package, Relationship, RelationshipType
 from aibom.models.evidence import Evidence
 
 DETECTOR_ID = "lockfile.dependencies"
@@ -70,6 +77,12 @@ _RE_JSON_NAME = re.compile(r'^\s*"name"\s*:\s*"([^"]+)"')
 _RE_GEM_SPEC = re.compile(r"^ {4}([A-Za-z0-9_.\-]+) \(([^)]+)\)$")
 _RE_GEM_DIRECT = re.compile(r"^ {2}([A-Za-z0-9_.\-]+)")
 _RE_REQ_HASH = re.compile(r"--hash=([A-Za-z0-9]+):([A-Fa-f0-9]+)")
+_RE_GEM_DEP = re.compile(r"^ {6}([A-Za-z0-9_.\-]+)")
+_RE_PYPI_SEP = re.compile(r"[-_.]+")
+
+# Where one lockfile entry ends: the next entry's header line.
+_RE_TOML_ENTRY = re.compile(r"^\[\[package\]\]")
+_RE_NPM_ENTRY = re.compile(r'^\s*"(?:[^"]*/)?node_modules/[^"]+"\s*:\s*\{')
 _RE_REQ_PIN = re.compile(r"^([A-Za-z0-9._-]+)\s*(?:\[[^\]]*\])?\s*==\s*([^\s;#\\]+)")
 
 
@@ -80,6 +93,10 @@ class LockfileCollector(Collector):
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).resolve()
+        # Per-lockfile state: the packages it resolved, and the dependency
+        # declarations seen so far as (ecosystem, parent, child, line).
+        self._resolved: dict[tuple[str, str], Package] = {}
+        self._declared: list[tuple[str, str, str, int]] = []
 
     def collect(self, inventory: Inventory) -> None:
         if DETECTOR_ID not in inventory.stats.detectors_run:
@@ -89,6 +106,7 @@ class LockfileCollector(Collector):
             name = path.name.lower()
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
+                self._resolved, self._declared = {}, []
                 if name == "package-lock.json":
                     self._parse_package_lock(inventory, text, rel)
                 elif name == "pipfile.lock":
@@ -109,6 +127,7 @@ class LockfileCollector(Collector):
                     continue
             except (OSError, ValueError):
                 continue
+            self._link(inventory, rel, text.splitlines())
             if rel not in inventory.stats.manifests_parsed:
                 inventory.stats.manifests_parsed.append(rel)
 
@@ -163,7 +182,7 @@ class LockfileCollector(Collector):
             detector_id=DETECTOR_ID,
             kind="lockfile",
         )
-        inventory.add_entity(
+        entity = inventory.add_entity(
             Package(
                 name=name,
                 ecosystem=ecosystem,
@@ -189,6 +208,57 @@ class LockfileCollector(Collector):
                 source_contexts=[classify_source_context(rel)],
             )
         )
+        if isinstance(entity, Package):
+            self._resolved[(ecosystem, _key(name, ecosystem))] = entity
+
+    def _declare(
+        self,
+        ecosystem: str,
+        parent: str,
+        children: Any,
+        lines: list[str],
+        start: int,
+        entry_header: re.Pattern[str] | None,
+    ) -> None:
+        """Record ``parent -> child`` for every name in ``children``.
+
+        ``start`` is the parent's header line; each edge's evidence is the
+        first line after it that names the child, searched up to the next
+        entry header so a later entry's dependency is never borrowed.
+        """
+        for child in children:
+            if not isinstance(child, str) or not child:
+                continue
+            line = _dep_line(lines, start, child, entry_header)
+            self._declared.append((ecosystem, parent, child, line))
+
+    def _link(self, inventory: Inventory, rel: str, lines: list[str]) -> None:
+        """Turn this lockfile's declarations into evidence-backed edges."""
+        for ecosystem, parent, child, lineno in self._declared:
+            src = self._resolved.get((ecosystem, _key(parent, ecosystem)))
+            dst = self._resolved.get((ecosystem, _key(child, ecosystem)))
+            if src is None or dst is None or src.id == dst.id:
+                continue
+            snippet = lines[lineno - 1] if 0 < lineno <= len(lines) else child
+            inventory.add_relationship(
+                Relationship(
+                    source_id=src.id,
+                    target_id=dst.id,
+                    relationship=RelationshipType.DEPENDS_ON,
+                    source_evidence=[
+                        Evidence(
+                            file=rel,
+                            line_start=max(lineno, 1),
+                            line_end=max(lineno, 1),
+                            snippet=snippet.strip()[:200],
+                            matched_pattern=f"{ecosystem.lower()}-lockfile-dependency",
+                            confidence=0.95,
+                            detector_id=DETECTOR_ID,
+                            kind="lockfile",
+                        )
+                    ],
+                )
+            )
 
     # -- npm -------------------------------------------------------------------
 
@@ -240,6 +310,10 @@ class LockfileCollector(Collector):
                 producer_url=_as_str(entry.get("resolved")),
                 license_=_as_str(entry.get("license")),
             )
+            for group in ("dependencies", "optionalDependencies", "peerDependencies"):
+                children = entry.get(group)
+                if isinstance(children, dict):
+                    self._declare("npm", name, children, lines, lineno, _RE_NPM_ENTRY)
 
     def _npm_v1(
         self,
@@ -269,6 +343,9 @@ class LockfileCollector(Collector):
                 producer=_registry_of(_as_str(entry.get("resolved"))),
                 producer_url=_as_str(entry.get("resolved")),
             )
+            requires = entry.get("requires")
+            if isinstance(requires, dict):
+                self._declare("npm", name, requires, lines, lineno, None)
             nested = entry.get("dependencies")
             if isinstance(nested, dict):
                 self._npm_v1(inventory, nested, lines, rel, direct=False)
@@ -308,16 +385,18 @@ class LockfileCollector(Collector):
         data = _load_toml(text)
         if data is None:
             return
-        index = _line_index(text.splitlines(), _RE_TOML_NAME)
+        lines = text.splitlines()
+        index = _line_index(lines, _RE_TOML_NAME)
         for entry in _as_dicts(data.get("package")):
             name = _as_str(entry.get("name"))
             if not name:
                 continue
             files = entry.get("files")
+            lineno = index.get(name, 1)
             self._emit(
                 inventory,
                 rel,
-                index.get(name, 1),
+                lineno,
                 f'name = "{name}"',
                 name=name,
                 ecosystem="PyPI",
@@ -327,20 +406,25 @@ class LockfileCollector(Collector):
                 producer="pypi.org",
                 producer_url="https://pypi.org/simple",
             )
+            deps = entry.get("dependencies")
+            if isinstance(deps, dict):
+                self._declare("PyPI", name, deps, lines, lineno, _RE_TOML_ENTRY)
 
     def _parse_uv_lock(self, inventory: Inventory, text: str, rel: str) -> None:
         data = _load_toml(text)
         if data is None:
             return
-        index = _line_index(text.splitlines(), _RE_TOML_NAME)
+        lines = text.splitlines()
+        index = _line_index(lines, _RE_TOML_NAME)
         for entry in _as_dicts(data.get("package")):
             name = _as_str(entry.get("name"))
             if not name:
                 continue
+            lineno = index.get(name, 1)
             self._emit(
                 inventory,
                 rel,
-                index.get(name, 1),
+                lineno,
                 f'name = "{name}"',
                 name=name,
                 ecosystem="PyPI",
@@ -350,6 +434,13 @@ class LockfileCollector(Collector):
                 producer="pypi.org",
                 producer_url="https://pypi.org/simple",
             )
+            children = [_as_str(d.get("name")) for d in _as_dicts(entry.get("dependencies"))]
+            for group in ("optional-dependencies", "dev-dependencies"):
+                extra = entry.get(group)
+                if isinstance(extra, dict):
+                    for deps in extra.values():
+                        children += [_as_str(d.get("name")) for d in _as_dicts(deps)]
+            self._declare("PyPI", name, children, lines, lineno, _RE_TOML_ENTRY)
 
     def _parse_hashed_requirements(self, inventory: Inventory, text: str, rel: str) -> None:
         """``pip-compile --generate-hashes`` output: exact pins plus digests.
@@ -388,16 +479,18 @@ class LockfileCollector(Collector):
         data = _load_toml(text)
         if data is None:
             return
-        index = _line_index(text.splitlines(), _RE_TOML_NAME)
+        lines = text.splitlines()
+        index = _line_index(lines, _RE_TOML_NAME)
         for entry in _as_dicts(data.get("package")):
             name = _as_str(entry.get("name"))
             if not name:
                 continue
             checksum = _as_str(entry.get("checksum"))
+            lineno = index.get(name, 1)
             self._emit(
                 inventory,
                 rel,
-                index.get(name, 1),
+                lineno,
                 f'name = "{name}"',
                 name=name,
                 ecosystem="crates.io",
@@ -408,12 +501,18 @@ class LockfileCollector(Collector):
                 producer="crates.io" if checksum else None,
                 producer_url="https://crates.io" if checksum else None,
             )
+            deps = entry.get("dependencies")
+            if isinstance(deps, list):
+                # "serde" or "serde 1.0.1 (registry+...)" when versions coexist.
+                children = [d.split()[0] for d in deps if isinstance(d, str) and d.strip()]
+                self._declare("crates.io", name, children, lines, lineno, _RE_TOML_ENTRY)
 
     def _parse_composer_lock(self, inventory: Inventory, text: str, rel: str) -> None:
         data = json.loads(text)
         if not isinstance(data, dict):
             return
-        index = _line_index(text.splitlines(), _RE_JSON_NAME)
+        lines = text.splitlines()
+        index = _line_index(lines, _RE_JSON_NAME)
         for group, scope in (
             ("packages", DependencyScope.DIRECT),
             ("packages-dev", DependencyScope.TRANSITIVE),
@@ -425,10 +524,11 @@ class LockfileCollector(Collector):
                 dist = entry.get("dist") if isinstance(entry.get("dist"), dict) else {}
                 shasum = _as_str(dist.get("shasum")) if dist else None
                 licenses = entry.get("license")
+                lineno = index.get(name, 1)
                 self._emit(
                     inventory,
                     rel,
-                    index.get(name, 1),
+                    lineno,
                     f'"name": "{name}"',
                     name=name,
                     ecosystem="Packagist",
@@ -443,6 +543,11 @@ class LockfileCollector(Collector):
                         else None
                     ),
                 )
+                require = entry.get("require")
+                if isinstance(require, dict):
+                    # Platform requirements (php, ext-*) are never locked, so
+                    # they resolve to nothing and are dropped in _link.
+                    self._declare("Packagist", name, require, lines, lineno, _RE_JSON_NAME)
 
     def _parse_gemfile_lock(self, inventory: Inventory, text: str, rel: str) -> None:
         """Gemfile.lock records the resolved graph but no digests."""
@@ -463,6 +568,7 @@ class LockfileCollector(Collector):
 
         remote: str | None = None
         in_specs = False
+        parent: str | None = None
         for lineno, line in enumerate(lines, 1):
             stripped = line.strip()
             if stripped.startswith("remote:"):
@@ -474,10 +580,16 @@ class LockfileCollector(Collector):
                 in_specs = False
             if not in_specs:
                 continue
+            dep = _RE_GEM_DEP.match(line)
+            if dep:
+                if parent is not None:
+                    self._declared.append(("RubyGems", parent, dep.group(1), lineno))
+                continue
             match = _RE_GEM_SPEC.match(line)
             if not match:
                 continue
             name = match.group(1)
+            parent = name
             self._emit(
                 inventory,
                 rel,
@@ -495,6 +607,32 @@ class LockfileCollector(Collector):
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _key(name: str, ecosystem: str) -> str:
+    """Comparison key for a package name within one ecosystem (PEP 503 for PyPI)."""
+    lowered = name.strip().lower()
+    return _RE_PYPI_SEP.sub("-", lowered) if ecosystem == "PyPI" else lowered
+
+
+def _dep_line(
+    lines: list[str], start: int, child: str, entry_header: re.Pattern[str] | None
+) -> int:
+    """First line after ``start`` naming ``child``, within the same entry.
+
+    Falls back to ``start`` (the parent's own line) when the child cannot be
+    located, so the evidence is never a line from an unrelated entry.
+    """
+    pattern = re.compile(
+        rf"(?<![A-Za-z0-9_.\-/]){re.escape(child)}(?![A-Za-z0-9_\-/])", re.IGNORECASE
+    )
+    for lineno in range(start + 1, len(lines) + 1):
+        line = lines[lineno - 1]
+        if entry_header is not None and entry_header.match(line):
+            break
+        if pattern.search(line):
+            return lineno
+    return start
 
 
 def _line_index(lines: list[str], pattern: re.Pattern[str]) -> dict[str, int]:

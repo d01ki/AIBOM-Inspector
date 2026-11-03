@@ -229,7 +229,9 @@
     border: 1px solid var(--border); border-radius: 12px; touch-action: none; }
   #graph .node { cursor: pointer; }
   #graph .node text { font-size: 9px; fill: var(--fg); pointer-events: none; }
-  #graph .edge { stroke: var(--muted); stroke-opacity: .4; stroke-width: 1.2; }
+  #graph .edge { stroke-opacity: .55; stroke-width: 1.3; }
+  #graphDetail .dt-links { margin: 6px 0 0; padding-left: 16px; }
+  #graphDetail .dt-links li { margin: 2px 0; word-break: break-all; }
   #graph circle { stroke: var(--card); stroke-width: 1.5; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 2px 0; font-size: 12px;
     color: var(--muted); }
@@ -1436,6 +1438,7 @@ code { background: #1d3045; color: #c5e4ed; }
               <span><i style="background:#39745b"></i>low</span>
               <span><i style="background:#6b7280"></i>no finding</span>
             </div>
+            <div class="legend" id="edgeLegend" aria-label="Edge types" hidden></div>
           </div>
           <div class="card" id="graphDetail">
             <span class="muted">Select a node to inspect its evidence and related findings.</span>
@@ -2246,7 +2249,29 @@ async function checkBackend(options) {
 // ── dependency graph (dependency-free SVG force layout) ──────────────────────
 const SVGNS = "http://www.w3.org/2000/svg";
 const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
-  agent:"#2e7d5b", service:"#556", package:"#8a6d3b", license:"#667" };
+  agent:"#2e7d5b", service:"#556", package:"#8a6d3b", license:"#667", tool:"#a14d6b" };
+// Edge styling per relationship type; the arrow points from dependent to dependency.
+const EDGE_STYLE = {
+  depends_on:  { color: "#7c8593", dash: "",    label: "depends on" },
+  served_by:   { color: "#3a6ea5", dash: "6 3", label: "served by" },
+  invokes:     { color: "#2e7d5b", dash: "",    label: "invokes" },
+  flows_to:    { color: "#b0761c", dash: "",    label: "prompt flows to" },
+  uses_prompt: { color: "#7a5ea5", dash: "2 3", label: "uses prompt" },
+};
+const EDGE_FALLBACK = { color: "#7c8593", dash: "4 2", label: "related" };
+function edgeStyle(type) { return EDGE_STYLE[type] || EDGE_FALLBACK; }
+// Endpoints trimmed to the node rims so the arrowhead is not hidden under a circle.
+function edgeCoords(l) {
+  const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+  const d = Math.sqrt(dx*dx + dy*dy) || 1;
+  const rs = (l.s.radius || 8.5) + 1, rt = (l.t.radius || 8.5) + 3;
+  return { x1: l.s.x + dx / d * rs, y1: l.s.y + dy / d * rs,
+           x2: l.t.x - dx / d * rt, y2: l.t.y - dy / d * rt };
+}
+function placeEdge(l) {
+  const c = edgeCoords(l);
+  for (const k in c) l.el.setAttribute(k, c[k]);
+}
 let graphFindings = [];
 let graphExposurePaths = [];
 let graphImpactPaths = [];
@@ -2279,8 +2304,9 @@ function renderGraph(graph, findings) {
     return { ...n, x: W/2 + Math.cos(a)*150, y: H/2 + Math.sin(a)*150, vx:0, vy:0 };
   });
   const byId = {}; nodes.forEach(n => byId[n.id] = n);
-  const links = graph.edges.map(e => ({ s: byId[e.source], t: byId[e.target], type: e.type }))
-    .filter(l => l.s && l.t);
+  const links = graph.edges.map(e => ({ s: byId[e.source], t: byId[e.target], type: e.type,
+    evidence: e.evidence || [] })).filter(l => l.s && l.t);
+  nodes.forEach(n => { n.radius = n.type === "agent" ? 11 : 8.5; });
   const adj = {}; nodes.forEach(n => adj[n.id] = new Set());
   links.forEach(l => { adj[l.s.id].add(l.t.id); adj[l.t.id].add(l.s.id); });
 
@@ -2289,25 +2315,42 @@ function renderGraph(graph, findings) {
 
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group",
     "aria-label": "AI dependency graph" });
+  const defs = svgEl("defs", {});
+  const types = [...new Set(links.map(l => l.type))];
+  types.forEach(type => {
+    const marker = svgEl("marker", { id: `arrow-${type}`, viewBox: "0 0 10 10", refX: "9", refY: "5",
+      markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" });
+    marker.appendChild(svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: edgeStyle(type).color }));
+    defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
   const gEdges = svgEl("g", {}), gNodes = svgEl("g", {});
   svg.appendChild(gEdges); svg.appendChild(gNodes);
 
   const lineEls = links.map(l => {
-    const ln = svgEl("line", { class: "edge", x1: l.s.x, y1: l.s.y, x2: l.t.x, y2: l.t.y });
-    gEdges.appendChild(ln); l.el = ln; return ln;
+    const style = edgeStyle(l.type);
+    const ln = svgEl("line", { class: "edge", "data-type": l.type, stroke: style.color,
+      "marker-end": `url(#arrow-${l.type})` });
+    if (style.dash) ln.setAttribute("stroke-dasharray", style.dash);
+    const title = svgEl("title", {});
+    title.textContent = `${l.s.label} ${style.label} ${l.t.label}`
+      + (l.evidence.length ? ` (${l.evidence[0]})` : "");
+    ln.appendChild(title);
+    gEdges.appendChild(ln); l.el = ln; placeEdge(l); return ln;
   });
+  renderEdgeLegend(types);
 
   nodes.forEach(n => {
     const g = svgEl("g", { class: "node", role: "button", tabindex: "0",
       "aria-label": `${n.label}, ${n.type}${n.severity ? `, ${n.severity} severity` : ""}` });
-    const r = n.type === "agent" ? 11 : 8.5;
+    const r = n.radius;
     const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
     const label = n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label;
     const t = svgEl("text", { x: n.x, y: n.y + r + 9, "text-anchor": "middle" });
     t.textContent = label;
     g.appendChild(c); g.appendChild(t);
     gNodes.appendChild(g);
-    n.circle = c; n.text = t; n.radius = r;
+    n.circle = c; n.text = t;
     g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj); });
     g.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") {
@@ -2321,7 +2364,18 @@ function renderGraph(graph, findings) {
 
   svg.addEventListener("click", () => clearSelection(nodes, lineEls));
   host.appendChild(svg);
-  host._nodes = nodes; host._lines = lineEls;
+  host._nodes = nodes; host._lines = lineEls; host._links = links;
+}
+
+function renderEdgeLegend(types) {
+  const host = $("edgeLegend");
+  host.hidden = !types.length;
+  host.innerHTML = types.map(type => {
+    const style = edgeStyle(type);
+    return `<span><svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"`
+      + ` stroke="${style.color}" stroke-width="2"${style.dash ? ` stroke-dasharray="${style.dash}"` : ""}/>`
+      + `</svg>${esc(style.label)}</span>`;
+  }).join("");
 }
 
 function renderImpactPaths(paths) {
@@ -2419,12 +2473,12 @@ function selectNode(node, nodes, links, adj) {
     const on = l.s.id === node.id || l.t.id === node.id;
     l.el.setAttribute("stroke-opacity", on ? 0.85 : 0.06);
   });
-  detailShow(node);
+  detailShow(node, links);
 }
 
 function clearSelection(nodes, lineEls) {
   nodes.forEach(n => { n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1); });
-  lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.4));
+  lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.55));
   detailReset();
 }
 
@@ -2442,10 +2496,7 @@ function enableDrag(g, n, svg, W, H, links) {
     const p = toSvg(ev); n.x = p.x; n.y = p.y;
     n.circle.setAttribute("cx", n.x); n.circle.setAttribute("cy", n.y);
     n.text.setAttribute("x", n.x); n.text.setAttribute("y", n.y + n.radius + 9);
-    links.forEach(l => {
-      if (l.s === n) { l.el.setAttribute("x1", n.x); l.el.setAttribute("y1", n.y); }
-      if (l.t === n) { l.el.setAttribute("x2", n.x); l.el.setAttribute("y2", n.y); }
-    });
+    links.forEach(l => { if (l.s === n || l.t === n) placeEdge(l); });
   });
   g.addEventListener("pointerup", (ev) => { dragging = false; g.releasePointerCapture(ev.pointerId); });
 }
@@ -2455,7 +2506,22 @@ function detailReset() {
     "<span class='muted'>Select a node to inspect its evidence and related findings.</span>";
 }
 
-function detailShow(node) {
+function connectionsHtml(node, links) {
+  const out = links.filter(l => l.s.id === node.id), inc = links.filter(l => l.t.id === node.id);
+  if (!out.length && !inc.length) {
+    return `<div class="dt-find muted">No proven connections. A component is only linked when a`
+      + ` scanned line (import, call, lockfile entry) shows the relationship.</div>`;
+  }
+  const name = (n) => `<strong>${esc(n.label)}</strong> <span class="muted">(${esc(n.type)})</span>`;
+  const cite = (l) => (l.evidence.length ? ` <code>${esc(l.evidence[0])}</code>` : "");
+  let html = `<div class="dt-find"><strong>Connections</strong><ul class="dt-links">`;
+  // Outgoing reads "this <verb> other"; incoming reads "other <verb> this".
+  out.forEach(l => { html += `<li>${esc(edgeStyle(l.type).label)} ${name(l.t)}${cite(l)}</li>`; });
+  inc.forEach(l => { html += `<li>${name(l.s)} ${esc(edgeStyle(l.type).label)} this${cite(l)}</li>`; });
+  return html + `</ul></div>`;
+}
+
+function detailShow(node, links) {
   const mine = graphFindings.filter(f => f.entity_id === node.id);
   const paths = graphExposurePaths.filter(path =>
     path.prompt_id === node.id || (path.model_ids || []).includes(node.id));
@@ -2469,6 +2535,7 @@ function detailShow(node) {
   if (node.detectors && node.detectors.length) {
     html += `<div class="muted">Detectors: ${esc(node.detectors.join(", "))}</div>`;
   }
+  html += connectionsHtml(node, links || []);
   for (const path of paths) {
     const models = (path.model_names || []).join(", ") || "unresolved model";
     html += `<div class="dt-find"><strong>${path.privileged ? "Privileged exposure" : "Input path"}</strong>`

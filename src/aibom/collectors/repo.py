@@ -598,7 +598,7 @@ class RepoCollector(Collector):
                 if not structured_python:
                     self._scan_signals(inventory, line, lineno, rel)
 
-        self._link_intra_file(inventory, buckets)
+        self._link_intra_file(inventory, buckets, rel)
 
     def _scan_signals(self, inventory: Inventory, line: str, lineno: int, rel: str) -> None:
         """Detect non-entity risk signals (trust_remote_code, hardcoded secrets)."""
@@ -1016,7 +1016,9 @@ class RepoCollector(Collector):
     # -- relationships ---------------------------------------------------------
 
     @staticmethod
-    def _link_intra_file(inventory: Inventory, buckets: dict[type[Entity], list[str]]) -> None:
+    def _link_intra_file(
+        inventory: Inventory, buckets: dict[type[Entity], list[str]], rel: str
+    ) -> None:
         """Link co-located entities using detector metadata and file scope."""
         entities = {entity.id: entity for entity in inventory.entities}
         for prompt_id in dict.fromkeys(buckets.get(Prompt, [])):
@@ -1060,6 +1062,15 @@ class RepoCollector(Collector):
             (Service, RelationshipType.INVOKES),
         )
         for agent_id in agents:
+            agent = entities.get(agent_id)
+            # The edge cites the agent's construction in this file: co-location
+            # is a weak (0.5) claim, but it is still pinned to a real line.
+            anchor = next(
+                (ev for ev in (agent.source_evidence if agent else []) if ev.file == rel),
+                None,
+            )
+            if anchor is None:
+                continue
             for entity_cls, rel_type in edges:
                 for target_id in buckets.get(entity_cls, []):
                     inventory.add_relationship(
@@ -1069,9 +1080,9 @@ class RepoCollector(Collector):
                             relationship=rel_type,
                             source_evidence=[
                                 Evidence(
-                                    file="<inferred>",
-                                    line_start=1,
-                                    line_end=1,
+                                    file=rel,
+                                    line_start=anchor.line_start,
+                                    line_end=anchor.line_end,
                                     snippet="agent and target co-located in file",
                                     matched_pattern="intra-file-colocation",
                                     confidence=0.5,

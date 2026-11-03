@@ -330,17 +330,27 @@ def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
                 center_y + min(radius, 170) * sin(angle),
             )
 
+    labels = {node["id"]: str(node["label"]) for node in nodes}
     edges: list[str] = []
     for edge in graph["edges"]:
         source = positions.get(edge["source"])
         target = positions.get(edge["target"])
         if source is None or target is None:
             continue
+        # Stop short of the target circle (r=11) so the arrowhead stays visible.
+        dx, dy = target[0] - source[0], target[1] - source[1]
+        length = max((dx * dx + dy * dy) ** 0.5, 1.0)
+        end = (target[0] - dx / length * 14, target[1] - dy / length * 14)
+        evidence = edge.get("evidence") or []
+        title = (
+            f"{labels[edge['source']]} {edge['type'].replace('_', ' ')} "
+            f"{labels[edge['target']]}" + (f" ({evidence[0]})" if evidence else "")
+        )
         edges.append(
-            "<line class='graph-edge' "
+            "<line class='graph-edge' marker-end='url(#graph-arrow)' "
             f"x1='{source[0]:.1f}' y1='{source[1]:.1f}' "
-            f"x2='{target[0]:.1f}' y2='{target[1]:.1f}'>"
-            f"<title>{escape(edge['type'])}</title></line>"
+            f"x2='{end[0]:.1f}' y2='{end[1]:.1f}'>"
+            f"<title>{escape(title)}</title></line>"
         )
 
     node_markup: list[str] = []
@@ -395,7 +405,11 @@ def _graph_section(inventory: Inventory, findings: list[Finding]) -> str:
         "aria-labelledby='graph-title graph-description'>"
         "<title id='graph-title'>AI dependency graph</title>"
         "<desc id='graph-description'>Components and their detected relationships. "
-        "Node colors indicate the highest related finding severity.</desc>"
+        "Node colors indicate the highest related finding severity; arrows point "
+        "from a component to what it depends on, flows to, or is served by.</desc>"
+        "<defs><marker id='graph-arrow' viewBox='0 0 10 10' refX='9' refY='5' "
+        "markerWidth='7' markerHeight='7' orient='auto-start-reverse'>"
+        "<path d='M 0 0 L 10 5 L 0 10 z' fill='#9aa3b2'></path></marker></defs>"
         f"{''.join(edges)}{''.join(node_markup)}</svg>"
         f"<figcaption class='graph-legend'>{legend}</figcaption>"
         "</figure>"
