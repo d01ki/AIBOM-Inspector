@@ -11,7 +11,13 @@ Dependencies tab, selects the best-connected node, and records:
 ``--fixture demos`` instead clicks the bundled offline demos (sample scan,
 privilege drift, MCP tool exposure, compare) and checks that each one draws a
 dependency map with directed, evidence-labelled edges
-(``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``).
+(``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``). It then loads the
+sample at 403 px and 1280 px wide and checks the page does not scroll
+sideways, every result tab is on screen, and map labels stay readable
+(``<out>/ui-demos-viewport-<width>.png``).
+
+A fixture run also checks that the scan went through ``/api/scan/stream`` and
+that the backend reported its stages.
 
 Exit code: 0 PASS, 1 FAIL (an assertion about the page failed), 2 BLOCKED
 (Playwright or a browser is unavailable). Never reports PASS for a check it
@@ -77,13 +83,66 @@ def _serve(fixture: Path, port: int) -> Any:
 
 
 DEMOS = "demos"
-# (name, button that starts it, dependency-map host, legend, detail panel)
+# (name, page, button that starts it, dependency-map host, legend, detail panel)
 _DEMO_CASES = (
-    ("sample", "#runDemo", "graph", "edgeLegend", "graphDetail"),
-    ("privilege-drift", "#heroDrift", "driftDepGraph", "driftDepLegend", "driftDepDetail"),
-    ("mcp-tool-exposure", "#heroMcp", "driftDepGraph", "driftDepLegend", "driftDepDetail"),
-    ("compare", "#compareDemoPy", "compareDepGraph", "compareDepLegend", "compareDepDetail"),
+    ("sample", "/", "#runDemo", "graph", "edgeLegend", "graphDetail"),
+    ("privilege-drift", "/#compare", "#driftDemoPolicy", "driftDepGraph", "driftDepLegend",
+     "driftDepDetail"),
+    ("mcp-tool-exposure", "/#compare", "#driftDemoMcp", "driftDepGraph", "driftDepLegend",
+     "driftDepDetail"),
+    ("compare", "/#compare", "#compareDemoPy", "compareDepGraph", "compareDepLegend",
+     "compareDepDetail"),
 )
+#: Narrow phone and desktop widths from the review's acceptance criteria.
+_VIEWPORTS = (403, 1280)
+#: Smallest rendered map label height, in CSS pixels, that still reads.
+_MIN_LABEL_PX = 9.0
+
+
+def _viewport_checks(
+    page: Any, port: int, width: int, out: Path
+) -> tuple[dict[str, Any], list[str]]:
+    """Load the sample at ``width`` and measure what a reader can actually reach."""
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/")
+    page.locator("#runDemo").click()
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    checks: dict[str, Any] = page.evaluate(
+        """(w) => {
+          const tabs = [...document.querySelectorAll('.result-tab')].filter(t => !t.hidden);
+          return {
+            page_overflow_px: document.documentElement.scrollWidth - window.innerWidth,
+            tabs: tabs.length,
+            tabs_off_screen: tabs.filter(t => {
+              const r = t.getBoundingClientRect(); return r.right > w + 1 || r.left < -1;
+            }).map(t => t.dataset.tab),
+            headline: document.querySelector('#securitySummary .headline-label').textContent,
+            body_font_px: parseFloat(getComputedStyle(document.body).fontSize),
+          };
+        }""",
+        width,
+    )
+    page.screenshot(path=str(out / f"ui-{DEMOS}-viewport-{width}.png"), full_page=True)
+    page.locator('[data-tab="graph"]').click()
+    page.wait_for_selector("#graph svg", timeout=60_000)
+    checks["min_label_px"] = page.evaluate(
+        "() => Math.min(...[...document.querySelectorAll('#graph .node text')]"
+        ".map(t => t.getBoundingClientRect().height))"
+    )
+    page.locator("#graphSection").screenshot(path=str(out / f"ui-{DEMOS}-viewport-{width}-map.png"))
+    failures = []
+    prefix = f"viewport {width}px: "
+    if checks["page_overflow_px"] > 0:
+        failures.append(prefix + f"page scrolls sideways by {checks['page_overflow_px']}px")
+    if checks["tabs_off_screen"]:
+        failures.append(prefix + f"tabs off screen: {checks['tabs_off_screen']}")
+    if checks["min_label_px"] < _MIN_LABEL_PX:
+        failures.append(prefix + f"map labels {checks['min_label_px']:.1f}px < {_MIN_LABEL_PX}px")
+    if checks["body_font_px"] < 15:
+        failures.append(prefix + "body text below 15px")
+    if checks["headline"] != "Action required":
+        failures.append(prefix + "sample with a critical finding is not headed 'Action required'")
+    return checks, failures
 
 
 def _graph_checks(page: Any, host: str, legend: str, detail: str) -> dict[str, Any]:
@@ -114,7 +173,7 @@ def _graph_checks(page: Any, host: str, legend: str, detail: str) -> dict[str, A
         host,
     )
     if best >= 0:
-        page.locator(f"#{host} .node").nth(best).click()
+        page.locator(f"#{host} .node").nth(best).locator("circle").click()
         checks["detail_panel"] = page.locator(f"#{detail}").inner_text()
     return checks
 
@@ -158,8 +217,8 @@ def run_demos(out: Path) -> int:
                 else None,
             )
             page.on("pageerror", lambda err: report["console_errors"].append(str(err)))
-            for name, button, host, legend, detail in _DEMO_CASES:
-                page.goto(f"http://127.0.0.1:{port}/")
+            for name, path, button, host, legend, detail in _DEMO_CASES:
+                page.goto(f"http://127.0.0.1:{port}{path}")
                 page.locator(button).click()
                 if host == "graph":
                     page.locator('[data-tab="graph"]').click(timeout=60_000)
@@ -176,6 +235,10 @@ def run_demos(out: Path) -> int:
                                                  "'graphgrid')]").screenshot(
                     path=str(out / f"ui-{DEMOS}-{name}.png")
                 )
+            for width in _VIEWPORTS:
+                checks, problems = _viewport_checks(page, port, width, out)
+                report["checks"][f"viewport-{width}"] = checks
+                failures += problems
             browser.close()
     finally:
         server.should_exit = True
@@ -186,9 +249,10 @@ def run_demos(out: Path) -> int:
     (out / f"ui-{DEMOS}.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
     )
-    summary = {k: {"nodes": v["nodes"], "edges": v["edges"]} for k, v in report["checks"].items()}
+    summary = {k: {"nodes": v["nodes"], "edges": v["edges"]} if "nodes" in v else v
+               for k, v in report["checks"].items()}
     print(json.dumps({"fixture": DEMOS, "status": report["status"], **summary,
-                      "failures": failures}, ensure_ascii=False))
+                      "failures": failures}))  # ASCII: Windows consoles are cp932
     return FAIL if failures else PASS
 
 
@@ -232,13 +296,23 @@ def run(fixture_name: str, out: Path) -> int:
                 body.update(resolve=False, vulns=False)
                 route.continue_(post_data=json.dumps(body))
 
+            # Both the stream and the plain fallback: never let either go online.
             page.route("**/api/scan", static_only)
+            page.route("**/api/scan/stream", static_only)
+            streamed: list[Any] = []
+            page.on("response", lambda r: streamed.append(r)
+                    if r.url.endswith("/api/scan/stream") else None)
             repo = f"https://github.com/example/{fixture_name}"
             page.goto(f"http://127.0.0.1:{port}/?repo={repo}")
             page.locator('[data-tab="graph"]').click(timeout=60_000)
             page.wait_for_selector("#graph svg, #graph p", timeout=60_000)
 
             report["checks"].update(_graph_checks(page, "graph", "edgeLegend", "graphDetail"))
+            lines = [json.loads(line) for r in streamed for line in r.text().splitlines()
+                     if line.strip()]
+            report["checks"]["stream_stages"] = [ln["stage"] for ln in lines if "stage" in ln]
+            report["checks"]["stream_result"] = any("result" in ln for ln in lines)
+            report["checks"]["status_text"] = page.locator("#status").text_content()
             page.locator("#graphSection").screenshot(path=str(out / f"ui-{fixture_name}.png"))
             browser.close()
     finally:
@@ -246,6 +320,12 @@ def run(fixture_name: str, out: Path) -> int:
 
     checks = report["checks"]
     failures = _graph_failures(checks)
+    stages = checks.get("stream_stages", [])
+    if not checks.get("stream_result") or stages[:2] != ["clone", "collect"] \
+            or stages[-1:] != ["report"]:
+        failures.append(f"scan did not stream its stages and result: {stages}")
+    if "resolve" in stages or "vulns" in stages:
+        failures.append("the offline check reached a network stage (resolve/vulns)")
     if report["console_errors"]:
         failures.append("browser console errors")
     report["failures"] = failures
@@ -256,7 +336,7 @@ def run(fixture_name: str, out: Path) -> int:
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
     )
     print(json.dumps({"fixture": fixture_name, "status": report["status"], **checks,
-                      "failures": failures}, ensure_ascii=False))
+                      "failures": failures}))  # ASCII: Windows consoles are cp932
     return status
 
 

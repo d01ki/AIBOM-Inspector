@@ -7,6 +7,7 @@ survives the round trip in the ``aibom:*`` property namespace.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from aibom import __version__
 from aibom.export.cyclonedx import to_cyclonedx, to_cyclonedx_json
@@ -105,3 +106,43 @@ def test_license_id_vs_name() -> None:
     assert _licenses("apache-2.0") == [{"license": {"id": "Apache-2.0"}}]
     assert _licenses("some-custom-license") == [{"license": {"name": "some-custom-license"}}]
     assert _licenses(None) is None
+
+
+# --- review backlog #38: an unknown dependency list is not an empty one -------
+
+def test_manifest_only_package_does_not_claim_to_be_a_leaf(tmp_path: Path) -> None:
+    from aibom.compliance.minimum_elements import evaluate_cyclonedx
+    from aibom.service import run_scan
+
+    (tmp_path / "requirements.txt").write_text("flask>=2\n", encoding="utf-8")
+    doc = to_cyclonedx(run_scan(tmp_path).inventory)
+    [flask] = [c for c in doc["components"] if c["name"] == "flask"]
+    refs = {d["ref"] for d in doc["dependencies"]}
+    assert flask["bom-ref"] not in refs, "no lockfile: its dependencies are unknown"
+    # ...but it is still reachable from the root, and the unknown is declared.
+    root = next(d for d in doc["dependencies"] if d["ref"] == "aibom:primary-component")
+    assert flask["bom-ref"] in root["dependsOn"]
+    assert any(
+        p["name"] == "cisa:known-unknown"
+        and p["value"].startswith("component-dependency-relationship:")
+        for p in flask["properties"]
+    )
+    element = next(e for e in evaluate_cyclonedx(doc).elements
+                   if e.id == "component-dependency-relationship")
+    assert element.declared_unknown >= 1
+
+
+def test_lockfile_package_states_its_dependencies(tmp_path: Path) -> None:
+    from aibom.service import run_scan
+
+    (tmp_path / "poetry.lock").write_text(
+        '[[package]]\nname = "flask"\nversion = "3.0.0"\n\n'
+        '[package.dependencies]\nwerkzeug = ">=3.0"\n\n'
+        '[[package]]\nname = "werkzeug"\nversion = "3.0.1"\n',
+        encoding="utf-8",
+    )
+    doc = to_cyclonedx(run_scan(tmp_path).inventory)
+    by_name = {c["name"]: c["bom-ref"] for c in doc["components"]}
+    deps = {d["ref"]: d["dependsOn"] for d in doc["dependencies"]}
+    assert deps[by_name["flask"]] == [by_name["werkzeug"]]
+    assert deps[by_name["werkzeug"]] == []  # a lockfile-proven leaf

@@ -92,6 +92,7 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
     "src/aibom/exposure.py",
     "src/aibom/impact.py",
     "src/aibom/spdx.py",
+    "src/aibom/provenance.py",
     "src/aibom/collectors/__init__.py",
     "src/aibom/collectors/base.py",
     "src/aibom/collectors/repo.py",
@@ -125,6 +126,7 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
     "tests/test_surface_rules.py",
     "tests/test_scoring_report.py",
     "tests/test_scan_stats.py",
+    "tests/test_provenance.py",
     "tests/test_analysis_scope.py",
     "tests/test_precision.py",
     "tests/test_corpus_regressions.py"
