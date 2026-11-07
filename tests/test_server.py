@@ -329,3 +329,26 @@ def test_compare_demo_returns_both_dependency_maps(client: TestClient, language:
 
 def test_sample_demo_graph_edges_all_cite_evidence(client: TestClient) -> None:
     _assert_evidenced_graph(client.post("/api/demo").json()["graph"])
+
+
+# --- review backlog: headline, coverage notes, scan ref -----------------------
+
+def test_scan_payload_leads_with_a_headline_and_coverage(client: TestClient) -> None:
+    data = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+              "resolve": False, "vulns": False},
+    ).json()
+    assert data["headline"]["status"] == "action_required"
+    assert any("OSV" in note for note in data["coverage_notes"])
+    assert data["stats"]["vuln_lookup"]["status"] == "not_requested"
+
+
+def test_scan_passes_the_ref_to_the_cloner_and_records_it(client: TestClient) -> None:
+    data = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "ref": "drift-candidate",
+              "resolve": False, "vulns": False},
+    ).json()
+    assert data["metadata"]["ref"] == "drift-candidate"
+    assert data["metadata"]["target"].endswith("AIBOM-Inspector.git")

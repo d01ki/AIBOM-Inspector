@@ -31,7 +31,8 @@ from aibom.export.sarif import to_sarif
 from aibom.graph import build_graph
 from aibom.impact import build_impact_paths, build_unresolved_impacts
 from aibom.policy import production_ai_component_count, production_view
-from aibom.report.html import render_html
+from aibom.report.html import coverage_notes, render_html
+from aibom.risk.scoring import headline
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
 from aibom.service import ScanResult, run_scan
 
@@ -49,6 +50,9 @@ class ScanRequest(BaseModel):
     """
 
     repo_url: str = Field(description="Public repo URL, e.g. https://github.com/owner/repo")
+    ref: str | None = Field(
+        default=None, description="Branch, tag, or commit SHA; the default branch if omitted."
+    )
     resolve: bool = Field(
         default=True, description="Enrich HF models/datasets (license, model card, formats)."
     )
@@ -191,12 +195,14 @@ def create_app() -> FastAPI:
                     base_path,
                     min_confidence=req.min_confidence,
                     display_target=f"{display}@{req.base_ref}",
+                    ref=req.base_ref,
                 )
             with cloner(req.repo_url, ref=req.head_ref) as head_path:
                 candidate = run_scan(
                     head_path,
                     min_confidence=req.min_confidence,
                     display_target=f"{display}@{req.head_ref}",
+                    ref=req.head_ref,
                 )
         except CloneError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -284,6 +290,7 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
         "target": inv.metadata.target,
         "counts": inv.counts(),
         "production_ai_components": production_ai_component_count(inv),
+        "headline": headline(result.findings).model_dump(),
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": len(result.findings),
         # The revision's dependency map, so the drift and compare demos can show
@@ -318,7 +325,8 @@ def _scan_with_agents(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         clone_started = time.monotonic()
-        with cloner(req.repo_url) as path:
+        ref = req.ref.strip() if req.ref and req.ref.strip() else None
+        with (cloner(req.repo_url, ref=ref) if ref else cloner(req.repo_url)) as path:
             clone_ms = int((time.monotonic() - clone_started) * 1000)
             result = run_scan(
                 path,
@@ -326,6 +334,7 @@ def _scan_with_agents(
                 vulns=req.vulns,
                 min_confidence=req.min_confidence,
                 display_target=display,
+                ref=ref,
             )
             result.inventory.stats.clone_ms = clone_ms
             agent_report = _agent_payload(path, result, display) if agents else None
@@ -365,6 +374,8 @@ def _to_payload(
                 len(inv.entities) - len(policy_inventory.entities)
             ),
         },
+        "headline": headline(result.findings).model_dump(),
+        "coverage_notes": coverage_notes(inv),
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": [f.model_dump() for f in result.findings],
         "graph": build_graph(inv, result.findings),

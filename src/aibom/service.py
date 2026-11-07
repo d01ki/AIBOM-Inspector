@@ -20,6 +20,7 @@ from aibom.inventory import Inventory, ScanMetadata
 from aibom.linking import link_components
 from aibom.models.findings import Finding, SecurityScore
 from aibom.policy import production_view
+from aibom.provenance import read_commit, source_url_template
 from aibom.resolvers.huggingface import HFClient, HuggingFaceResolver
 from aibom.risk.engine import evaluate as evaluate_risk
 from aibom.risk.engine import order_findings
@@ -47,6 +48,7 @@ def run_scan(
     disabled_detectors: set[str] | None = None,
     ignore_rules: list[str] | None = None,
     lockfiles: bool = True,
+    ref: str | None = None,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
@@ -65,10 +67,16 @@ def run_scan(
     if vulns is None:
         vulns = resolve
     started = time.monotonic()
+    commit = read_commit(target)
     inventory = Inventory(
         metadata=ScanMetadata(
             tool_version=__version__,
             target=display_target or str(Path(target).resolve()),
+            ref=ref,
+            commit=commit,
+            source_url_template=(
+                source_url_template(display_target, commit) if display_target else None
+            ),
         )
     )
     RepoCollector(target, disabled_detectors=disabled_detectors).collect(inventory)
@@ -92,12 +100,20 @@ def run_scan(
     findings = evaluate_risk(risk_inventory)
     if vulns:
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
-        findings = order_findings(findings + OSVMapper().map(risk_inventory))
+        mapper = OSVMapper()
+        findings = order_findings(findings + mapper.map(risk_inventory))
+        inventory.stats.vuln_lookup = mapper.coverage
     if ignore_rules:
-        findings = [f for f in findings if not ignored(f.rule_id, ignore_rules)]
+        findings = [f for f in findings if not _suppressed(f, ignore_rules)]
     score = score_findings(findings)
     inventory.stats.duration_ms = int((time.monotonic() - started) * 1000)
     return ScanResult(inventory=inventory, findings=findings, score=score)
+
+
+def _suppressed(finding: Finding, rules: list[str]) -> bool:
+    """A rule ID or any advisory alias may be named to suppress a finding."""
+    names = [finding.rule_id, *(finding.advisory.ids if finding.advisory else [])]
+    return any(ignored(name, rules) for name in names)
 
 
 def apply_confidence_filter(inventory: Inventory, threshold: float) -> None:

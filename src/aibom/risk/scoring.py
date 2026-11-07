@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from collections import Counter
 
+from pydantic import BaseModel
+
 from aibom.models.findings import (
     CategoryScore,
     Finding,
@@ -28,6 +30,48 @@ from aibom.models.findings import (
     SecurityScore,
     Severity,
 )
+
+
+class Headline(BaseModel):
+    """The first thing a reader sees: what to do, decided by the worst finding.
+
+    The hygiene score is a secondary detail. A critical finding is "action
+    required" whatever the score says, so a 76/B can never read as a pass.
+    """
+
+    status: str  # action_required | review | no_findings
+    label: str
+    detail: str
+    critical: int
+    high: int
+    medium: int
+    low: int
+
+
+def headline(findings: list[Finding]) -> Headline:
+    counts = Counter(f.severity for f in findings)
+    crit, high = counts[Severity.CRITICAL], counts[Severity.HIGH]
+    med, low = counts[Severity.MEDIUM], counts[Severity.LOW]
+    if crit or high:
+        parts = [f"{n} {word}" for n, word in ((crit, "critical"), (high, "high")) if n]
+        return Headline(
+            status="action_required", label="Action required",
+            detail=" and ".join(parts) + " finding(s) to fix before relying on this code.",
+            critical=crit, high=high, medium=med, low=low,
+        )
+    if med or low:
+        parts = [f"{n} {word}" for n, word in ((med, "medium"), (low, "low")) if n]
+        return Headline(
+            status="review", label="Review",
+            detail=" and ".join(parts) + " finding(s); no critical or high finding.",
+            critical=0, high=0, medium=med, low=low,
+        )
+    return Headline(
+        status="no_findings", label="No findings from the applied rules",
+        detail="None of the rules matched in the analyzed scope. This is not a proof "
+        "that the repository is safe; see the coverage notes.",
+        critical=0, high=0, medium=0, low=0,
+    )
 
 #: Max findings of one rule that count toward a category's deduction.
 PER_RULE_CAP = 3
