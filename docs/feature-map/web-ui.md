@@ -72,6 +72,12 @@ the plain `/api/scan`, with elapsed time only.
 
 What broke before, and the check that now holds it:
 
+- `esc()` escaped `<` and `&` but not quotes, so a repository file named
+  `a" onfocus="…` broke out of an `aria-label` in the Compare view (HTML
+  injection on the app's origin). `esc()` now escapes `"` and `'` as well, the
+  server sends a CSP without inline script, and `verify_ui.py --fixture demos`
+  replays every demo with an HTML payload appended to each repository-controlled
+  string and fails if any view renders it as markup.
 - A critical finding read as a pass because "76 / B" was the biggest thing on
   screen. The summary leads with the API's `headline`; the score sits in a
   collapsed "secondary" disclosure. `verify_ui.py --fixture demos` fails if the

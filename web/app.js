@@ -41,10 +41,12 @@ let lastRequest = null;
 let lastResult = null;
 let scannerVersion = "";
 
+// Escapes for text *and* quoted attribute values. Scanned repositories control
+// names and file paths (a file may be called `a" onfocus="...`), and many of
+// them land in attributes, so quotes must be escaped too.
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function esc(s) {
-  const d = document.createElement("div");
-  d.textContent = s == null ? "" : String(s);
-  return d.innerHTML;
+  return (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => ESC[c]);
 }
 function evLoc(ev) {
   if (!ev) return "";

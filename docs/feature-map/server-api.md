@@ -41,6 +41,17 @@ a clone failure after streaming started is an `{"error", "status"}` line.
 `min_confidence` is limited to 0–1. CORS origins come from
 `AIBOM_CORS_ORIGINS` (default `*`).
 
+At most `AIBOM_MAX_CONCURRENT_SCANS` (default 4) clone-and-scan requests run
+at once, shared by `/api/scan`, `/api/scan/stream`, `/api/report`,
+`/api/sarif` and `/api/diff`; one over the cap gets 503 with `Retry-After`
+immediately. A streamed scan holds its slot until its worker ends, including
+after a disconnect. Demo endpoints are not capped (no clone).
+
+Every response carries `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`; HTML (the UI and
+`/api/report`) also gets a Content-Security-Policy with `script-src 'self'`,
+so an escaping bug cannot run an injected inline handler.
+
 ## How to verify
 
 | Check | Proves |
@@ -64,7 +75,9 @@ Changing a response key breaks the UI silently. Run the Web UI checks with any
 API change. A new scan stage must be added to `STAGES` in `web/app.js`; `tests/test_web_ui.py`
 compares the two lists.
 The browser check intercepts both `/api/scan` and `/api/scan/stream` to keep
-the run offline: a new scan route needs the same interception.
+the run offline: a new scan route needs the same interception. A new endpoint
+that clones must take a scan slot (`slots.held()`); the cap test in
+`tests/test_server.py` lists the routes it expects to be capped.
 
 ```json verify
 {

@@ -14,7 +14,9 @@ dependency map with directed, evidence-labelled edges
 (``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``). It then loads the
 sample at 403 px and 1280 px wide and checks the page does not scroll
 sideways, every result tab is on screen, and map labels stay readable
-(``<out>/ui-demos-viewport-<width>.png``).
+(``<out>/ui-demos-viewport-<width>.png``). Finally it replays the demos with
+every repository-controlled string in the API responses carrying an HTML
+payload, and fails if any view renders it as markup (escaping regression).
 
 A fixture run also checks that the scan went through ``/api/scan/stream`` and
 that the backend reported its stages.
@@ -145,6 +147,69 @@ def _viewport_checks(
     return checks, failures
 
 
+#: Appended to every repository-controlled string: closes an attribute and a
+#: tag, then adds an element the check can count.
+_INJECTION = "\"'><img src=x onerror=\"window.__xss=1\"><b data-pwned=1>"
+#: Enum-like fields the UI switches on. Every other string (names, labels,
+#: files, versions, ids) can come from a scanned repository.
+_ENUM_KEYS = frozenset({
+    "severity", "type", "status", "role", "kind", "verdict", "state", "relations",
+    "scope", "category", "source_kind", "sink_kind", "trust_boundary", "evidence_level",
+    "usage", "change_type", "bomFormat", "specVersion", "edge_type", "reachable",
+    "strength", "privileged", "impact", "confidence_level", "lifecycle", "match",
+    "severity_rule", "operation_class", "effect", "decision", "mode", "level",
+})
+
+
+def _taint(value: Any, key: str | None = None) -> Any:
+    if isinstance(value, dict):
+        return {k: _taint(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_taint(v, key) for v in value]
+    if isinstance(value, str) and key not in _ENUM_KEYS and not value.startswith("http"):
+        return value + _INJECTION
+    return value
+
+
+def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
+    """Render every demo view from tainted API data; nothing may become markup."""
+
+    def tainted(route: Any) -> None:
+        response = route.fetch()
+        route.fulfill(response=response, json=_taint(response.json()))
+
+    patterns = ("**/api/demo", "**/api/diff/demo*", "**/api/agent-drift/demo*")
+    for pattern in patterns:
+        page.route(pattern, tainted)
+    count = "() => [window.__xss || 0, document.querySelectorAll('[data-pwned]').length]"
+    checks: dict[str, Any] = {}
+    page.set_viewport_size({"width": 1400, "height": 1000})
+    page.goto(f"http://127.0.0.1:{port}/")
+    page.locator("#runDemo").click()
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    for tab in page.locator(".result-tab:visible").all():
+        tab.click()
+        if tab.get_attribute("data-tab") == "graph":
+            page.wait_for_selector("#graph svg", timeout=60_000)
+            # Opens the detail panel, which renders names and evidence too.
+            page.locator("#graph .node circle").first.dispatch_event("click")
+    checks["sample"] = page.evaluate(count)
+    for button in ("#compareDemoPy", "#driftDemoPolicy", "#driftDemoMcp"):
+        page.goto(f"http://127.0.0.1:{port}/#compare")
+        page.locator(button).click()
+        page.wait_for_selector("#compareResult:not([hidden]), #privResult:not([hidden])",
+                               timeout=60_000)
+        nodes = page.locator(".path-node")
+        if nodes.count():
+            nodes.first.dispatch_event("click")
+        checks[button.lstrip("#")] = page.evaluate(count)
+    for pattern in patterns:
+        page.unroute(pattern)
+    failures = [f"injection: {view} rendered repository data as markup {found}"
+                for view, found in checks.items() if any(found)]
+    return checks, failures
+
+
 def _graph_checks(page: Any, host: str, legend: str, detail: str) -> dict[str, Any]:
     """Count nodes/edges/arrows in one graph and read the best-connected node's panel."""
     checks: dict[str, Any] = {
@@ -239,6 +304,9 @@ def run_demos(out: Path) -> int:
                 checks, problems = _viewport_checks(page, port, width, out)
                 report["checks"][f"viewport-{width}"] = checks
                 failures += problems
+            checks, problems = _injection_checks(page, port)
+            report["checks"]["injection"] = checks
+            failures += problems
             browser.close()
     finally:
         server.should_exit = True
