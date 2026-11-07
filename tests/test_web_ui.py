@@ -72,26 +72,35 @@ def test_every_element_id_used_by_the_script_exists_in_the_markup(page: str) -> 
     assert not missing, f"script references ids that are not in the markup: {missing}"
 
 
-def test_revision_comparison_is_its_own_section(page: str) -> None:
-    """Baseline vs candidate is a separate panel over the same diff API.
+def test_revision_comparison_is_its_own_view(page: str) -> None:
+    """Comparing revisions is a separate view over the diff API, not a scan mode.
 
     An earlier version made drift a *mode* of the scan panel and shared its
-    result container; keeping the two apart is what this guards.
+    result container; the review then asked for comparison and demos to leave
+    the main analysis flow entirely (#43, #46).
     """
-    for leftover in ("modeDrift", "driftFields", "driftResult", "runDriftDemo", "downloadDrift"):
-        assert leftover not in page, f"leftover mode-based drift UI reference: {leftover}"
+    for leftover in ("modeDrift", "driftFields", "driftResult", "runDriftDemo", "downloadDrift",
+                     "heroDrift", "heroMcp"):
+        assert leftover not in page, f"leftover drift UI reference: {leftover}"
+    analyze = page.index('data-view="analyze"')
+    compare_view = page.index('data-view="compare"')
     compare = page.index('id="compareSection"')
-    results_start = page.index('id="results" tabindex="-1" hidden')
-    results_end = page.index('id="helpPanel"')
-    assert not results_start < compare < page.index('id="scanResult"'), (
-        "the comparison must not live inside the scan result container"
-    )
-    assert compare < results_end
+    assert analyze < page.index('id="scanResult"') < compare_view < compare
+    assert 'id="compareView" hidden' in page
     assert 'id="compareResult" tabindex="-1" hidden' in page
     assert '$("compareResult").hidden = false;' in page
     # The page renders the engine's verdicts; it does not compute its own.
     assert "/api/diff/demo?" in page and '"/api/diff"' in page
     assert "drift.bom" in page and "security_boundary_changed" in page
+    assert "agent_privileges" in page
+
+
+def test_demos_are_labelled_and_never_claim_to_verify_user_code(page: str) -> None:
+    assert "Examples with bundled data" in page and "demo-badge" in page
+    assert "Bundled fixed revision" in page
+    assert "gates CI" not in page, "say what fails CI (--fail-on), not that the demo gates it"
+    assert "Same AIBOM" not in page
+    assert "Compared components identical" in page
 
 
 def test_the_page_can_be_pointed_at_a_backend(page: str) -> None:
@@ -101,15 +110,32 @@ def test_the_page_can_be_pointed_at_a_backend(page: str) -> None:
     assert "/api/health" in page
 
 
-def test_agent_security_leads_and_compliance_is_a_tab(page: str) -> None:
-    """The security graph is the default result view; SBOM conformance is secondary."""
+def test_findings_lead_and_the_score_is_secondary(page: str) -> None:
+    """The headline comes from the worst finding (API `headline`), not the grade (#36)."""
     tabs = re.findall(r'class="result-tab" data-tab="(\w+)"', page)
-    assert tabs[0] == "agent" and "compliance" in tabs
-    assert 'id="agentSection" data-panel="agent"' in page
-    assert 'data-panel="compliance"' in page and 'id="elementsSection"' in page
-    assert 'selectTab("agent")' in page
+    assert tabs[0] == "findings"
+    assert {"deps", "graph", "agent", "inventory", "compliance"} <= set(tabs)
+    assert 'selectTab((d.findings || []).length ? "findings" : "deps")' in page
+    assert "d.headline" in page
+    # The hygiene score lives in a collapsed, explicitly secondary disclosure.
+    assert '<details class="disclosure score-box" id="overview">' in page
+    assert "Supply-chain hygiene score (secondary)" in page
+
+
+def test_agent_paths_distinguish_not_detected_from_not_evaluated(page: str) -> None:
+    for state in ("not_detected", "not_evaluated", "failed", "evaluated"):
+        assert f'"{state}"' in page
+    assert '$("agentTab").hidden = state.state === "not_detected";' in page
     # The page renders the analyzer's verdicts and unknowns; it does not compute its own.
     assert "capability_paths" in page and "unknowns" in page
     assert '"/api/agent-drift/demo?scenario="' in page
     # Browser auto-translation mixed languages into the demo UI.
     assert '<html lang="en" translate="no">' in page
+
+
+def test_dependencies_tab_renders_the_full_table_and_says_when_relations_are_unknown(
+    page: str,
+) -> None:
+    assert 'id="depsSection" data-panel="deps"' in page
+    assert "d.dependencies" in page and "relations_resolved" in page
+    assert "Dependency relations unresolved" in page

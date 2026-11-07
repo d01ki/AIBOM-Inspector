@@ -39,6 +39,7 @@ class BackendUnavailable extends Error {}
 
 let lastRequest = null;
 let lastResult = null;
+let scannerVersion = "";
 
 function esc(s) {
   const d = document.createElement("div");
@@ -60,22 +61,6 @@ function usageLabel(usage) {
 }
 function setStatus(msg, isErr) {
   const s = $("status"); s.textContent = msg; s.className = isErr ? "err" : "";
-}
-
-function showWorkspaceState(code, title, copy) {
-  $("workspaceStateCode").textContent = code;
-  $("workspaceStateTitle").textContent = title;
-  $("workspaceStateCopy").textContent = copy;
-  $("emptyState").hidden = false;
-  const state = $("resultState");
-  const states = {
-    "READY": ["Waiting for input", "idle"],
-    "RUNNING": ["Analysis in progress", "running"],
-    "NO RESULT": ["Analysis failed", "error"],
-  };
-  const next = states[code] || [code, "idle"];
-  state.textContent = next[0];
-  state.dataset.state = next[1];
 }
 
 function repoLabel(repo) {
@@ -117,41 +102,61 @@ function setExportsEnabled(enabled) {
   for (const id of SCAN_EXPORTS) $(id).disabled = !enabled;
 }
 
-// Reveal the results area and its exports.
 function showResultBody() {
+  $("resultsArea").hidden = false;
   $("scanResult").hidden = false;
   for (const id of SCAN_EXPORTS) $(id).hidden = false;
-  $("emptyState").hidden = true;
   $("results").hidden = false;
 }
 
-// One busy/error/scroll path for every analysis the panel can start.
+// One busy/error/scroll path for every analysis the panel can start. The
+// previous result stays on screen until a new one has arrived, and a failed or
+// cancelled run never wipes it.
+let activeScan = null;
 async function runAnalysis(button, busyLabel, spec) {
   const original = button.textContent;
   ACTION_BUTTONS.forEach((id) => { $(id).disabled = true; });
   button.textContent = busyLabel;
   $("scanSection").setAttribute("aria-busy", "true");
-  $("results").hidden = true;
-  setExportsEnabled(false);
-  showWorkspaceState("RUNNING", spec.running[0], spec.running[1]);
+  const hadResult = !$("results").hidden;
+  const stale = $("staleNote");
+  stale.hidden = !hadResult;
+  stale.textContent = "Showing the previous result while the new analysis runs.";
   setStatus(spec.status, false);
+  const controller = new AbortController();
+  activeScan = controller;
+  const started = Date.now();
+  $("progressStage").textContent = spec.progress;
+  const tick = () => {
+    $("progressElapsed").textContent = Math.floor((Date.now() - started) / 1000) + " s elapsed";
+  };
+  tick();
+  $("progress").hidden = false;
+  const timer = setInterval(tick, 1000);
   try {
-    const data = await spec.request();
+    const data = await spec.request(controller.signal);
+    lastRequest = spec.requestInfo;
     spec.render(data);
+    stale.hidden = true;
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto" : "smooth";
     $("results").scrollIntoView({ behavior, block: "start" });
     $("results").focus({ preventScroll: true });
   } catch (e) {
-    const missing = e instanceof BackendUnavailable;
-    setStatus(spec.failure + ": " + e.message, true);
-    showWorkspaceState("NO RESULT", missing ? "No analysis backend" : spec.failure,
-      missing
-        ? "This page is only the interface. Start a backend with `aibom serve` (or the "
-          + "Docker image) and enter its address above — nothing was analyzed."
-        : "Review the error above, adjust the input if needed, and try again.");
-    if (missing) showApiEndpointField();
+    const keep = hadResult ? " The previous result is still shown below." : "";
+    if (e.name === "AbortError") {
+      setStatus("Cancelled. The page stopped waiting; the backend may still finish and "
+        + "discard the work." + keep, false);
+    } else {
+      const missing = e instanceof BackendUnavailable;
+      setStatus(spec.failure + ": " + e.message + keep, true);
+      if (missing) showApiEndpointField();
+    }
+    stale.textContent = "Showing the previous result: the latest analysis did not complete.";
   } finally {
+    clearInterval(timer);
+    $("progress").hidden = true;
+    activeScan = null;
     ACTION_BUTTONS.forEach((id) => { $(id).disabled = false; });
     button.textContent = original;
     $("scanSection").removeAttribute("aria-busy");
@@ -159,17 +164,17 @@ async function runAnalysis(button, busyLabel, spec) {
 }
 
 function runDemo() {
-  lastRequest = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
-  lastResult = null;
-  return runAnalysis($("runDemo"), "Scanning the sample app…", {
+  showView("analyze");
+  const info = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
+  return runAnalysis($("runDemo"), "Scanning the sample…", {
     status: "Scanning the bundled sample app (offline)…",
-    running: ["Scanning the bundled sample app",
-      "Tracing external input through agent instructions to directly bound tool capabilities."],
+    progress: "Static analysis of the bundled sample (no clone, no network)",
     failure: "The bundled sample scan could not be completed",
-    request: () => postJson(apiBase() + "/api/demo"),
+    requestInfo: info,
+    request: (signal) => postJson(apiBase() + "/api/demo", null, signal),
     render: (data) => {
       renderScan(data);
-      setStatus("Sample app scanned. Start with the path from untrusted input to the bound tool.", false);
+      setStatus("Sample scanned. Start with the findings at the top of the result.", false);
     },
   });
 }
@@ -195,6 +200,7 @@ function statsLine(repo, st) {
 function scan() {
   const repoInput = $("repo");
   const repo = repoInput.value.trim();
+  const ref = $("repoRef").value.trim();
   if (!isRepositoryUrl(repo)) {
     repoInput.setAttribute("aria-invalid", "true");
     setStatus(repo
@@ -204,14 +210,15 @@ function scan() {
     return Promise.resolve();
   }
   repoInput.removeAttribute("aria-invalid");
-  lastRequest = { repo_url: repo, resolve: true, api: apiBase() };
-  lastResult = null;
+  const info = { repo_url: repo, ref: ref || null, resolve: true, api: apiBase() };
   return runAnalysis($("scan"), "Analyzing…", {
-    status: "Inspecting " + repoLabel(repo) + "…",
-    running: ["Scan in progress",
-      "The repository is being cloned and analyzed. Results will replace this message when ready."],
+    status: "Analyzing " + repoLabel(repo) + (ref ? " at " + ref : "") + "…",
+    progress: "The backend clones the repository, reads supported files, looks up "
+      + "advisories and builds the report. Step timings are shown when it finishes.",
     failure: "The analysis could not be completed",
-    request: () => postJson(apiBase() + "/api/scan", { repo_url: repo, resolve: true }),
+    requestInfo: info,
+    request: (signal) => postJson(apiBase() + "/api/scan",
+      { repo_url: repo, ref: ref || null, resolve: true }, signal),
     render: (data) => {
       renderScan(data);
       setStatus("Analysis complete. " + statsLine(repo, data.stats), false);
@@ -223,54 +230,140 @@ function renderScan(d) {
   lastResult = d;
   showResultBody();
   setExportsEnabled(true);
-  $("resultOverline").textContent = "SCAN RESULT";
+  const repo = d.repo_url || (lastRequest && lastRequest.repo_url);
+  const demo = typeof repo === "string" && repo.startsWith("built-in://");
+  $("resultOverline").textContent = demo ? "Bundled sample · analysis result" : "Analysis result";
+  $("resultRepoName").textContent = repoLabel(repo);
+  $("resultMeta").textContent = statsLine(repo, d.stats);
+  $("resultProvenance").innerHTML = provenanceHtml(d.metadata || {});
+  for (const id of ["findingSearch", "inventorySearch", "depsSearch"]) $(id).value = "";
+  for (const id of ["severityFilter", "typeFilter", "reachFilter", "depsFilter"]) $(id).value = "all";
+
+  renderSummary(d);
+  renderScore(d);
+  renderFindings(d);
+  renderDependencies(d.dependencies);
+  renderGraph(d.graph || { nodes: [], edges: [] }, d.findings || []);
+  renderGraphLead(d);
+  renderInventory(d);
+  renderMinimumElements(d.minimum_elements, d);
+  renderAgentSecurity(d.agent_security, d.inventory);
+  // Lead with what needs doing: findings when there are any, else the packages.
+  selectTab((d.findings || []).length ? "findings" : "deps");
+  filterFindings();
+  filterInventory();
+  filterDeps();
+}
+
+function provenanceHtml(meta) {
+  const parts = [];
+  if (meta.ref) parts.push(`ref <code>${esc(meta.ref)}</code>`);
+  if (meta.commit) {
+    const tree = meta.source_url_template
+      ? meta.source_url_template.replace("{path}", "").replace(/#.*$/, "") : null;
+    const short = esc(meta.commit.slice(0, 12));
+    parts.push(tree
+      ? `commit <a href="${esc(tree)}" target="_blank" rel="noopener noreferrer"><code>${short}</code></a>`
+      : `commit <code>${short}</code>`);
+  } else if (!String(meta.target || "").startsWith("built-in://")) {
+    parts.push("commit not recorded");
+  }
+  if (meta.tool_version) parts.push(`aibom ${esc(meta.tool_version)}`);
+  if (meta.created_at) {
+    const when = new Date(meta.created_at);
+    parts.push("analyzed " + esc(isNaN(when) ? meta.created_at
+      : when.toISOString().replace("T", " ").slice(0, 16) + " UTC"));
+  }
+  return parts.join(" · ");
+}
+
+// A file:line that opens the analyzed commit on the forge, when one is known.
+function srcLink(ev) {
+  if (!ev) return "";
+  const text = evLoc(ev);
+  const meta = (lastResult && lastResult.metadata) || {};
+  const template = meta.source_url_template;
+  if (!template || !ev.file || ev.file.startsWith("<")) return `<code>${esc(text)}</code>`;
+  const href = template.replace("{path}", ev.file.split("/").map(encodeURIComponent).join("/"))
+    .replace("{line}", String(ev.line_start || 1));
+  return `<a class="src" href="${esc(href)}" target="_blank" rel="noopener noreferrer">`
+    + `<code>${esc(text)}</code></a>`;
+}
+
+const ELEMENT_STATUS = {
+  satisfied: { label: "filled", color: "#2e8b57" },
+  partial: { label: "partly filled", color: "#b8860b" },
+  declared_unknown: { label: "declared unknown", color: "#5a6a82" },
+  missing: { label: "missing", color: "#b3123b" },
+};
+const ELEMENT_ORIGIN = {
+  carried_over: "2021", updated_2026: "2026 updated", new_2026: "2026 new",
+};
+
+// CISA 2026 SBOM minimum elements: field coverage, declared unknowns and the
+// machine check are three different statements, shown apart.
+function renderMinimumElements(report, d) {
+  const body = document.querySelector("#elements tbody");
+  if (!body) return;
+  if (!report || !report.elements) {
+    $("elementsSummary").innerHTML = "";
+    body.innerHTML = `<tr><td colspan="5" class="empty">No SBOM field report was returned.</td></tr>`;
+    return;
+  }
+  const s = report.summary || {};
+  const tile = (n, label, cls, note) => `<div class="sum-tile ${cls}"><strong>${n}</strong>`
+    + `<span>${esc(label)}</span>${note ? `<small>${esc(note)}</small>` : ""}</div>`;
+  const inventory = ((d && d.inventory && d.inventory.entities) || []).length;
+  const rows = Math.max(0, ...report.elements.map(el => el.applicable || 0));
+  const denominator = rows === inventory + 1
+    ? ` Component counts cover ${rows} components: the ${inventory} inventory entries plus the `
+      + "scanned repository itself (the SBOM's primary component)."
+    : rows ? ` Component counts cover ${rows} components.` : "";
+  $("elementsSummary").innerHTML = tile(s.satisfied, "filled", "is-ok", `of ${s.total} fields`)
+    + tile(s.partial, "partly filled", s.partial ? "is-warn" : "", "some components only")
+    + tile(s.declared_unknown, "declared unknown", "", "stated as unknown in the file")
+    + tile(s.missing, "missing", s.missing ? "is-bad" : "", "empty without a declaration")
+    + `<p class="elements-note"><strong>Machine check: ${report.conformant ? "passed" : "failed"}.`
+    + `</strong> ${report.conformant
+      ? "Every field is either filled or explicitly declared unknown in the generated file, "
+        + "which is what the 2026 minimum elements require of a generator. That is not "
+        + `completeness: ${s.satisfied} of ${s.total} fields are fully filled.`
+      : `${s.missing} field(s) are empty without an explicit declaration.`}`
+    + `${esc(denominator)}</p>`;
+  body.innerHTML = report.elements.map(el => {
+    const status = ELEMENT_STATUS[el.status] || ELEMENT_STATUS.missing;
+    let coverage = el.applicable > 1 ? `${el.present}/${el.applicable}`
+      : (el.present ? "yes" : "no");
+    if (el.declared_unknown) coverage += ` <span class="muted">+${el.declared_unknown} declared unknown</span>`;
+    const detail = el.status === "satisfied" ? el.description : el.remediation;
+    const gaps = (el.undeclared_gaps || []).length
+      ? `<br><span class="muted">undeclared: ${esc(el.undeclared_gaps.slice(0, 5).join(", "))}</span>`
+      : "";
+    return `<tr><td><span class="sev" style="color:${status.color}">`
+      + `${esc(status.label)}</span></td>`
+      + `<td>${esc(el.name)}<br><span class="muted">${esc(detail)}</span>${gaps}</td>`
+      + `<td>${esc(ELEMENT_ORIGIN[el.origin] || el.origin)}</td>`
+      + `<td>${coverage}</td><td><code>${esc(el.cyclonedx_path)}</code></td></tr>`;
+  }).join("");
+}
+
+function renderScore(d) {
   const sc = d.score;
-  const allEnts = (d.inventory && d.inventory.entities) || [];
-  // Non-AI packages complete the BOM but don't count as AI usage.
-  const totalEntities = allEnts.filter(e => e.type !== "package" || e.ai).length;
-  const riskEntities = d.analysis_scope
-    ? d.analysis_scope.production_ai_components : totalEntities;
-  const excludedEntities = d.analysis_scope
-    ? d.analysis_scope.excluded_non_production_entities : 0;
-  const plainDeps = allEnts.length - totalEntities;
-  $("resultRepoName").textContent = repoLabel(d.repo_url || lastRequest.repo_url);
-  const scopeSuffix = excludedEntities
-    ? ` \u00b7 ${excludedEntities} test/example/docs component(s) excluded from risk and graph`
-    : "";
-  $("resultMeta").textContent = statsLine(d.repo_url || lastRequest.repo_url, d.stats)
-    + scopeSuffix;
-  $("findingTotal").textContent = d.findings.length;
-  $("componentTotal").textContent = totalEntities;
-  $("fileTotal").textContent = d.stats && d.stats.files_scanned != null
-    ? d.stats.files_scanned : "—";
-  $("findingSearch").value = "";
-  $("severityFilter").value = "all";
-  $("inventorySearch").value = "";
-  $("typeFilter").value = "all";
-  $("reachFilter").value = "all";
-  if (!riskEntities) {
-    // "Nothing AI found" means exactly that, not "perfectly safe" —
-    // don't present a triumphant 100/A over zero evidence.
+  const scope = d.analysis_scope || {};
+  if (!sc || !scope.production_ai_components) {
+    $("scoreBrief").textContent = "· not scored: no production AI components";
     $("scoreNum").textContent = "—";
     $("scoreNum").style.color = "";
-    $("scoreGrade").textContent = "no production AI components detected";
-    $("cats").innerHTML = "<span class='muted'>Nothing to score in production scope."
-      + (excludedEntities ? ` ${excludedEntities} test/example/docs component(s) remain `
-      + "visible in the inventory but are excluded from risk and graph claims." : "")
-      + (plainDeps ? ` ${plainDeps} ordinary dependencies were also catalogued.` : "")
-      + "</span>";
-  } else {
+    $("scoreGrade").textContent = "not scored";
+    $("cats").innerHTML = "<span class='muted'>Nothing to score in production code.</span>";
+    $("chips").innerHTML = "";
+    return;
+  }
+  const gradeColor = { A: "#2e8b57", B: "#6a9c3a", C: "#b8860b", D: "#d64500", F: "#b3123b" }[sc.grade] || "";
+  $("scoreBrief").textContent = `· ${sc.overall} / 100, grade ${sc.grade}`;
   $("scoreNum").textContent = sc.overall;
-  const gradeColor = { A:"#2e8b57", B:"#6a9c3a", C:"#b8860b", D:"#d64500", F:"#b3123b" }[sc.grade] || "";
-  const highestFinding = ["critical", "high", "medium", "low", "info"].find(
-    severity => (sc.severity_counts[severity] || 0) > 0);
-  const gradeWord = highestFinding === "critical" ? "critical finding present"
-    : highestFinding === "high" ? "high finding present"
-    : ({ A:"good hygiene", B:"minor issues", C:"needs attention",
-         D:"poor hygiene", F:"serious issues" }[sc.grade] || "");
   $("scoreNum").style.color = gradeColor;
-  $("scoreGrade").textContent = `/ 100 · grade ${sc.grade} — ${gradeWord}`;
-
+  $("scoreGrade").textContent = `/ 100 · grade ${sc.grade}`;
   $("cats").innerHTML = sc.categories.map(c => {
     const col = c.score >= 75 ? "#2e8b57" : c.score >= 50 ? "#b8860b" : "#b3123b";
     const category = c.category.charAt(0).toUpperCase() + c.category.slice(1);
@@ -278,46 +371,190 @@ function renderScan(d) {
       + `<span>${c.score} · ${c.finding_count} finding(s)</span></div>`
       + `<div class="bar"><span style="width:${c.score}%;background:${col}"></span></div></div>`;
   }).join("");
-
-  $("chips").innerHTML = ["critical","high","medium","low","info"].map(s => {
+  $("chips").innerHTML = ["critical", "high", "medium", "low", "info"].map(s => {
     const n = sc.severity_counts[s] || 0;
     return n ? `<span class="chip" data-severity="${s}">${n} ${s}</span>` : "";
   }).join("");
-  }
-  if (!totalEntities) $("chips").innerHTML = "";
+}
 
+function advisoryHtml(f) {
+  const a = f.advisory;
+  const links = (a.urls || []).map(u => `<a href="${esc(u)}" target="_blank" `
+    + `rel="noopener noreferrer">${esc(u.split("/").pop())}</a>`).join(", ");
+  const linked = new Set((a.urls || []).map(u => u.split("/").pop()));
+  const aliases = (a.ids || []).filter(i => !linked.has(i));
+  const rated = (a.severity_sources || []).map(s => `${esc(s.advisory_id)}: `
+    + `${esc(s.severity || "unrated")} <span class="muted">(${esc(s.source)}`
+    + `${s.score != null ? " " + esc(s.score) : ""})</span>`).join(" · ");
+  const where = (f.source_evidence || []).slice(0, 2).map(srcLink).join(", ");
+  return `<li class="advisory" data-severity="${esc(f.severity)}">${sevTag(f.severity)} `
+    + `<strong>${links}</strong>${aliases.length ? ` <span class="muted">also ${esc(aliases.join(", "))}</span>` : ""}`
+    + `<p>${esc(f.description)}</p><dl class="adv-facts">`
+    + `<dt>Installed</dt><dd><code>${esc(a.installed_version)}</code> (${esc(a.match)})</dd>`
+    + `<dt>Affected</dt><dd>${esc((a.affected_ranges || []).join("; ") || "not stated by the advisory")}</dd>`
+    + `<dt>Fixed in</dt><dd>${a.fixed_version ? `<code>${esc(a.fixed_version)}</code>`
+      : "no fixed release recorded"}</dd>`
+    + `<dt>Severity</dt><dd>${esc(a.severity_rule)}: ${rated}</dd>`
+    + (a.modified ? `<dt>Updated</dt><dd>${esc(a.modified)}</dd>` : "")
+    + (where ? `<dt>Declared at</dt><dd>${where}</dd>` : "")
+    + `</dl></li>`;
+}
+
+function renderFindings(d) {
+  const findings = d.findings || [];
+  const byEntity = {};
+  for (const f of findings) {
+    if (f.advisory) (byEntity[f.entity_id] = byEntity[f.entity_id] || []).push(f);
+  }
+  const groups = d.vulnerable_packages || [];
+  $("vulnPackages").innerHTML = groups.length
+    ? `<h3 class="subhead">Vulnerable packages (${groups.length})</h3>` + groups.map(g => {
+      const items = (byEntity[g.entity_id] || []).slice().sort((a, b) =>
+        (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9));
+      const fixed = items.length - g.without_known_fix;
+      const upgrade = g.recommended_version
+        ? `Upgrade to <strong><code>${esc(g.recommended_version)}</code></strong> or later: `
+          + `clears ${fixed === items.length ? "all " : ""}${fixed} of ${items.length} advisories `
+          + `with a known fixed release. Check compatibility before upgrading.`
+        : "No fixed release is recorded for these advisories; see each advisory.";
+      const none = g.without_known_fix && g.recommended_version
+        ? ` ${g.without_known_fix} advisory(ies) have no fixed release recorded.` : "";
+      return `<article class="vuln-card" data-row="true" `
+        + `data-severities="${esc([...new Set(items.map(i => i.severity))].join(" "))}">`
+        + `<header>${sevTag(g.severity)} <strong>${esc(g.package)}</strong> `
+        + `<code>${esc(g.installed_version || "")}</code> <span class="muted">`
+        + `${items.length} advisor${items.length === 1 ? "y" : "ies"}</span></header>`
+        + `<p class="upgrade">${upgrade}${esc(none)}</p>`
+        + `<details><summary>Advisory details</summary><ul class="advisories">`
+        + items.map(advisoryHtml).join("") + `</ul></details></article>`;
+    }).join("")
+    : "";
+  const lookup = (d.stats && d.stats.vuln_lookup) || {};
+  if (!groups.length && lookup.status && lookup.status !== "complete") {
+    $("vulnPackages").innerHTML = `<p class="notice">Known-vulnerability lookup: `
+      + `${esc(lookup.status.replace("_", " "))}. See Analysis limits above.</p>`;
+  }
+
+  const code = findings.filter(f => !f.advisory);
   const fb = $("findings").querySelector("tbody");
-  $("findingCount").textContent = d.findings.length ? "(" + d.findings.length + ")" : "";
-  if (!d.findings.length) {
-    // "No findings" has two very different meanings. Say which one this is,
-    // so an empty table is not mistaken for a broken scan.
-    const why = !riskEntities
-      ? (totalEntities
-        ? `This repository's ${totalEntities} AI component(s) were all found in test, `
-          + "example, or documentation files, which are deliberately excluded from risk "
-          + "rules so a fixture cannot score its own repository. They are listed in the "
-          + "Inventory below."
-        : "No AI components were detected in this repository, so no AI risk rule applies. "
-          + "Ordinary dependencies are still listed in the Inventory below.")
-      : `The ${riskEntities} AI component(s) in production code matched none of the risk `
-        + "rules. This covers the rules listed in the README — not every possible risk.";
-    fb.innerHTML = `<tr><td colspan="4" class="empty empty-state">No findings. ${esc(why)}</td></tr>`;
+  $("findingCount").textContent = findings.length ? "(" + findings.length + ")" : "";
+  $("codeFindingsTitle").hidden = !groups.length;
+  if (!code.length) {
+    const scope = d.analysis_scope || {};
+    const why = !scope.production_ai_components
+      ? "No AI component was found in production code, so the AI rules had nothing to check."
+      : `The ${scope.production_ai_components} AI component(s) in production code matched none `
+        + "of the rules. This covers the rules listed in the README, not every possible risk.";
+    fb.innerHTML = `<tr><td colspan="4" class="empty">No code or configuration findings. `
+      + `${esc(why)}</td></tr>`;
   } else {
-    const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-    const orderedFindings = d.findings.slice().sort((a, b) =>
-      (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9));
-    fb.innerHTML = orderedFindings.map(f => {
-      const locs = (f.source_evidence || []).slice(0, 4).map(evLoc).join(", ") || "—";
+    fb.innerHTML = code.slice().sort((a, b) =>
+      (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)).map(f => {
+      const locs = (f.source_evidence || []).slice(0, 3).map(srcLink).join("<br>") || "—";
       return `<tr data-row="true" data-severity="${esc(f.severity)}">`
         + `<td><span class="sev" data-severity="${esc(f.severity)}">${esc(f.severity)}</span></td>`
         + `<td><code>${esc(f.rule_id)}</code></td>`
         + `<td><strong class="finding-title">${esc(f.title)}</strong>${findingThreeParts(f)}</td>`
-        + `<td>${esc(f.entity_name || "—")}<br><code>${esc(locs)}</code></td></tr>`;
+        + `<td>${esc(f.entity_name || "—")}<br>${locs}</td></tr>`;
     }).join("");
   }
+}
 
-  renderGraph(d.graph || { nodes: [], edges: [] }, d.findings || []);
+function renderDependencies(dep) {
+  const body = $("deps").querySelector("tbody");
+  if (!dep) {
+    $("depsLead").textContent = "This backend did not return a dependency table.";
+    body.innerHTML = "";
+    return;
+  }
+  const s = dep.summary;
+  const byId = Object.fromEntries(dep.packages.map((p, i) => [p.id, { ...p, index: i }]));
+  $("depsCount").textContent = `(${s.total})`;
+  $("depsLead").textContent = `${s.total} package(s): ${s.direct} direct (declared by the `
+    + `project) and ${s.transitive} transitive (resolved by a lockfile); ${s.ai} AI package(s). `
+    + "This is the same set the CycloneDX file lists as libraries, test and example "
+    + "manifests included. Nothing is filtered or hidden here.";
+  const notice = $("depsNotice");
+  notice.hidden = !s.total || s.relations_resolved === s.total;
+  notice.innerHTML = !s.relations_resolved
+    ? `<strong>Dependency relations unresolved:</strong> ${s.total} package(s) detected, but no `
+      + "lockfile that records package-to-package dependencies was found (package-lock.json, "
+      + "poetry.lock, uv.lock, Cargo.lock, composer.lock, Gemfile.lock). Their own dependencies "
+      + "are <em>unknown</em>, not absent, and transitive packages are missing from this list."
+    : `Relations are known for ${s.relations_resolved} of ${s.total} package(s), from `
+      + `${esc(s.graph_lockfiles.join(", "))}. The rest show “unknown”.`;
+  const name = (id) => {
+    const p = byId[id];
+    return p ? `<button type="button" class="link dep-jump" data-dep="${p.index}">${esc(p.name)}</button>` : esc(id);
+  };
+  body.innerHTML = dep.packages.length ? dep.packages.map((p, i) => {
+    const deps = p.relations === "unknown"
+      ? `<span class="muted" title="No edge-recording lockfile covers this package">unknown</span>`
+      : (p.depends_on.length ? p.depends_on.map(name).join(", ") : `<span class="muted">none (lockfile)</span>`);
+    const req = p.required_by.length ? p.required_by.map(name).join(", ")
+      : (p.scope === "direct" ? `<span class="muted">this project</span>` : `<span class="muted">—</span>`);
+    const version = p.version
+      ? `<code>${esc(p.version)}</code>${p.version_pinned ? "" : ` <span class="muted">declared range</span>`}`
+      : `<span class="muted">unknown</span>`;
+    const where = [...new Set(p.locations || [])].slice(0, 2).map(loc => {
+      const [file, line] = loc.split(/:(?=\d)/);
+      return srcLink({ file, line_start: Number(line) || 1, line_end: Number(line) || 1 });
+    }).join("<br>");
+    const findings = p.finding_count
+      ? `<button type="button" class="link dep-findings" data-name="${esc(p.name)}">`
+        + `${sevTag(p.severity)} ${p.finding_count}</button>` : `<span class="muted">0</span>`;
+    const ctx = p.production ? "" : ` <span class="tag">${esc(p.source_contexts.join(", "))}</span>`;
+    return `<tr id="dep-${i}" data-row="true" data-scope="${esc(p.scope)}" data-ai="${p.ai}" `
+      + `data-findings="${p.finding_count ? "yes" : "no"}" data-relations="${esc(p.relations)}">`
+      + `<td><strong>${esc(p.name)}</strong>${p.ai ? ' <span class="tag ai">AI</span>' : ""}${ctx}`
+      + `<br><span class="muted">${esc(p.ecosystem || "")}${p.purl ? " · " + esc(p.purl) : ""}</span></td>`
+      + `<td>${version}</td><td>${esc(p.scope)}</td><td>${deps}</td><td>${req}</td>`
+      + `<td>${where || "—"}</td><td>${findings}</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="empty">No dependency manifest or lockfile was found.</td></tr>`;
+  body.querySelectorAll(".dep-jump").forEach(btn => btn.addEventListener("click", () => {
+    $("depsFilter").value = "all"; $("depsSearch").value = ""; filterDeps();
+    const row = $("dep-" + btn.dataset.dep);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("is-flash");
+    setTimeout(() => row.classList.remove("is-flash"), 1600);
+  }));
+  body.querySelectorAll(".dep-findings").forEach(btn => btn.addEventListener("click", () => {
+    showFindingsFor(btn.dataset.name);
+  }));
+}
 
+function showFindingsFor(name) {
+  $("findingSearch").value = name;
+  $("severityFilter").value = "all";
+  selectTab("findings");
+  filterFindings();
+}
+
+function filterDeps() {
+  const mode = $("depsFilter").value;
+  filterRows("deps", "depsSearch", null, null, "No packages match the current filters.", (row) =>
+    mode === "all" || (mode === "direct" && row.dataset.scope === "direct")
+    || (mode === "transitive" && row.dataset.scope === "transitive")
+    || (mode === "ai" && row.dataset.ai === "true")
+    || (mode === "findings" && row.dataset.findings === "yes")
+    || (mode === "unknown" && row.dataset.relations === "unknown"));
+}
+
+function renderGraphLead(d) {
+  const nodes = ((d.graph || {}).nodes || []).length;
+  const scope = d.analysis_scope || {};
+  const total = ((d.inventory || {}).entities || []).length;
+  $("graphLead").textContent = `Showing ${nodes} of ${total} components: models, services, `
+    + "prompts, tools, agents and AI packages, plus an ordinary package only when it has a "
+    + "finding or an AI package depends on it directly. Production code only"
+    + (scope.excluded_non_production_entities
+      ? ` (${scope.excluded_non_production_entities} test/example/docs component(s) left out)` : "")
+    + ". Every line is a relationship a scanned file proves; the full package list is under "
+    + "Dependencies.";
+}
+
+function renderInventory(d) {
+  const allEnts = (d.inventory && d.inventory.entities) || [];
   const ib = $("inventory").querySelector("tbody");
   const ents = allEnts.slice().sort((a, b) => {
     if (a.type !== b.type) return a.type.localeCompare(b.type);
@@ -328,106 +565,56 @@ function renderScan(d) {
     Object.entries(d.counts || {}).map(([k, v]) => v + " " + k).join(" · ") + ")";
   ib.innerHTML = ents.length ? ents.map(e => {
     const prov = e.provider || e.source || e.source_kind || e.ecosystem || "—";
-    const loc = e.source_evidence && e.source_evidence[0] ? evLoc(e.source_evidence[0]) : "—";
+    const loc = e.source_evidence && e.source_evidence[0] ? srcLink(e.source_evidence[0]) : "—";
     const contexts = (e.source_contexts || []).join(", ") || "—";
     const detectors = (e.detector_ids || []).join(", ") || "—";
     const typeCell = e.type === "package" && e.ai
-      ? "package <strong style='color:var(--accent)'>· AI</strong>"
-      : esc(e.type);
+      ? "package <span class='tag ai'>AI</span>" : esc(e.type);
     const reach = e.type === "package" ? "n/a" : ((e.usage && e.usage.reachable) || "unknown");
-    return `<tr data-row="true" data-type="${esc(e.type)}" data-reach="${esc(reach)}">`
+    const version = e.version || e.revision;
+    const scope = e.type === "package" && e.dependency_scope ? ` <span class="muted">${esc(e.dependency_scope)}</span>` : "";
+    return `<tr data-row="true" data-type="${esc(e.type)}" data-reach="${esc(reach)}" `
+      + `data-contexts="${esc((e.source_contexts || []).join(" "))}">`
       + `<td>${typeCell}</td><td>${esc(e.name)}</td>`
+      + `<td>${version ? `<code>${esc(version)}</code>` : '<span class="muted">unknown</span>'}${scope}</td>`
       + `<td>${esc(prov)}</td><td>${usageCell(e, reach)}</td>`
-      + `<td>${esc(contexts)}</td><td><code>${esc(loc)}</code><br>${esc(detectors)}</td></tr>`;
-  }).join("") : `<tr><td colspan="6" class="empty empty-state">No components were discovered.</td></tr>`;
+      + `<td>${esc(contexts)}</td><td>${loc}<br><span class="muted">${esc(detectors)}</span></td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="empty">No components were discovered.</td></tr>`;
 
-  const typeFilter = $("typeFilter");
-  typeFilter.innerHTML = `<option value="all">All types</option>`;
-  [...new Set(ents.map(e => e.type))].sort().forEach(type => {
-    const option = document.createElement("option");
-    option.value = type;
-    option.textContent = type.charAt(0).toUpperCase() + type.slice(1);
-    typeFilter.appendChild(option);
-  });
-
-  renderMinimumElements(d.minimum_elements);
-  renderAgentSecurity(d.agent_security, d.inventory);
-  renderSecuritySummary(d);
-  selectTab("agent");
-
-  $("resultState").textContent = "Analysis complete";
-  $("resultState").dataset.state = "complete";
-  filterFindings();
-  filterInventory();
+  const fill = (id, values, label) => {
+    const select = $(id);
+    select.innerHTML = `<option value="all">${label}</option>`;
+    values.forEach(v => {
+      const option = document.createElement("option");
+      option.value = v;
+      option.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+      select.appendChild(option);
+    });
+  };
+  fill("typeFilter", [...new Set(ents.map(e => e.type))].sort(), "All types");
+  fill("contextFilter", [...new Set(ents.flatMap(e => e.source_contexts || []))].sort(),
+    "All contexts");
 }
 
-const ELEMENT_STATUS = {
-  satisfied: { label: "verified", color: "#7adbb1" },
-  partial: { label: "partial", color: "#efd078" },
-  declared_unknown: { label: "unknown", color: "#a4b7ce" },
-  missing: { label: "missing", color: "#ff879e" },
-};
-const ELEMENT_ORIGIN = {
-  carried_over: "2021", updated_2026: "2026 updated", new_2026: "2026 new",
-};
-
-// CISA 2026 SBOM minimum elements: a declared known unknown is conformance,
-// a silent gap is not — so the summary counts them separately.
-function renderMinimumElements(report) {
-  const body = document.querySelector("#elements tbody");
-  if (!body) return;
-  if (!report || !report.elements) {
-    $("elementsSummary").innerHTML = "";
-    body.innerHTML = `<tr><td colspan="5" class="empty empty-state">`
-      + `No conformance report was returned.</td></tr>`;
-    return;
-  }
-  const s = report.summary || {};
-  const tile = (n, label, cls, note) => `<div class="sum-tile ${cls}"><strong>${n}</strong>`
-    + `<span>${esc(label)}</span>${note ? `<small>${esc(note)}</small>` : ""}</div>`;
-  $("elementsSummary").innerHTML = tile(s.satisfied, "verified", "is-ok", `of ${s.total} elements`)
-    + tile(s.partial, "partial", s.partial ? "is-warn" : "", "some components only")
-    + tile(s.declared_unknown, "unknown (declared)", "", "not knowable statically")
-    + tile(s.missing, "missing", s.missing ? "is-bad" : "is-ok", "silent gaps")
-    + `<p class="elements-note">${report.conformant
-      ? `Conformant under the CISA 2026 rule: every element is either populated or explicitly `
-        + `declared unknown in the BOM. That is not the same as complete — only `
-        + `${s.satisfied} of ${s.total} elements are fully populated.`
-      : `Not conformant: ${s.missing} element(s) are missing without an explicit `
-        + `declaration.`}</p>`;
-  body.innerHTML = report.elements.map(el => {
-    const status = ELEMENT_STATUS[el.status] || ELEMENT_STATUS.missing;
-    let coverage = el.applicable > 1 ? `${el.present}/${el.applicable}`
-      : (el.present ? "yes" : "no");
-    if (el.declared_unknown) coverage += ` <span class="muted">+${el.declared_unknown} declared</span>`;
-    const detail = el.status === "satisfied" ? el.description : el.remediation;
-    const gaps = (el.undeclared_gaps || []).length
-      ? `<br><span class="muted">undeclared: ${esc(el.undeclared_gaps.slice(0, 5).join(", "))}</span>`
-      : "";
-    // .sev renders as an outline chip: the status reads through `color`.
-    return `<tr><td><span class="sev" style="color:${status.color}">`
-      + `${esc(status.label)}</span></td>`
-      + `<td>${esc(el.name)}<br><span class="muted">${esc(detail)}</span>${gaps}</td>`
-      + `<td>${esc(ELEMENT_ORIGIN[el.origin] || el.origin)}</td>`
-      + `<td>${coverage}</td><td><code>${esc(el.cyclonedx_path)}</code></td></tr>`;
-  }).join("");
+// The exports re-run the same request as the result on screen (same ref).
+function exportRequest() {
+  return lastRequest.demo
+    ? { method: "POST" }
+    : { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_url: lastRequest.repo_url, ref: lastRequest.ref || null,
+          resolve: lastRequest.resolve }) };
 }
 
 async function download() {
   if (!lastRequest) return;
   const button = $("download");
+  const original = button.innerHTML;
   button.disabled = true;
   button.textContent = "Building report…";
-  setStatus("Building HTML report …", false);
+  setStatus("Building the HTML report (the backend re-runs the analysis)…", false);
   try {
     const endpoint = lastRequest.demo ? "/api/demo/report" : "/api/report";
-    const options = lastRequest.demo
-      ? { method: "POST" }
-      : {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo_url: lastRequest.repo_url, resolve: lastRequest.resolve }),
-      };
-    const resp = await fetch(lastRequest.api + endpoint, options);
+    const resp = await fetch(lastRequest.api + endpoint, exportRequest());
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
@@ -440,24 +627,13 @@ async function download() {
     setStatus("Report failed: " + e.message, true);
   } finally {
     button.disabled = false;
-    button.textContent = "HTML report";
+    button.innerHTML = original;
   }
 }
 
 function downloadCycloneDX() {
   if (!lastResult || !lastResult.cyclonedx) return;
-  const blob = new Blob([JSON.stringify(lastResult.cyclonedx, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "aibom.cdx.json";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  setStatus("CycloneDX AIBOM downloaded.", false);
+  saveJson(lastResult.cyclonedx, "aibom.cdx.json", "CycloneDX SBOM");
 }
 
 function saveJson(payload, filename, label) {
@@ -482,17 +658,12 @@ function downloadInventory() {
 async function downloadSarif() {
   if (!lastRequest) return;
   const button = $("downloadSarif");
+  const original = button.innerHTML;
   button.disabled = true;
   button.textContent = "Building SARIF…";
   try {
     const endpoint = lastRequest.demo ? "/api/demo/sarif" : "/api/sarif";
-    const options = lastRequest.demo
-      ? { method: "POST" }
-      : {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: lastRequest.repo_url, resolve: lastRequest.resolve }),
-      };
-    const resp = await fetch(lastRequest.api + endpoint, options);
+    const resp = await fetch(lastRequest.api + endpoint, exportRequest());
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
     saveJson(data, "aibom-findings.sarif", "SARIF log");
@@ -500,19 +671,20 @@ async function downloadSarif() {
     setStatus("SARIF export failed: " + e.message, true);
   } finally {
     button.disabled = false;
-    button.textContent = "SARIF";
+    button.innerHTML = original;
   }
 }
 
-async function postJson(url, body) {
+async function postJson(url, body, signal) {
   const options = body
     ? { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body) }
-    : { method: "POST" };
+        body: JSON.stringify(body), signal }
+    : { method: "POST", signal };
   let resp;
   try {
     resp = await fetch(url, options);
   } catch (e) {
+    if (e.name === "AbortError") throw e;
     // Network-level failure: wrong address, backend down, CORS, offline.
     throw new BackendUnavailable("cannot reach " + apiBase() + " (" + e.message + ")");
   }
@@ -549,11 +721,10 @@ function renderApiLine() {
 }
 
 function showApiEndpointField(message) {
-  const block = $("apiEndpointBlock");
-  block.hidden = false;
+  $("advancedInfo").open = true;
   $("apiEndpoint").value = apiOverride || "";
   if (message) setStatus(message, true);
-  block.scrollIntoView({ block: "nearest" });
+  $("advancedInfo").scrollIntoView({ block: "nearest" });
   $("apiEndpoint").focus();
 }
 
@@ -580,7 +751,7 @@ async function checkBackend(options) {
     const resp = await fetch(base + "/api/health");
     const data = await resp.json();
     if (!resp.ok || data.status !== "ok") throw new Error("HTTP " + resp.status);
-    $("apiEndpointBlock").hidden = true;
+    scannerVersion = data.version || "";
     if (announce) setStatus("Backend reachable (aibom " + (data.version || "?") + ").", false);
     return true;
   } catch (_) {
@@ -597,10 +768,10 @@ const TYPE_COLOR = { model:"#3a6ea5", dataset:"#7a5ea5", prompt:"#9c7a2e",
   agent:"#2e7d5b", service:"#556", package:"#8a6d3b", license:"#667", tool:"#a14d6b" };
 // Edge styling per relationship type; the arrow points from dependent to dependency.
 const EDGE_STYLE = {
-  depends_on:  { color: "#7c8593", dash: "",    label: "depends on" },
-  served_by:   { color: "#3a6ea5", dash: "6 3", label: "served by" },
-  invokes:     { color: "#2e7d5b", dash: "",    label: "invokes" },
-  flows_to:    { color: "#b0761c", dash: "",    label: "prompt flows to" },
+  depends_on:  { color: "#7c8593", dash: "",    label: "depends on (package / SDK)" },
+  served_by:   { color: "#3a6ea5", dash: "6 3", label: "served by (provider)" },
+  invokes:     { color: "#2e7d5b", dash: "",    label: "invokes (tool / server)" },
+  flows_to:    { color: "#b0761c", dash: "",    label: "prompt flows to (data flow)" },
   uses_prompt: { color: "#7a5ea5", dash: "2 3", label: "uses prompt" },
 };
 const EDGE_FALLBACK = { color: "#7c8593", dash: "4 2", label: "related" };
@@ -647,14 +818,22 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   }
   const host = $(view.host);
   const grid = host.closest(".graphgrid");
+  const tools = graphToolbar(host);
   host.innerHTML = "";
-  detailReset(ctx);
   grid.classList.toggle("is-empty", !graph.nodes.length);
+  if (view.main) $("nodeLegend").hidden = !graph.nodes.length;
   if (!graph.nodes.length) {
-    host.innerHTML = "<p class='muted'>No components to graph.</p>";
+    // An empty map gets a reason and a next step, not a legend and "select a node".
+    host.innerHTML = `<div class="empty-graph"><strong>Nothing to map.</strong> No AI component `
+      + "was found in production code, so there is nothing to connect. Every package is "
+      + `listed under <button type="button" class="link" data-goto="deps">Dependencies</button>.</div>`;
+    tools.hidden = true;
+    $(view.detail).innerHTML = "";
     renderEdgeLegend([], view.legend);
     return;
   }
+  tools.hidden = false;
+  detailReset(ctx);
 
   const W = 800, H = 520, PAD = 46;
   const nodes = graph.nodes.map((n, i) => {
@@ -671,8 +850,17 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   simulate(nodes, links, W, H);
   fit(nodes, W, H, PAD);
 
+  if (!links.length) {
+    const note = document.createElement("p");
+    note.className = "notice";
+    note.textContent = `No relationship between these ${nodes.length} components could be `
+      + "proven from the scanned lines, so they are drawn unconnected. That is not a "
+      + "statement that they are unrelated.";
+    host.appendChild(note);
+  }
+
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group",
-    "aria-label": "AI dependency graph" });
+    "aria-label": "AI usage map" });
   const defs = svgEl("defs", {});
   const types = [...new Set(links.map(l => l.type))];
   types.forEach(type => {
@@ -703,12 +891,14 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
       "aria-label": `${n.label}, ${n.type}${n.severity ? `, ${n.severity} severity` : ""}` });
     const r = n.radius;
     const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
-    const label = n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label;
-    const t = svgEl("text", { x: n.x, y: n.y + r + 9, "text-anchor": "middle" });
+    const label = n.label.length > 24 ? n.label.slice(0, 23) + "…" : n.label;
+    const t = svgEl("text", { x: n.x, y: n.y + r + 13, "text-anchor": "middle" });
     t.textContent = label;
-    g.appendChild(c); g.appendChild(t);
+    const full = svgEl("title", {});
+    full.textContent = `${n.label} (${n.type})`;
+    g.appendChild(full); g.appendChild(c); g.appendChild(t);
     gNodes.appendChild(g);
-    n.circle = c; n.text = t;
+    n.circle = c; n.text = t; n.g = g;
     g.addEventListener("click", (ev) => { ev.stopPropagation(); selectNode(n, nodes, links, adj, ctx); });
     g.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") {
@@ -723,6 +913,56 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   svg.addEventListener("click", () => clearSelection(nodes, lineEls, ctx));
   host.appendChild(svg);
   host._nodes = nodes; host._lines = lineEls; host._links = links;
+  host._select = (n) => selectNode(n, nodes, links, adj, ctx);
+  host._W = W;
+  setZoom(host, "default");
+}
+
+// Zoom keeps labels readable on a narrow screen: the map scrolls inside its
+// own frame instead of shrinking until the text is illegible.
+function setZoom(host, mode) {
+  const svg = host.querySelector("svg");
+  if (!svg) return;
+  const avail = Math.max(host.clientWidth || 0, 280);
+  const current = host._zoom || 1;
+  const zoom = mode === "fit" ? avail / host._W
+    : mode === "in" ? current * 1.25
+    : mode === "out" ? current / 1.25
+    : Math.max(avail, 640) / host._W;
+  host._zoom = Math.min(3, Math.max(0.3, zoom));
+  svg.style.width = Math.round(host._W * host._zoom) + "px";
+}
+
+function graphToolbar(host) {
+  let tools = host.previousElementSibling;
+  if (!tools || !tools.classList.contains("graph-tools")) {
+    tools = document.createElement("div");
+    tools.className = "graph-tools";
+    tools.setAttribute("role", "group");
+    tools.setAttribute("aria-label", "Map controls");
+    host.parentNode.insertBefore(tools, host);
+  }
+  if (!tools.dataset.ready) {
+    tools.dataset.ready = "1";
+    tools.innerHTML = `<button type="button" class="ghost small" data-zoom="out" aria-label="Zoom out">−</button>`
+      + `<button type="button" class="ghost small" data-zoom="fit">Fit</button>`
+      + `<button type="button" class="ghost small" data-zoom="in" aria-label="Zoom in">+</button>`
+      + `<input type="search" class="graph-search" placeholder="Find a component" `
+      + `aria-label="Find a component in the map">`;
+    tools.querySelectorAll("[data-zoom]").forEach(b =>
+      b.addEventListener("click", () => setZoom(host, b.dataset.zoom)));
+    const search = tools.querySelector(".graph-search");
+    const find = (select) => {
+      const q = search.value.trim().toLocaleLowerCase();
+      const nodes = host._nodes || [];
+      const hits = nodes.filter(n => q && n.label.toLocaleLowerCase().includes(q));
+      nodes.forEach(n => n.g && n.g.classList.toggle("is-hit", hits.includes(n)));
+      if (select && hits.length && host._select) host._select(hits[0]);
+    };
+    search.addEventListener("input", () => find(false));
+    search.addEventListener("keydown", (e) => { if (e.key === "Enter") find(true); });
+  }
+  return tools;
 }
 
 function renderEdgeLegend(types, legendId = "edgeLegend") {
@@ -826,6 +1066,7 @@ function selectNode(node, nodes, links, adj, ctx) {
     const on = n.id === node.id || keep.has(n.id);
     n.circle.setAttribute("opacity", on ? 1 : 0.16);
     n.text.setAttribute("opacity", on ? 1 : 0.16);
+    if (n.g) n.g.classList.toggle("is-selected", n.id === node.id);
   });
   links.forEach(l => {
     const on = l.s.id === node.id || l.t.id === node.id;
@@ -835,7 +1076,10 @@ function selectNode(node, nodes, links, adj, ctx) {
 }
 
 function clearSelection(nodes, lineEls, ctx) {
-  nodes.forEach(n => { n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1); });
+  nodes.forEach(n => {
+    n.circle.setAttribute("opacity", 1); n.text.setAttribute("opacity", 1);
+    if (n.g) n.g.classList.remove("is-selected");
+  });
   lineEls.forEach(l => l.setAttribute("stroke-opacity", 0.55));
   detailReset(ctx);
 }
@@ -861,7 +1105,8 @@ function enableDrag(g, n, svg, W, H, links) {
 
 function detailReset(ctx) {
   $(ctx ? ctx.detail : "graphDetail").innerHTML =
-    "<span class='muted'>Select a node to inspect its evidence and related findings.</span>";
+    "<span class='muted'>Select a component to see its full name, evidence, connections and "
+    + "findings.</span>";
 }
 
 function connectionsHtml(node, links) {
@@ -884,7 +1129,9 @@ function detailShow(node, links, ctx) {
   const mine = ctx.findings.filter(f => f.entity_id === node.id);
   const paths = ctx.exposure.filter(path =>
     path.prompt_id === node.id || (path.model_ids || []).includes(node.id));
-  let html = `<span class="dt-type">${esc(node.type)}</span><h3>${esc(node.label)}</h3>`;
+  let html = `<span class="dt-type">${esc(node.type)} · selected</span>`
+    + `<h3 class="dt-name">${esc(node.label)}</h3>`
+    + `<button type="button" class="ghost small copy-name">Copy name</button>`;
   if (node.provider) html += `<div class="muted">Provider: ${esc(node.provider)}</div>`;
   if (node.location) html += `<div class="muted">Location: <code>${esc(node.location)}</code></div>`;
   if (node.usage) html += `<div class="muted">${esc(usageLabel(node.usage))}</div>`;
@@ -904,14 +1151,24 @@ function detailShow(node, links, ctx) {
   if (!mine.length) {
     html += `<div class="dt-find muted">No findings on this component.</div>`;
   } else {
-    for (const f of mine) {
-      const loc = (f.source_evidence || []).slice(0, 3).map(evLoc).join(", ");
+    for (const f of mine.slice(0, 5)) {
       html += `<div class="dt-find"><span class="sev" data-severity="${esc(f.severity)}">`
         + `${esc(f.severity)}</span> <code>${esc(f.rule_id)}</code><br>`
-        + `<strong>${esc(f.title)}</strong><div class="muted">${esc(loc)}</div></div>`;
+        + `<strong>${esc(f.title)}</strong></div>`;
+    }
+    if (ctx.detail === "graphDetail") {
+      html += `<button type="button" class="link open-findings">Open ${mine.length} finding(s) `
+        + `in Findings</button>`;
     }
   }
-  $(ctx.detail).innerHTML = html;
+  const host = $(ctx.detail);
+  host.innerHTML = html;
+  host.querySelector(".copy-name").addEventListener("click", (ev) => {
+    const done = () => { ev.target.textContent = "Copied"; };
+    if (navigator.clipboard) navigator.clipboard.writeText(node.label).then(done, () => {});
+  });
+  const open = host.querySelector(".open-findings");
+  if (open) open.addEventListener("click", () => showFindingsFor(node.label));
 }
 
 function filterRows(tableId, searchId, selectId, dataKey, emptyMessage, extraMatch) {
@@ -920,7 +1177,7 @@ function filterRows(tableId, searchId, selectId, dataKey, emptyMessage, extraMat
   tbody.querySelectorAll(".filter-empty").forEach(row => row.remove());
   const rows = [...tbody.querySelectorAll("tr[data-row='true']")];
   const query = $(searchId).value.trim().toLocaleLowerCase();
-  const selected = $(selectId).value;
+  const selected = selectId ? $(selectId).value : "all";
   let visible = 0;
   rows.forEach(row => {
     const matchesText = !query || row.textContent.toLocaleLowerCase().includes(query);
@@ -934,7 +1191,7 @@ function filterRows(tableId, searchId, selectId, dataKey, emptyMessage, extraMat
     row.className = "filter-empty";
     const cell = document.createElement("td");
     cell.colSpan = table.querySelectorAll("thead th").length;
-    cell.className = "empty empty-state";
+    cell.className = "empty";
     cell.textContent = emptyMessage;
     row.appendChild(cell);
     tbody.appendChild(row);
@@ -944,18 +1201,33 @@ function filterRows(tableId, searchId, selectId, dataKey, emptyMessage, extraMat
 
 function filterFindings() {
   const count = filterRows("findings", "findingSearch", "severityFilter", "severity",
-    "No findings match the current filters.");
-  if (count.total) {
-    $("findingCount").textContent = count.visible === count.total
-      ? `(${count.total})` : `(${count.visible} of ${count.total})`;
+    "No code or configuration findings match the current filters.");
+  const query = $("findingSearch").value.trim().toLocaleLowerCase();
+  const sev = $("severityFilter").value;
+  let cards = 0, shown = 0;
+  document.querySelectorAll("#vulnPackages .vuln-card").forEach(card => {
+    cards += 1;
+    const ok = (!query || card.textContent.toLocaleLowerCase().includes(query))
+      && (sev === "all" || card.dataset.severities.split(" ").includes(sev));
+    card.hidden = !ok;
+    if (ok) shown += 1;
+  });
+  const total = count.total + (lastResult && lastResult.findings
+    ? lastResult.findings.filter(f => f.advisory).length : 0);
+  if (total) {
+    const filtered = query || sev !== "all";
+    $("findingCount").textContent = filtered
+      ? `(${count.visible} code findings and ${shown} of ${cards} packages shown)` : `(${total})`;
   }
 }
 
 function filterInventory() {
   const reach = $("reachFilter").value;
+  const context = $("contextFilter").value;
   filterRows("inventory", "inventorySearch", "typeFilter", "type",
     "No components match the current filters.",
-    (row) => reach === "all" || row.dataset.reach === reach);
+    (row) => (reach === "all" || row.dataset.reach === reach)
+      && (context === "all" || row.dataset.contexts.split(" ").includes(context)));
 }
 
 // The panel has two modes; the steps and empty state describe the active one.
@@ -964,11 +1236,6 @@ $("loadExample").addEventListener("click", loadExample);
 $("saveApiEndpoint").addEventListener("click", saveApiEndpoint);
 $("apiEndpoint").addEventListener("keydown", (e) => {
   if (e.key === "Enter") saveApiEndpoint();
-});
-$("toggleApiEndpoint").addEventListener("click", () => {
-  const block = $("apiEndpointBlock");
-  if (block.hidden) showApiEndpointField();
-  else block.hidden = true;
 });
 $("runDemo").addEventListener("click", runDemo);
 $("download").addEventListener("click", download);
@@ -1010,16 +1277,17 @@ function revisionLabel(target) {
   return repoLabel(target);
 }
 
-async function runCompare(button, busyLabel, status, request) {
+async function runCompare(button, busyLabel, status, request, demo) {
   const original = button.textContent;
   COMPARE_BUTTONS.forEach((id) => { $(id).disabled = true; });
   button.textContent = busyLabel;
   $("compareSection").setAttribute("aria-busy", "true");
   $("compareState").textContent = "Comparison in progress";
+  setDriftStatus("", false);
   setCompareStatus(status, false);
   try {
     const body = await request();
-    renderCompare(body);
+    renderCompare(body, demo);
     $("compareState").textContent = "Comparison loaded";
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
       ? "auto" : "smooth";
@@ -1043,9 +1311,9 @@ function compareDemo(language, revision) {
   const query = `language=${language}&scenario=cross-file&revision=${revision}`;
   return runCompare(button, "Comparing…",
     revision === "fixed"
-      ? "Rescanning the fixed revision against the vulnerable candidate (offline)…"
-      : `Scanning the ${language} baseline and candidate revisions (offline)…`,
-    () => postJson(apiBase() + "/api/diff/demo?" + query));
+      ? "Comparing the vulnerable candidate with the bundled fixed revision (offline demo)…"
+      : `Scanning the bundled ${language} baseline and candidate (offline demo)…`,
+    () => postJson(apiBase() + "/api/diff/demo?" + query), revision === "fixed" ? "fixed" : "demo");
 }
 
 function compareRepo() {
@@ -1059,16 +1327,20 @@ function compareRepo() {
   return runCompare($("compareRun"), "Comparing…",
     `Cloning ${repoLabel(repo)} at ${base} and ${head}…`,
     () => postJson(apiBase() + "/api/diff",
-      { repo_url: repo, base_ref: base, head_ref: head }));
+      { repo_url: repo, base_ref: base, head_ref: head }), null);
 }
 
-function renderCompare(body) {
+function renderCompare(body, demo) {
   const drift = body.drift || {};
+  $("privResult").hidden = true;
   $("compareResult").hidden = false;
   $("nodeDetail").hidden = true;
-  renderVerdicts(drift);
+  $("compareOverline").textContent = demo
+    ? "Demo result · bundled data" : "Comparison · " + repoLabel(drift.baseline_target || "");
+  renderVerdicts(drift, body.agent_privileges, demo);
   renderRevision($("baselineCard"), "Baseline", body.baseline, body.baseline_paths);
-  renderRevision($("candidateCard"), "Candidate", body.candidate, body.candidate_paths);
+  renderRevision($("candidateCard"), demo === "fixed" ? "Bundled fixed revision" : "Candidate",
+    body.candidate, body.candidate_paths);
   renderGraph((body.candidate || {}).graph || { nodes: [], edges: [] }, [], COMPARE_GRAPH);
   const changes = drift.changes || [];
   const paths = changes.filter(c => PATH_KINDS.includes(c.kind));
@@ -1076,10 +1348,14 @@ function renderCompare(body) {
   compareNodes = [];
   $("pathChanges").innerHTML = paths.length
     ? paths.map((change, index) => pathChangeHtml(change, index)).join("")
-    : `<p class="field-help">No agent capability path was added, changed or removed.</p>`;
+    : `<p class="help">No agent capability path was added, changed or removed.</p>`;
   $("pathChanges").querySelectorAll(".path-node").forEach((node) => {
     node.addEventListener("click", () => showNode(node));
   });
+  const priv = body.agent_privileges;
+  $("comparePrivileges").innerHTML = priv && priv.status === "evaluated"
+    ? `<h3 class="subhead">Agent permission changes</h3>`
+      + privilegeChangesHtml(priv.report.changes || [], {}) : "";
   const rows = others.map(change => {
     const evidence = (change.after_evidence && change.after_evidence[0])
       || (change.before_evidence && change.before_evidence[0]);
@@ -1095,25 +1371,27 @@ function renderCompare(body) {
     + `${revisionLabel(drift.candidate_target)}.`, false);
 }
 
-function renderVerdicts(drift) {
+function renderVerdicts(drift, privileges, demo) {
   const bom = drift.bom;
   const bomBox = $("bomVerdict");
+  const types = bom ? esc((bom.compared_types || []).join(", ")) : "";
   if (bom && bom.identical) {
     bomBox.className = "verdict ok";
-    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p>`
-      + `<p class="verdict-value">Unchanged</p><p class="verdict-note">${bom.candidate_components}`
-      + ` components compared (${esc((bom.compared_types || []).join(", "))}): names, versions`
-      + ` and security metadata are identical. Prompts are compared as paths, not as parts.</p>`;
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENTS</p>`
+      + `<p class="verdict-value">Compared components identical</p><p class="verdict-note">`
+      + `${bom.candidate_components} component(s) of type ${types}: names, versions and `
+      + `security metadata match. Prompts are not in this comparison; they are compared as `
+      + `paths below.</p>`;
   } else if (bom) {
     bomBox.className = "verdict warn";
     const delta = [...bom.added.map(x => "+" + x), ...bom.removed.map(x => "−" + x),
       ...bom.changed.map(x => "~" + x)];
-    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p>`
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENTS (${types})</p>`
       + `<p class="verdict-value">Changed</p><p class="verdict-note">`
       + `${esc(delta.slice(0, 6).join(", "))}${delta.length > 6 ? ` +${delta.length - 6} more` : ""}</p>`;
   } else {
     bomBox.className = "verdict";
-    bomBox.innerHTML = `<p class="verdict-label">COMPONENT BOM</p><p class="verdict-value">—</p>`;
+    bomBox.innerHTML = `<p class="verdict-label">COMPONENTS</p><p class="verdict-value">—</p>`;
   }
   const changes = drift.changes || [];
   const added = changes.filter(c => c.kind === "impact_path_added");
@@ -1122,15 +1400,34 @@ function renderVerdicts(drift) {
   if (drift.security_boundary_changed) {
     const proven = added.filter(c => c.evidence_level === "proven_static").length;
     box.className = "verdict bad";
-    box.innerHTML = `<p class="verdict-label">SECURITY BOUNDARY</p>`
+    box.innerHTML = `<p class="verdict-label">INPUT-TO-TOOL PATHS</p>`
       + `<p class="verdict-value">Changed</p><p class="verdict-note">${added.length} new agent`
       + ` capability path(s), ${proven} proven statically. A static path, not a proven exploit.</p>`;
   } else {
     box.className = unresolved.length ? "verdict warn" : "verdict ok";
-    box.innerHTML = `<p class="verdict-label">SECURITY BOUNDARY</p>`
+    box.innerHTML = `<p class="verdict-label">INPUT-TO-TOOL PATHS</p>`
       + `<p class="verdict-value">Unchanged</p><p class="verdict-note">${unresolved.length
         ? `${unresolved.length} unresolved input(s) to review — not proven either way.`
         : "No new path from untrusted input to privileged instructions or a bound tool."}</p>`;
+  }
+  const priv = $("privilegeVerdict");
+  if (!privileges) {
+    priv.className = "verdict";
+    priv.innerHTML = `<p class="verdict-label">AGENT PERMISSIONS</p><p class="verdict-value">`
+      + `Not in this demo</p><p class="verdict-note">See the “Agent permission change” `
+      + `demo.</p>`;
+  } else if (privileges.status === "evaluated") {
+    const gated = (privileges.report.changes || []).filter(c => c.gates);
+    priv.className = "verdict " + (gated.length ? "bad" : "ok");
+    priv.innerHTML = `<p class="verdict-label">AGENT PERMISSIONS</p><p class="verdict-value">`
+      + `${gated.length ? gated.length + " added" : "No addition"}</p><p class="verdict-note">`
+      + "Judged against the identity policies in aibom-identity.yaml only, not AWS effective "
+      + "authorization.</p>";
+  } else {
+    priv.className = "verdict warn";
+    priv.innerHTML = `<p class="verdict-label">AGENT PERMISSIONS</p><p class="verdict-value">`
+      + `${privileges.status === "failed" ? "Analysis failed" : "Not evaluated"}</p>`
+      + `<p class="verdict-note">${esc(privileges.reason || "")}.</p>`;
   }
 }
 
@@ -1145,12 +1442,13 @@ function renderRevision(card, title, summary, paths) {
       + ` ${esc(p.source_kind)} → ${esc(p.tool_names.join(", "))}</li>`),
     ...unresolved.map(p => `<li>${evidenceTag("unknown")} ${esc(p.sink_kind)} → `
       + `${esc(p.tool_names.join(", "))}</li>`)];
+  const head = summary.headline || {};
   const score = summary.score || {};
-  card.innerHTML = `<h4>${title}</h4>`
+  card.innerHTML = `<h4>${esc(title)}</h4>`
     + `<p class="revision-target">${esc(revisionLabel(summary.target))}</p>`
     + `<div>${esc(counts || "no components")}</div>`
-    + `<div>${summary.findings} finding(s) · score ${score.overall ?? "–"}`
-    + `${score.grade ? " (" + esc(score.grade) + ")" : ""}</div>`
+    + `<div><strong>${esc(head.label || "")}</strong> · ${summary.findings} finding(s)`
+    + `${score.overall != null ? ` <span class="muted">· hygiene ${score.overall}</span>` : ""}</div>`
     + `<div><strong>${impact.length}</strong> agent capability path(s)</div>`
     + (items.length ? `<ul>${items.join("")}</ul>` : "");
 }
@@ -1258,17 +1556,18 @@ function uniqueLocs(list, limit) {
 
 function findingThreeParts(f) {
   const where = [f.source_kind, f.sink_kind].filter(Boolean).join(" → ");
+  const locs = (f.source_evidence || []).slice(0, 3).map(srcLink).join(", ");
   const impact = esc(f.description)
     + (f.trust_boundary ? ` <span class="muted">Trust boundary: ${esc(f.trust_boundary)}.</span>` : "");
   const steps = (f.data_flow_path || []).slice(0, 6).map(step =>
     `${step.operation}${step.symbol ? " " + step.symbol : ""} @ ${step.file}${step.line ? ":" + step.line : ""}`);
   const level = f.evidence_level
     ? evidenceTag(f.evidence_level)
-    : `<span class="evidence-tag">Rule match</span>`;
+    : `<span class="evidence-tag" title="A deterministic rule matched the code or manifest at these lines">Rule match</span>`;
   const count = (f.source_evidence || []).length;
   const evidence = `${level} ${where ? `<code>${esc(where)}</code> ` : ""}`
     + (steps.length ? `<br><span class="muted">${esc(steps.join(" → "))}</span>`
-      : `<span class="muted">${count} source location(s)</span>`);
+      : `<span class="muted">matched at ${count} source location(s)${locs ? ": " : ""}</span>${locs}`);
   return `<div class="f3"><span class="f3-label l-impact">Impact</span><div>${impact}</div>`
     + `<span class="f3-label l-evidence">Evidence</span><div>${evidence}</div>`
     + `<span class="f3-label l-fix">Fix</span><div>${esc(f.remediation)}</div></div>`;
@@ -1280,8 +1579,8 @@ function usageCell(e, reach) {
     .filter(name => e.usage && e.usage[name]);
   const reachText = reach === "unknown"
     ? `<span class="muted" title="Static analysis did not connect this component to a `
-      + `production entry point. Unknown is not unreachable.">reachable: unknown</span>`
-    : `reachable: ${esc(reach)}`;
+      + `production entry point. Unknown is not unreachable.">entry point: unknown</span>`
+    : `entry point: ${reach === "true" ? "reachable" : reach === "false" ? "not reachable" : esc(reach)}`;
   return (states.length ? esc(states.join(" → ")) + " → " : "") + reachText;
 }
 
@@ -1292,6 +1591,7 @@ function selectTab(name) {
   document.querySelectorAll(".tab-panel").forEach(panel => {
     panel.hidden = panel.dataset.panel !== name;
   });
+  if (name === "graph") setZoom($("graph"), "default");
 }
 document.querySelectorAll(".result-tab").forEach(tab => {
   tab.addEventListener("click", () => selectTab(tab.dataset.tab));
@@ -1681,30 +1981,35 @@ function unknownsHtml(report) {
   if (!reasons.length) return "";
   const items = reasons.map(reason => {
     const subjects = [...new Set(groups[reason].map(u => u.subject))];
-    return `<li><code>${esc(reason)}</code> ×${groups[reason].length} — `
-      + `${esc(UNKNOWN_REASON[reason] || "Not statically resolvable.")}`
+    return `<li><strong>${esc(UNKNOWN_REASON[reason] || "Not statically resolvable.")}</strong>`
+      + ` <span class="muted">(${esc(reason)}; ${subjects.length} subject(s))</span>`
       + `<br><span class="muted">${esc(subjects.slice(0, 4).join(", "))}`
       + `${subjects.length > 4 ? ` +${subjects.length - 4}` : ""}</span></li>`;
   }).join("");
-  const manifest = report.scope && report.scope.manifest
-    ? "" : `<li>No <code>aibom-identity.yaml</code> in this repository, so no agent has a known `
-      + `identity. Add one to turn Unknown verdicts into policy-checked ones.</li>`;
-  return `<details open><summary>Unknown — ${(report.unknowns || []).length} item(s) not `
-    + `resolved statically (shown, never counted as safe)</summary><ul>${manifest}${items}</ul></details>`;
+  const total = (report.unknowns || []).length;
+  return `<details open><summary>Unresolved: ${total} item(s) for ${reasons.length} reason(s). `
+    + `Shown, never counted as safe.</summary><ul>${items}</ul></details>`;
 }
 
 let agentModel = null;
 function renderAgentSecurity(report, inventory) {
   const graphHost = $("agentGraph"), detailHost = $("agentDetail");
-  if (!report || report.error) {
+  const state = agentState(report);
+  const status = $("agentStatus");
+  status.textContent = state.text;
+  status.dataset.state = state.state;
+  // A tab for a feature that found nothing to analyze only adds noise.
+  $("agentTab").hidden = state.state === "not_detected";
+  if (state.state === "failed" || state.state === "not_run" || state.state === "not_detected") {
     agentModel = null;
     $("attackPaths").innerHTML = "";
     $("agentUnknowns").innerHTML = "";
-    graphHost.innerHTML = `<p class="empty-graph">Agent security analysis is unavailable for this `
-      + `scan${report && report.error ? ": " + esc(report.error) : "."}</p>`;
+    $("agentGraphGrid").hidden = true;
+    graphHost.innerHTML = "";
     detailHost.innerHTML = "";
     return;
   }
+  $("agentGraphGrid").hidden = false;
   const names = Object.fromEntries(((inventory && inventory.entities) || []).map(e => [e.id, e.name]));
   agentModel = secModel(report, names);
   $("attackPaths").innerHTML = attackPathCards(report);
@@ -1712,52 +2017,114 @@ function renderAgentSecurity(report, inventory) {
   $("agentUnknowns").innerHTML = unknownsHtml(report);
 }
 
-function renderSecuritySummary(d) {
-  const report = d.agent_security && !d.agent_security.error ? d.agent_security : null;
-  const sc = d.score || { severity_counts: {} };
-  const impact = (d.graph && d.graph.impact_paths) || [];
-  const paths = report ? report.capability_paths : [];
-  const allowed = paths.filter(p => p.verdict === "potentially_allowed");
-  const unknownPaths = paths.filter(p => p.verdict === "unknown");
-  const servers = report ? report.mcp_servers : [];
-  const mcpTools = servers.flatMap(s => s.tools || []);
-  const exposedIds = new Set(report ? report.agents.flatMap(a => a.mcp_tool_ids || []) : []);
-  const riskyTools = mcpTools.filter(t => (t.capability_kinds || []).length);
-  const critHigh = (sc.severity_counts.critical || 0) + (sc.severity_counts.high || 0);
-  let headline;
-  if (impact.length) {
-    const p = impact[0];
-    headline = `Untrusted ${p.source_kind} input reaches tool ${(p.tool_names || []).join(", ")}`
-      + ` (${(p.capabilities || []).map(c => c.operation).join(", ") || "capability"}) — `
-      + `${p.severity}, ${p.evidence_level === "proven_static" ? "proven statically" : "potential"}.`;
-  } else if (allowed.length) {
-    const top = allowed.slice().sort((a, b) =>
-      SEV_RANK[HAZARD_SEV[a.hazard]] - SEV_RANK[HAZARD_SEV[b.hazard]])[0];
-    headline = `${top.agent_id} can reach ${top.action} via ${top.tool_name}; the supplied `
-      + `policy for ${top.identity_id} potentially allows it.`;
-  } else if (riskyTools.length) {
-    headline = `${riskyTools.length} MCP tool(s) with ${[...new Set(riskyTools.flatMap(t =>
-      t.capability_kinds))].join(", ")} are exposed to any LLM client that launches the server.`;
+// What a reader must see first: the worst-finding status, what was found, and
+// what the scan could not see. Zero counts of features that do not apply stay
+// out of the way.
+function agentState(report) {
+  if (!report) return { state: "not_run", text: "Agent analysis was not run." };
+  if (report.error) {
+    return { state: "failed", text: "Agent analysis failed: " + report.error
+      + ". Nothing is inferred about agents in this repository." };
   }
+  const agents = (report.agents || []).length;
+  const servers = (report.mcp_servers || []).length;
+  if (!agents && !servers) {
+    return { state: "not_detected", text: "No agent or MCP server was found in production code. "
+      + "Supported: Python OpenAI Agents SDK agents and MCP servers/configs; other "
+      + "frameworks are not analyzed, so this is not a proof that none exist." };
+  }
+  const subject = [agents ? `${agents} agent(s)` : "", servers ? `${servers} MCP server(s)` : ""]
+    .filter(Boolean).join(" and ");
+  if (!(report.scope && report.scope.manifest)) {
+    return { state: "not_evaluated", text: `${subject} found. Cloud permissions were not `
+      + "evaluated: the repository has no aibom-identity.yaml mapping agents to IAM policies." };
+  }
+  const allowed = (report.capability_paths || [])
+    .filter(p => p.verdict === "potentially_allowed").length;
+  return { state: "evaluated", text: `${subject} found; permissions checked against the `
+    + `supplied policies: ${allowed} path(s) potentially allowed.` };
+}
+
+function renderSummary(d) {
+  const h = d.headline || { status: "no_findings", label: "No findings from the applied rules",
+    detail: "" };
+  const dep = (d.dependencies && d.dependencies.summary) || null;
+  const entities = (d.inventory && d.inventory.entities) || [];
+  const scope = d.analysis_scope || {};
+  const aiTotal = entities.filter(e => e.type !== "package" || e.ai).length;
+  const sevs = (d.score && d.score.severity_counts) || {};
+  const vuln = d.vulnerable_packages || [];
+  const agent = agentState(d.agent_security);
+  const impact = (d.graph && d.graph.impact_paths) || [];
   const tile = (n, label, cls, note) => `<div class="sum-tile ${cls || ""}"><strong>${n}</strong>`
     + `<span>${esc(label)}</span>${note ? `<small>${esc(note)}</small>` : ""}</div>`;
+  const sevNote = ["critical", "high", "medium", "low"].filter(s => sevs[s])
+    .map(s => `${sevs[s]} ${s}`).join(" · ");
+  const tiles = [
+    tile((d.findings || []).length, "findings",
+      h.status === "action_required" ? "is-bad" : h.status === "review" ? "is-warn" : "",
+      sevNote || "none from the applied rules"),
+  ];
+  if (dep) {
+    tiles.push(tile(dep.total, "packages",
+      "", `${dep.direct} direct · ${dep.transitive} transitive · relations known for `
+        + `${dep.relations_resolved}`));
+  }
+  if (vuln.length) {
+    tiles.push(tile(vuln.length, "vulnerable packages", "is-bad",
+      `${vuln.filter(v => v.recommended_version).length} with a known fixed release`));
+  }
+  tiles.push(tile(scope.production_ai_components ?? aiTotal, "AI components in production code",
+    "", scope.excluded_non_production_entities
+      ? `${scope.excluded_non_production_entities} more in test/example/docs` : ""));
+  if (impact.length) {
+    tiles.push(tile(impact.length, "input-to-tool paths", "is-bad", "untrusted input reaches a bound tool"));
+  }
+  if (agent.state !== "not_detected") {
+    tiles.push(tile((d.agent_security && d.agent_security.agents || []).length, "agents",
+      agent.state === "failed" ? "is-warn" : "", agent.state.replace("_", " ")));
+  }
+
+  const contexts = {};
+  for (const e of entities) {
+    const list = e.source_contexts && e.source_contexts.length ? e.source_contexts : ["unknown"];
+    for (const c of list) contexts[c] = (contexts[c] || 0) + 1;
+  }
+  const contextLine = Object.keys(contexts).length > 1 || !contexts.production
+    ? `<p class="sum-contexts">Components by source context: ${Object.entries(contexts)
+        .sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button type="button" class="link" `
+        + `data-context="${esc(c)}">${esc(c)} ${n}</button>`).join(" · ")}. Risk rules and the `
+        + `AI usage map use production code only; the Inventory lists everything.</p>` : "";
+
+  const limits = [...(d.coverage_notes || [])];
+  if (agent.state !== "evaluated") limits.push(agent.text);
+  const top = (d.findings || []).slice().sort((a, b) =>
+    (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9))[0];
+  const start = top && h.status !== "no_findings"
+    ? `<p class="sum-start">Start with: <button type="button" class="link" data-goto="findings">`
+      + `${esc(top.title)}</button> (${esc(top.severity)})</p>` : "";
+
   $("securitySummary").innerHTML =
-    (headline ? `<p class="sum-headline">${esc(headline)}</p>`
-      : `<p class="sum-headline is-quiet">No path from an agent or untrusted input to a dangerous `
-        + `operation was found. Unknowns below are not counted as safe.</p>`)
-    + tile(report ? report.agents.length : "—", "agents")
-    + tile(mcpTools.length ? `${exposedIds.size}/${mcpTools.length}` : "0", "MCP tools exposed",
-      riskyTools.length ? "is-warn" : "", riskyTools.length ? `${riskyTools.length} with dangerous capability` : "")
-    + tile(report ? report.operations.length : "—", "cloud operations in tool code")
-    + tile(allowed.length + impact.length, "dangerous paths", allowed.length + impact.length ? "is-bad" : "is-ok",
-      `${impact.length} from untrusted input · ${allowed.length} policy-allowed`)
-    + tile(unknownPaths.length + (report ? report.unknowns.length : 0), "unknown",
-      unknownPaths.length || (report && report.unknowns.length) ? "is-warn" : "", "unresolved, not safe")
-    + tile(critHigh, "critical / high findings", critHigh ? "is-bad" : "is-ok");
+    `<div class="headline ${esc(h.status)}"><p class="headline-label">${esc(h.label)}</p>`
+    + `<p>${esc(h.detail)}</p>${start}</div>`
+    + `<div class="sum-tiles">${tiles.join("")}</div>`
+    + contextLine
+    + (limits.length ? `<details class="limits" open><summary>Analysis limits (${limits.length})`
+      + `</summary><ul>${limits.map(n => `<li>${esc(n)}</li>`).join("")}</ul></details>` : "");
+  $("securitySummary").querySelectorAll("[data-context]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $("contextFilter").value = btn.dataset.context;
+      selectTab("inventory");
+      filterInventory();
+    });
+  });
+  $("tabCountFindings").textContent = (d.findings || []).length || "";
+  $("tabCountDeps").textContent = dep ? dep.total : "";
+  $("tabCountInventory").textContent = entities.length || "";
 }
 
 // ── agent privilege drift (Baseline → Candidate → Fixed) ──────────────────────────
-const DRIFT_BUTTONS = ["driftDemoPolicy", "driftDemoMcp", "heroDrift", "heroMcp"];
+const DRIFT_BUTTONS = ["driftDemoPolicy", "driftDemoMcp"];
 const DRIFT_TYPE_LABEL = {
   permission_scope_expanded: "Permission scope expanded",
   privilege_path_added: "Privilege path added",
@@ -1778,22 +2145,20 @@ function setDriftStatus(msg, isErr) {
 async function runPrivilegeScenario(scenario, button) {
   const original = button.textContent;
   DRIFT_BUTTONS.forEach(id => { $(id).disabled = true; });
-  button.textContent = "Scanning 3 revisions…";
+  button.textContent = "Scanning 3 bundled revisions…";
   $("driftState").textContent = "Scanning";
-  $("driftState").dataset.state = "running";
-  setDriftStatus("Scanning baseline, candidate and fixed revisions offline…", false);
+  setCompareStatus("", false);
+  setDriftStatus("Scanning the bundled baseline, candidate and fixed revisions (offline demo)…", false);
   try {
     const body = await postJson(apiBase() + "/api/agent-drift/demo?scenario=" + encodeURIComponent(scenario));
     renderDrift(body);
     $("driftState").textContent = "Scenario loaded";
-    $("driftState").dataset.state = "complete";
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     $("privResult").scrollIntoView({ behavior, block: "start" });
     $("privResult").focus({ preventScroll: true });
   } catch (e) {
-    setDriftStatus("The drift scenario could not be run: " + e.message, true);
+    setDriftStatus("The demo could not be run: " + e.message, true);
     $("driftState").textContent = "Failed";
-    $("driftState").dataset.state = "error";
     if (e instanceof BackendUnavailable) showApiEndpointField();
   } finally {
     DRIFT_BUTTONS.forEach(id => { $(id).disabled = false; });
@@ -1814,54 +2179,19 @@ function driftCard(title, label, report, note) {
     + (items.length ? `<ul>${items.join("")}</ul>` : "");
 }
 
-function renderDrift(body) {
-  driftBody = body;
-  const introduced = body.introduced, residual = body.residual;
-  const gated = introduced.changes.filter(c => c.gates);
-  const remaining = residual.changes.filter(c => c.gates);
-  const counts = body.revisions.candidate.counts || {};
-  const components = Object.entries(counts).filter(([k, n]) => n && k !== "prompt")
-    .map(([k, n]) => `${n} ${k}`).join(", ");
-  $("privResult").hidden = false;
-  const bom = $("driftBomVerdict");
-  bom.className = "verdict " + (introduced.bom_components_unchanged ? "ok" : "warn");
-  bom.innerHTML = `<p class="verdict-label">COMPONENT BOM</p><p class="verdict-value">`
-    + `${introduced.bom_components_unchanged ? "Unchanged" : "Changed"}</p><p class="verdict-note">`
-    + (introduced.bom_components_unchanged
-      ? `${esc(components)}: identical in both revisions. An SBOM diff reports nothing.`
-      : esc(introduced.bom_differences.slice(0, 5).join(", "))) + `</p>`;
-  const priv = $("driftPrivVerdict");
-  priv.className = "verdict " + (gated.length ? "bad" : "ok");
-  priv.innerHTML = `<p class="verdict-label">AGENT PRIVILEGE</p><p class="verdict-value">`
-    + `${gated.length ? gated.length + " new" : "No change"}</p><p class="verdict-note">`
-    + (gated.length ? esc([...new Set(gated.map(c => DRIFT_TYPE_LABEL[c.type] || c.type))].join(", "))
-      + `. Changed file: <code>${esc(body.scenario.changed)}</code>.`
-      : "No privilege addition.") + `</p>`;
-  const fix = $("driftFixVerdict");
-  const unknowns = (body.reports.fixed.unknowns || []).length;
-  fix.className = "verdict " + (remaining.length ? "bad" : "ok");
-  fix.innerHTML = `<p class="verdict-label">VERIFY FIX (BASELINE vs FIXED)</p><p class="verdict-value">`
-    + `${remaining.length ? remaining.length + " remain" : "Fixed"}</p><p class="verdict-note">`
-    + `${esc(body.scenario.fix)}. ${remaining.length} privilege addition(s) remain`
-    + `${unknowns ? `, ${unknowns} unknown(s) (never counted as fixed)` : ""}.</p>`;
-  $("driftRevisions").innerHTML =
-    `<article class="revision">${driftCard("Baseline", "least privilege", body.reports.baseline)}</article>`
-    + `<span class="revision-arrow" aria-hidden="true">→</span>`
-    + `<article class="revision">${driftCard("Candidate", "after the change", body.reports.candidate,
-      `<span class="evidence-tag">changed</span> ${esc(body.scenario.change)}`)}</article>`;
-  showDriftStage("candidate");
-  const toolLabel = Object.fromEntries((body.reports.candidate.nodes || [])
-    .filter(n => n.kind === "tool").map(n => [n.id, n.label]));
-  const changes = introduced.changes.slice().sort((a, b) =>
+function privilegeChangesHtml(list, toolLabel) {
+  const changes = list.slice().sort((a, b) =>
     (b.gates - a.gates) || (SEV_RANK[a.severity] - SEV_RANK[b.severity]));
-  $("driftChanges").innerHTML = changes.length ? changes.map(c => {
+  if (!changes.length) return `<p class="help">No permission change between the revisions.</p>`;
+  return changes.map(c => {
     const rem = c.remediation || {};
     const verdicts = c.before_verdict || c.after_verdict
       ? `${verdictTag(c.before_verdict || "unknown")} → ${verdictTag(c.after_verdict || "unknown")}` : "";
     const subject = [c.agent, toolLabel[c.tool] || c.tool, c.action].filter(Boolean).join(" → ");
     return `<article class="drift-change" data-gates="${c.gates}"><header>${sevTag(c.severity)}`
       + ` <span class="evidence-tag">${esc(DRIFT_TYPE_LABEL[c.type] || c.type)}</span>`
-      + ` <span class="evidence-tag">${c.gates ? "gates CI" : "review only"}</span>`
+      + ` <span class="evidence-tag" title="Whether aibom diff --agent-privileges --fail-on would fail on it">`
+      + `${c.gates ? "can fail CI (--fail-on)" : "review only, never fails CI"}</span>`
       + ` <h4>${esc(subject)}${c.affected_resource ? ` on ${esc(c.affected_resource)}` : ""}</h4></header>`
       + `<div class="f3"><span class="f3-label l-impact">Impact</span><div>`
       + `${esc(rem.why_it_matters || "")} ${verdicts}</div>`
@@ -1873,9 +2203,55 @@ function renderDrift(body) {
         ? `<ol>${rem.recommended_actions.map(a => `<li>${esc(a)}</li>`).join("")}</ol>` : "")
       + (rem.retest_command ? `<span class="muted">Retest: <code>${esc(rem.retest_command)}</code></span>` : "")
       + `</div></div></article>`;
-  }).join("") : `<p class="field-help">No privilege change between baseline and candidate.</p>`;
-  setDriftStatus(`${gated.length} privilege addition(s) gate CI; the component BOM is `
-    + `${introduced.bom_components_unchanged ? "unchanged" : "changed"}.`, false);
+  }).join("");
+}
+
+function renderDrift(body) {
+  driftBody = body;
+  const introduced = body.introduced, residual = body.residual;
+  const gated = introduced.changes.filter(c => c.gates);
+  const remaining = residual.changes.filter(c => c.gates);
+  const counts = body.revisions.candidate.counts || {};
+  const components = Object.entries(counts).filter(([k, n]) => n && k !== "prompt")
+    .map(([k, n]) => `${n} ${k}`).join(", ");
+  $("compareResult").hidden = true;
+  $("privResult").hidden = false;
+  const bom = $("driftBomVerdict");
+  bom.className = "verdict " + (introduced.bom_components_unchanged ? "ok" : "warn");
+  bom.innerHTML = `<p class="verdict-label">COMPONENTS</p><p class="verdict-value">`
+    + `${introduced.bom_components_unchanged ? "Compared components identical" : "Changed"}</p>`
+    + `<p class="verdict-note">` + (introduced.bom_components_unchanged
+      ? `${esc(components)} in both revisions (prompts not compared as parts). A component `
+        + "diff reports nothing."
+      : esc(introduced.bom_differences.slice(0, 5).join(", "))) + `</p>`;
+  const priv = $("driftPrivVerdict");
+  priv.className = "verdict " + (gated.length ? "bad" : "ok");
+  priv.innerHTML = `<p class="verdict-label">AGENT PERMISSIONS</p><p class="verdict-value">`
+    + `${gated.length ? gated.length + " added" : "No change"}</p><p class="verdict-note">`
+    + (gated.length ? esc([...new Set(gated.map(c => DRIFT_TYPE_LABEL[c.type] || c.type))].join(", "))
+      + `. Changed file: <code>${esc(body.scenario.changed)}</code>. Judged against the bundled `
+      + "identity policies only."
+      : "No privilege addition.") + `</p>`;
+  const fix = $("driftFixVerdict");
+  const unknowns = (body.reports.fixed.unknowns || []).length;
+  fix.className = "verdict " + (remaining.length ? "bad" : "ok");
+  fix.innerHTML = `<p class="verdict-label">BUNDLED FIXED REVISION (DEMO)</p><p class="verdict-value">`
+    + `${remaining.length ? remaining.length + " remain" : "No addition left"}</p><p class="verdict-note">`
+    + `${esc(body.scenario.fix)}. Compared with the baseline: ${remaining.length} privilege `
+    + `addition(s) remain${unknowns ? `, ${unknowns} unresolved (never counted as fixed)` : ""}. `
+    + "This is the fixture shipped with the demo, not a check of your code.</p>";
+  $("driftRevisions").innerHTML =
+    `<article class="revision">${driftCard("Baseline", "bundled · least privilege", body.reports.baseline)}</article>`
+    + `<span class="revision-arrow" aria-hidden="true">→</span>`
+    + `<article class="revision">${driftCard("Candidate", "bundled · after the change", body.reports.candidate,
+      `<span class="evidence-tag">changed</span> ${esc(body.scenario.change)}`)}</article>`;
+  showDriftStage("candidate");
+  const toolLabel = Object.fromEntries((body.reports.candidate.nodes || [])
+    .filter(n => n.kind === "tool").map(n => [n.id, n.label]));
+  $("driftChanges").innerHTML = privilegeChangesHtml(introduced.changes, toolLabel);
+  setDriftStatus(`Demo: ${gated.length} privilege addition(s) that \`aibom diff --agent-privileges `
+    + `--fail-on\` would fail on; the compared components are `
+    + `${introduced.bom_components_unchanged ? "identical" : "changed"}.`, false);
 }
 
 function showDriftStage(stage) {
@@ -1887,22 +2263,62 @@ function showDriftStage(stage) {
   const model = secModel(driftBody.reports[stage]);
   renderSecGraph($("driftGraph"), $("driftDetail"), model, stage === "baseline" ? null : base);
   const revision = (driftBody.revisions || {})[stage] || {};
-  $("driftDepTitle").textContent = "Dependency map \u00b7 " + stage;
+  $("driftDepTitle").textContent = "AI usage map · "
+    + (stage === "fixed" ? "bundled fixed revision" : stage);
   renderGraph(revision.graph || { nodes: [], edges: [] }, [], DRIFT_GRAPH);
 }
 document.querySelectorAll(".stage-toggle button").forEach(b => {
   b.addEventListener("click", () => showDriftStage(b.dataset.stage));
 });
 
-function heroDemo(scenario, button) {
-  const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-  $("driftSection").scrollIntoView({ behavior, block: "start" });
-  return runPrivilegeScenario(scenario, button);
-}
 $("driftDemoPolicy").addEventListener("click", () => runPrivilegeScenario("agent-privilege-drift", $("driftDemoPolicy")));
 $("driftDemoMcp").addEventListener("click", () => runPrivilegeScenario("mcp-tool-exposure", $("driftDemoMcp")));
-$("heroDrift").addEventListener("click", () => heroDemo("agent-privilege-drift", $("heroDrift")));
-$("heroMcp").addEventListener("click", () => heroDemo("mcp-tool-exposure", $("heroMcp")));
+
+// ── views: Analyze (default) and Compare changes ──────────────────────────────
+function showView(name) {
+  document.querySelectorAll(".view").forEach(v => { v.hidden = v.dataset.view !== name; });
+  document.querySelectorAll("[data-view-link]").forEach(a => {
+    if (a.getAttribute("href") === "#help") return;
+    if (a.dataset.viewLink === name) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+}
+function route() {
+  const hash = location.hash.replace("#", "");
+  if (hash === "compare") {
+    showView("compare");
+    window.scrollTo(0, 0);
+  } else {
+    showView("analyze");
+    if (hash && hash !== "analyze") {
+      const target = document.getElementById(hash);
+      if (target) target.scrollIntoView();
+    }
+  }
+}
+window.addEventListener("hashchange", route);
+route();
+
+document.addEventListener("click", (ev) => {
+  const goto = ev.target.closest("[data-goto]");
+  if (goto) selectTab(goto.dataset.goto);
+  const example = ev.target.closest("[data-example]");
+  if (example) {
+    if (example.dataset.example === "demo") runDemo();
+    else {
+      $("repo").value = example.dataset.example;
+      $("repoRef").value = "";
+      setStatus("Example URL added. Start the analysis when you are ready.", false);
+      $("scanSection").scrollIntoView({ block: "start" });
+      $("repo").focus();
+    }
+  }
+});
+$("cancelScan").addEventListener("click", () => { if (activeScan) activeScan.abort(); });
+$("depsSearch").addEventListener("input", filterDeps);
+$("depsFilter").addEventListener("change", filterDeps);
+$("contextFilter").addEventListener("change", filterInventory);
+$("repoRef").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
 
 renderApiLine();
 

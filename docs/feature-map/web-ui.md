@@ -61,6 +61,24 @@ The page has no JS unit-test harness. Behavior is only proven by the
 browser run. The attack-path visualization (impact and exposure paths) is not
 yet covered by a browser check.
 
+The page is `web/index.html` + `app.css` + `app.js` (+ `favicon.svg`), served
+side by side with no build step; the structural test reads all three.
+
+What broke before, and the check that now holds it:
+
+- A critical finding read as a pass because "76 / B" was the biggest thing on
+  screen. The summary leads with the API's `headline`; the score sits in a
+  collapsed "secondary" disclosure. `verify_ui.py --fixture demos` fails if the
+  sample is not headed "Action required".
+- The map shrank to an unreadable 351 px on a phone, and tabs scrolled out of
+  view. The demos check loads the sample at 403 px and 1280 px and fails on
+  page-level sideways scroll, a tab off screen, or a map label under 9 px.
+- Bigger node labels moved the centre of a node group into empty space, so
+  clicking the group missed; the check clicks the node's circle.
+- "No edges" looked like "no dependencies". The Dependencies tab renders the
+  API's full `dependencies` table and says "relations unresolved" when no
+  edge-recording lockfile exists; the map says when it has nothing to connect.
+
 ```json verify
 {
   "id": "web-ui",

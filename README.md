@@ -152,9 +152,6 @@ and whether a revision introduced a new exposure while keeping the same parts.
 | Dependency-Track | Consumes SBOMs; no AI-specific discovery or risk rules. |
 | `modelscan` / `picklescan` | Scan a *given* model file for unsafe pickles. AIBOM Inspector *finds which models a repo uses in the first place*, then flags the pickle risk in context. |
 
-The dated, source-linked competitive analysis and claim boundaries are in
-[docs/novelty-positioning.md](docs/novelty-positioning.md).
-
 ## Features
 
 - **Discovery** — Python AST detectors for OpenAI, Anthropic, and Hugging Face
@@ -416,7 +413,19 @@ does: LLM05 (Improper Output Handling), LLM07 (System Prompt Leakage), LLM08
 (Vector and Embedding Weaknesses), LLM09 (Misinformation) and LLM10 (Unbounded
 Consumption) need runtime behavior, which a static scanner never observes.
 
-**Security score (0–100):** each of the four categories {integrity, provenance,
+**Headline status:** every result leads with *Action required* (any critical or
+high finding), *Review* (medium/low only) or *No findings from the applied rules*.
+The hygiene score below is secondary and is never a pass/fail verdict: a
+repository with a critical finding is "Action required" even at 76/B.
+
+**Known vulnerabilities (OSV):** OSV records that describe the same issue (GHSA,
+PYSEC, CVE aliases) are merged into one finding listing every id and each
+database's severity; the finding takes the highest rating. Fixed versions come
+only from the package's release ranges, never from a Git commit. A failed or
+skipped lookup is reported under the result's analysis limits, not as "no
+vulnerabilities".
+
+**Supply-chain hygiene score (0–100, secondary):** each of the four categories {integrity, provenance,
 licensing, configuration} starts at 100 and loses points per finding
 (critical 40 / high 20 / medium 10 / low 3, floored at 0, counting at most
 3 findings per rule). The overall score is `0.55 × mean + 0.45 × worst category`,

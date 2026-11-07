@@ -100,7 +100,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     port = os.environ.get("AIBOM_PORT") or os.environ.get("PORT") or "8000"
     print(
         f"\n  AIBOM Inspector is ready -- open  http://localhost:{port}  in your browser\n"
-        "  Quick demo: click \"Run built-in impact demo\" (no URL or network needed)\n"
+        "  Quick demo: click \"Try the bundled sample\" (no URL or network needed)\n"
         "  CLI demo:   docker compose run --rm demo\n"
         f"  (from another machine: http://<this-host's-IP>:{port})\n",
         flush=True,
