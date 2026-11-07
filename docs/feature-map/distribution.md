@@ -7,9 +7,12 @@ How users get and run the tool:
 - the wheel (`pyproject.toml`, with the web UI and demo fixtures force-included)
 - the Docker image and `docker-compose.yml`
 - the `./aibom` / `aibom.ps1` launchers
-- the render.com blueprint
+- the render.com blueprint, and Cloud Run (`scripts/deploy-cloud-run.sh`)
 - the GitHub Actions workflows: `ci.yml` (lint, types, tests on 3.10–3.12),
-  `release.yml`, and `pages.yml` (manual)
+  `release.yml`, `pages.yml` (manual), and `deploy-cloud-run.yml`, which
+  deploys each `main` commit that passed CI to the public Cloud Run site
+  (keyless, Workload Identity Federation; skipped until the `GCP_*`
+  repository variables exist; setup in `docs/CLOUD_RUN_DEPLOYMENT.md`)
 
 ## Entry points
 
@@ -19,7 +22,7 @@ workflows on push, PR, or manual dispatch.
 ## Source
 
 `pyproject.toml`, `Dockerfile`, `docker-compose.yml`, `aibom`, `aibom.ps1`,
-`render.yaml`, `.github/workflows/*`.
+`render.yaml`, `scripts/deploy-cloud-run.sh`, `.github/workflows/*`.
 
 ## Depends on
 
@@ -46,7 +49,7 @@ Python 3.10 is the floor. Use only 3.10-compatible syntax (checked by ruff
 | `ruff check .` and `mypy` | the same gates CI runs |
 | `pytest tests/test_feature_map.py` | the feature map still covers every shipped source file |
 | Docker build plus `./aibom demo` | **Manual**: slow, needs Docker |
-| releases, Pages deploys, render.com | **Human approval required**: these are outward-facing, never run by an agent |
+| releases, Pages deploys, render.com, Cloud Run | **Human approval required**: these are outward-facing, never run by an agent. Merging to `main` deploys Cloud Run once the `GCP_*` variables are set, so a merge needs the same approval |
 
 ## Expected results
 
