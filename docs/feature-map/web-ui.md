@@ -2,8 +2,8 @@
 
 ## Overview
 
-A single dependency-free HTML file (`web/index.html`, about 3,500 lines) that
-drives the API. It contains the scan form, the result tabs (agent security,
+A dependency-free page with no build step (`web/index.html`, `app.css`,
+`i18n.js`, `app.js`) that drives the API. It contains the scan form, the result tabs (agent security,
 findings, Dependencies, inventory, exports), the compare and drift view, and
 the hero demos. It also works when served from GitHub Pages with a separate
 backend (`?api=`).
@@ -16,7 +16,8 @@ selects a backend.
 
 ## Source
 
-`web/index.html`.
+`web/index.html`, `web/app.css`, `web/i18n.js` (Japanese text and the language
+switch), `web/app.js`, `web/favicon.svg`.
 
 ## Depends on
 
@@ -61,8 +62,21 @@ The page has no JS unit-test harness. Behavior is only proven by the
 browser run. The attack-path visualization (impact and exposure paths) is not
 yet covered by a browser check.
 
-The page is `web/index.html` + `app.css` + `app.js` (+ `favicon.svg`), served
-side by side with no build step; the structural test reads all three.
+The page is `web/index.html` + `app.css` + `i18n.js` + `app.js` (+
+`favicon.svg`), served side by side with no build step; the structural test
+reads all of them.
+
+Language: English is the source text in the markup and `app.js`; `i18n.js`
+holds only Japanese, keyed by `data-i18n` / `data-i18n-attr` and `t(key, en)`.
+The page follows the browser language until the visitor picks one (kept in
+`localStorage`). Scanner output (finding titles, evidence, fixes, analysis
+limits) comes from the API in English and stays English; the page says so.
+`tests/test_web_ui.py` fails on a key without Japanese or an unused entry.
+
+Progress: a repository scan reads `/api/scan/stream` and lists each stage as
+the backend reports it; Cancel closes the stream, which stops the server-side
+scan at the next stage. A backend without the stream endpoint (404/405) gets
+the plain `/api/scan`, with elapsed time only.
 
 What broke before, and the check that now holds it:
 
@@ -75,6 +89,10 @@ What broke before, and the check that now holds it:
   page-level sideways scroll, a tab off screen, or a map label under 9 px.
 - Bigger node labels moved the centre of a node group into empty space, so
   clicking the group missed; the check clicks the node's circle.
+- The headless browser inherits the host's locale, so on a Japanese machine
+  the page opened in Japanese and the English assertions failed. Every check
+  page pins `locale="en-US"`; the language check opens a `ja-JP` page on
+  purpose and switches languages at 403 px.
 - "No edges" looked like "no dependencies". The Dependencies tab renders the
   API's full `dependencies` table and says "relations unresolved" when no
   edge-recording lockfile exists; the map says when it has nothing to connect.

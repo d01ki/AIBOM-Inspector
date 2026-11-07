@@ -471,7 +471,8 @@ string.
 |---|---|
 | `POST /api/demo` | Offline built-in impact scan; no URL or network |
 | `POST /api/demo/report` | Self-contained report for the built-in demo |
-| `POST /api/scan` `{repo_url, resolve?}` | Inventory + CycloneDX + findings + score + dependency graph (JSON) |
+| `POST /api/scan` `{repo_url, ref?, resolve?}` | Inventory + CycloneDX + findings + score + dependency graph (JSON) |
+| `POST /api/scan/stream` `{repo_url, ref?, resolve?}` | The same scan as NDJSON: one `{"stage": ...}` line per step, then `{"result": ...}` or `{"error": ..., "status": ...}`; disconnecting stops the scan before its next step |
 | `POST /api/report` `{repo_url, resolve?}` | Self-contained HTML report |
 | `POST /api/sarif` `{repo_url, resolve?}` | SARIF 2.1.0, identical to `aibom scan --sarif` |
 | `POST /api/demo/sarif` | SARIF for the built-in demo |

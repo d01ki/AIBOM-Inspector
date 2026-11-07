@@ -8,6 +8,7 @@ the CLI and the FastAPI backend cannot drift apart.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,7 @@ def run_scan(
     ignore_rules: list[str] | None = None,
     lockfiles: bool = True,
     ref: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> ScanResult:
     """Statically scan ``target`` and evaluate risk.
 
@@ -63,7 +65,12 @@ def run_scan(
     scanned third-party repository cannot silence its own findings.
     ``lockfiles`` resolves lockfiles for transitive components and artifact
     digests; turn it off for a manifest-only (top-level) inventory.
+    ``progress`` is called with each stage id as it starts (``collect``,
+    ``lockfiles``, ``link``, ``resolve``, ``risk``, ``vulns``); skipped stages
+    are not reported. An exception it raises stops the scan, which is how a
+    caller cancels between stages.
     """
+    report = progress or (lambda _stage: None)
     if vulns is None:
         vulns = resolve
     started = time.monotonic()
@@ -79,27 +86,33 @@ def run_scan(
             ),
         )
     )
+    report("collect")
     RepoCollector(target, disabled_detectors=disabled_detectors).collect(inventory)
     DependencyCollector(target).collect(inventory)
     if lockfiles:
+        report("lockfiles")
         # After the manifests: a lockfile resolves what a manifest constrains,
         # adding transitive components, exact versions and artifact digests
         # (CISA 2026 coverage + Component Hash).
         LockfileCollector(target).collect(inventory)
     # Last collector step: every component and package is known, so the
     # linker can connect them (only where a scanned line proves the edge).
+    report("link")
     link_components(inventory, target)
 
     if resolve or hf_cache is not None:
+        report("resolve")
         client = HFClient(cache_dir=hf_cache, offline=not resolve)
         HuggingFaceResolver(client).resolve(inventory)
 
     apply_confidence_filter(inventory, min_confidence)
 
+    report("risk")
     risk_inventory = production_view(inventory)
     findings = evaluate_risk(risk_inventory)
     if vulns:
         # Online enrichment: map declared packages to known vulnerabilities (OSV).
+        report("vulns")
         mapper = OSVMapper()
         findings = order_findings(findings + mapper.map(risk_inventory))
         inventory.stats.vuln_lookup = mapper.coverage

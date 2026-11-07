@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import os
+import queue
+import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractContextManager, asynccontextmanager
@@ -11,7 +16,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from aibom import __version__
@@ -42,6 +47,14 @@ from aibom.vuln.osv import group_by_package
 # A cloner takes a URL (and optional git ref) and returns a context manager
 # yielding the checkout path.
 Cloner = Callable[..., AbstractContextManager[Path]]
+# Called with a stage id as each scan step starts; raising stops the scan.
+Progress = Callable[[str], None]
+
+log = logging.getLogger(__name__)
+
+
+class ScanCancelled(Exception):
+    """The client went away; the scan stops at the next stage boundary."""
 
 
 class ScanRequest(BaseModel):
@@ -132,6 +145,20 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         result, agents = _scan_with_agents(req, cloner)
         return _to_payload(req.repo_url, result, agents)
+
+    @app.post("/api/scan/stream")
+    async def scan_stream(
+        req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
+    ) -> StreamingResponse:
+        """``/api/scan`` as NDJSON: one ``{"stage": id}`` line per step, then
+        ``{"result": payload}`` or ``{"error": detail, "status": code}``.
+
+        Disconnecting cancels the work at the next stage boundary.
+        """
+        _validated_url(req.repo_url)  # a bad URL is a plain 400, before streaming
+        return StreamingResponse(
+            _stream_scan(req, cloner), media_type="application/x-ndjson"
+        )
 
     @app.post("/api/demo")
     def demo_scan() -> dict[str, Any]:
@@ -351,6 +378,39 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
     }
 
 
+async def _stream_scan(req: ScanRequest, cloner: Cloner) -> AsyncIterator[str]:
+    cancel = threading.Event()
+    lines: queue.Queue[dict[str, Any] | None] = queue.Queue()
+
+    def report(stage: str) -> None:
+        if cancel.is_set():
+            raise ScanCancelled
+        lines.put({"stage": stage})
+
+    def work() -> None:
+        try:
+            result, agents = _scan_with_agents(req, cloner, progress=report)
+            report("report")
+            lines.put({"result": _to_payload(req.repo_url, result, agents)})
+        except ScanCancelled:
+            pass
+        except HTTPException as exc:
+            lines.put({"error": exc.detail, "status": exc.status_code})
+        except Exception:
+            log.exception("streamed scan failed")
+            lines.put({"error": "internal error while scanning", "status": 500})
+        finally:
+            lines.put(None)
+
+    threading.Thread(target=work, name="aibom-scan", daemon=True).start()
+    try:
+        while (item := await asyncio.to_thread(lines.get)) is not None:
+            yield json.dumps(item) + "\n"
+    finally:
+        # Normal end, or the client disconnected: either way stop the worker.
+        cancel.set()
+
+
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:
     return _scan_with_agents(req, cloner, agents=False)[0]
 
@@ -369,13 +429,19 @@ def _agent_payload(path: Path, result: ScanResult, label: str) -> dict[str, Any]
 
 
 def _scan_with_agents(
-    req: ScanRequest, cloner: Cloner, *, agents: bool = True
+    req: ScanRequest,
+    cloner: Cloner,
+    *,
+    agents: bool = True,
+    progress: Progress | None = None,
 ) -> tuple[ScanResult, dict[str, Any] | None]:
+    report = progress or (lambda _stage: None)
     try:
         display = normalize_repo_url(req.repo_url)
     except CloneError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
+        report("clone")
         clone_started = time.monotonic()
         ref = req.ref.strip() if req.ref and req.ref.strip() else None
         with (cloner(req.repo_url, ref=ref) if ref else cloner(req.repo_url)) as path:
@@ -387,8 +453,11 @@ def _scan_with_agents(
                 min_confidence=req.min_confidence,
                 display_target=display,
                 ref=ref,
+                progress=progress,
             )
             result.inventory.stats.clone_ms = clone_ms
+            if agents:
+                report("agents")
             agent_report = _agent_payload(path, result, display) if agents else None
             return result, agent_report
     except CloneError as exc:
