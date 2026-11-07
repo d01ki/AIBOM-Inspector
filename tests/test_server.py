@@ -439,7 +439,7 @@ def test_closing_the_scan_stream_stops_the_work_at_the_next_stage() -> None:
 
     from aibom.server.app import ScanCancelled, ScanRequest, _stream_scan
 
-    release = threading.Event()
+    release, slot_released = threading.Event(), threading.Event()
     exited_with: list[type[BaseException] | None] = []
 
     @contextmanager
@@ -453,7 +453,8 @@ def test_closing_the_scan_stream_stops_the_work_at_the_next_stage() -> None:
         exited_with.append(None)
 
     async def disconnect_after_first_line() -> None:
-        stream = _stream_scan(ScanRequest(repo_url="https://github.com/a/b"), slow_clone)
+        stream = _stream_scan(ScanRequest(repo_url="https://github.com/a/b"), slow_clone,
+                              release=slot_released.set)
         assert await anext(stream) == '{"stage": "clone"}\n'
         await stream.aclose()  # what Starlette does when the client goes away
         release.set()
@@ -464,3 +465,58 @@ def test_closing_the_scan_stream_stops_the_work_at_the_next_stage() -> None:
             break
         threading.Event().wait(0.05)
     assert exited_with == [ScanCancelled]  # the scan never ran past "collect"
+    assert slot_released.wait(10)  # a cancelled scan gives its slot back
+
+
+def test_concurrent_clones_are_capped_and_the_overflow_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A public instance must not start unbounded clones (resource exhaustion)."""
+    import threading
+
+    monkeypatch.setenv("AIBOM_MAX_CONCURRENT_SCANS", "1")
+    entered, release = threading.Event(), threading.Event()
+
+    @contextmanager
+    def held_clone(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        entered.set()
+        release.wait(10)
+        yield FIXTURE
+
+    app = create_app()
+    app.dependency_overrides[get_cloner] = lambda: held_clone
+    client = TestClient(app)
+    body = {"repo_url": "https://github.com/a/b", "resolve": False, "vulns": False}
+    first: dict[str, int] = {}
+    worker = threading.Thread(
+        target=lambda: first.update(code=client.post("/api/scan", json=body).status_code)
+    )
+    worker.start()
+    assert entered.wait(10)
+    for route in ("/api/scan", "/api/scan/stream", "/api/report", "/api/sarif"):
+        busy = client.post(route, json=body)
+        assert busy.status_code == 503, route
+        assert busy.headers.get("retry-after")
+    busy = client.post("/api/diff", json={"repo_url": "https://github.com/a/b",
+                                          "base_ref": "a", "head_ref": "b"})
+    assert busy.status_code == 503
+    release.set()
+    worker.join(30)
+    assert first["code"] == 200
+    # The slot is released afterwards, including after a streamed scan.
+    assert client.post("/api/scan/stream", json=body).status_code == 200
+    assert client.post("/api/scan", json=body).status_code == 200
+
+
+def test_responses_carry_security_headers(client: TestClient) -> None:
+    api = client.get("/api/health")
+    assert api.headers["x-content-type-options"] == "nosniff"
+    assert api.headers["x-frame-options"] == "DENY"
+    page = client.get("/")
+    csp = page.headers["content-security-policy"]
+    # No inline script may run, even if an escaping bug lets markup through.
+    directives = dict(d.strip().split(" ", 1) for d in csp.split(";"))
+    assert directives["script-src"] == "'self'"
+    assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
+    report = client.post("/api/demo/report")
+    assert "script-src 'self'" in report.headers["content-security-policy"]

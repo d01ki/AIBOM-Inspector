@@ -359,7 +359,8 @@ a backend reachable over HTTPS whose `AIBOM_CORS_ORIGINS` allows your page.
 
 The backend shallow-clones the URL into a throwaway temp dir, runs the same
 static pipeline as the CLI, and returns JSON — it **never executes the cloned
-code**. Clone URLs are validated against a host allowlist (github.com,
+code**. At most `AIBOM_MAX_CONCURRENT_SCANS` (default 4) clones run at once; a
+request over the cap gets `503` with `Retry-After`. Clone URLs are validated against a host allowlist (github.com,
 gitlab.com, bitbucket.org, codeberg.org) and passed to git as argv, not a shell
 string.
 

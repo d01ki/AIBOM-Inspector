@@ -6,11 +6,10 @@ import asyncio
 import json
 import logging
 import os
-import queue
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractContextManager, asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -55,6 +54,92 @@ log = logging.getLogger(__name__)
 
 class ScanCancelled(Exception):
     """The client went away; the scan stops at the next stage boundary."""
+
+
+# The UI and the HTML report run no inline script and load nothing from other
+# origins. ``connect-src`` stays open to https because the page may be pointed
+# at another backend (``?api=``, the Advanced setting).
+_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; connect-src 'self' https: http://localhost:* "
+    "http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+_SECURITY_HEADERS = [
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+]
+
+
+class SecurityHeaders:
+    """Plain ASGI middleware (streaming and disconnects pass straight through).
+
+    Adds nosniff, no framing and no referrer to every response, and a strict
+    Content-Security-Policy to HTML, so an escaping bug in the page cannot run
+    an injected inline script.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def with_headers(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                present = {k.lower() for k, _ in headers}
+                headers += [(k, v) for k, v in _SECURITY_HEADERS if k not in present]
+                html = dict(headers).get(b"content-type", b"").startswith(b"text/html")
+                if html and b"content-security-policy" not in present:
+                    headers.append((b"content-security-policy", _CSP.encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
+
+
+class ScanSlots:
+    """Caps concurrent clone-and-scan work across every endpoint that clones.
+
+    A public instance would otherwise start one clone per request without
+    limit (disk, CPU and git processes). A request over the cap is refused at
+    once with 503 + ``Retry-After`` rather than queued.
+    ``AIBOM_MAX_CONCURRENT_SCANS`` sets the cap (default 4).
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._slots = threading.BoundedSemaphore(limit)
+
+    @classmethod
+    def from_env(cls) -> ScanSlots:
+        try:
+            limit = int(os.environ.get("AIBOM_MAX_CONCURRENT_SCANS", "4"))
+        except ValueError:
+            limit = 4
+        return cls(max(1, limit))
+
+    def acquire(self) -> None:
+        if not self._slots.acquire(blocking=False):
+            raise HTTPException(
+                status_code=503,
+                detail="the server is busy with other analyses; try again shortly",
+                headers={"Retry-After": "30"},
+            )
+
+    def release(self) -> None:
+        self._slots.release()
+
+    @contextmanager
+    def held(self) -> Iterator[None]:
+        self.acquire()
+        try:
+            yield
+        finally:
+            self.release()
 
 
 class ScanRequest(BaseModel):
@@ -134,6 +219,8 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+    app.add_middleware(SecurityHeaders)
+    slots = ScanSlots.from_env()
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -143,7 +230,8 @@ def create_app() -> FastAPI:
     def scan(
         req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
     ) -> dict[str, Any]:
-        result, agents = _scan_with_agents(req, cloner)
+        with slots.held():
+            result, agents = _scan_with_agents(req, cloner)
         return _to_payload(req.repo_url, result, agents)
 
     @app.post("/api/scan/stream")
@@ -156,8 +244,10 @@ def create_app() -> FastAPI:
         Disconnecting cancels the work at the next stage boundary.
         """
         _validated_url(req.repo_url)  # a bad URL is a plain 400, before streaming
+        slots.acquire()  # a busy server is a plain 503, before streaming
         return StreamingResponse(
-            _stream_scan(req, cloner), media_type="application/x-ndjson"
+            _stream_scan(req, cloner, release=slots.release),
+            media_type="application/x-ndjson",
         )
 
     @app.post("/api/demo")
@@ -203,7 +293,8 @@ def create_app() -> FastAPI:
     def report(
         req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
     ) -> HTMLResponse:
-        result = _scan(req, cloner)
+        with slots.held():
+            result = _scan(req, cloner)
         html = render_html(result.inventory, result.findings, result.score)
         return HTMLResponse(content=html)
 
@@ -220,7 +311,7 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         display = _validated_url(req.repo_url)
         try:
-            with cloner(req.repo_url, ref=req.base_ref) as base_path:
+            with slots.held(), cloner(req.repo_url, ref=req.base_ref) as base_path:
                 baseline = run_scan(
                     base_path,
                     min_confidence=req.min_confidence,
@@ -228,7 +319,7 @@ def create_app() -> FastAPI:
                     ref=req.base_ref,
                 )
                 base_agents = _agent_report(base_path, baseline, f"{display}@{req.base_ref}")
-            with cloner(req.repo_url, ref=req.head_ref) as head_path:
+            with slots.held(), cloner(req.repo_url, ref=req.head_ref) as head_path:
                 candidate = run_scan(
                     head_path,
                     min_confidence=req.min_confidence,
@@ -279,7 +370,8 @@ def create_app() -> FastAPI:
     def sarif(
         req: ScanRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
     ) -> dict[str, Any]:
-        return to_sarif(_scan(req, cloner).findings)
+        with slots.held():
+            return to_sarif(_scan(req, cloner).findings)
 
     @app.post("/api/demo/sarif")
     def demo_sarif() -> dict[str, Any]:
@@ -378,37 +470,57 @@ def _revision_summary(result: ScanResult) -> dict[str, Any]:
     }
 
 
-async def _stream_scan(req: ScanRequest, cloner: Cloner) -> AsyncIterator[str]:
+def _stream_scan(
+    req: ScanRequest, cloner: Cloner, *, release: Callable[[], None]
+) -> AsyncGenerator[str, None]:
+    """Start the scan now and return the NDJSON lines it produces.
+
+    The worker starts before the response does, so ``release`` (the scan
+    slot) runs in its ``finally`` even if the client never reads the body.
+    Lines are handed to the event loop with ``call_soon_threadsafe``: a waiting
+    stream holds no thread-pool thread.
+    """
+    loop = asyncio.get_running_loop()
     cancel = threading.Event()
-    lines: queue.Queue[dict[str, Any] | None] = queue.Queue()
+    lines: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    def put(item: dict[str, Any] | None) -> None:
+        loop.call_soon_threadsafe(lines.put_nowait, item)
 
     def report(stage: str) -> None:
         if cancel.is_set():
             raise ScanCancelled
-        lines.put({"stage": stage})
+        put({"stage": stage})
 
     def work() -> None:
         try:
             result, agents = _scan_with_agents(req, cloner, progress=report)
             report("report")
-            lines.put({"result": _to_payload(req.repo_url, result, agents)})
+            put({"result": _to_payload(req.repo_url, result, agents)})
         except ScanCancelled:
             pass
         except HTTPException as exc:
-            lines.put({"error": exc.detail, "status": exc.status_code})
+            put({"error": exc.detail, "status": exc.status_code})
         except Exception:
             log.exception("streamed scan failed")
-            lines.put({"error": "internal error while scanning", "status": 500})
+            put({"error": "internal error while scanning", "status": 500})
         finally:
-            lines.put(None)
+            release()
+            # RuntimeError: the event loop is gone (server shutting down).
+            with suppress(RuntimeError):
+                put(None)
 
     threading.Thread(target=work, name="aibom-scan", daemon=True).start()
-    try:
-        while (item := await asyncio.to_thread(lines.get)) is not None:
-            yield json.dumps(item) + "\n"
-    finally:
-        # Normal end, or the client disconnected: either way stop the worker.
-        cancel.set()
+
+    async def lines_out() -> AsyncGenerator[str, None]:
+        try:
+            while (item := await lines.get()) is not None:
+                yield json.dumps(item) + "\n"
+        finally:
+            # Normal end, or the client disconnected: either way stop the worker.
+            cancel.set()
+
+    return lines_out()
 
 
 def _scan(req: ScanRequest, cloner: Cloner) -> ScanResult:

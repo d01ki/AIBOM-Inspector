@@ -34,8 +34,6 @@ HTTP request body   routes/api.py:11
 
 `aibom diff --fail-on high` turns that into a CI failure.
 
-![Analysis result: the headline, findings and dependency map](docs/demo.png)
-
 ## What it does
 
 - **Inventory:** AI models, datasets, prompts, agents, MCP servers and
