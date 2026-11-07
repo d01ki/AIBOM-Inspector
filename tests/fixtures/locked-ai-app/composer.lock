@@ -10,6 +10,10 @@
                 "url": "https://api.github.com/repos/openai-php/client/zipball/abc",
                 "shasum": "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a"
             },
+            "require": {
+                "php": "^8.1",
+                "psr/http-client": "^1.0"
+            },
             "license": ["MIT"]
         }
     ],

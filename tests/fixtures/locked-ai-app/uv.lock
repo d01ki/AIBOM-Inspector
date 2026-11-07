@@ -6,6 +6,9 @@ name = "anthropic"
 version = "0.30.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/aa/anthropic-0.30.1.tar.gz", hash = "sha256:7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e", size = 100 }
+dependencies = [
+    { name = "httpx" },
+]
 
 [[package]]
 name = "httpx"

@@ -37,6 +37,35 @@ class ScanMetadata(BaseModel):
     tool_version: str
     target: str
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    ref: str | None = Field(default=None, description="Requested branch, tag, or commit.")
+    commit: str | None = Field(
+        default=None, description="Commit the scanned checkout was at, read from .git."
+    )
+    source_url_template: str | None = Field(
+        default=None,
+        description="URL with {path} and {line} placeholders, pinned to `commit`.",
+    )
+
+
+class VulnLookup(BaseModel):
+    """What the known-vulnerability lookup did, so a failed or partial lookup
+    is never read as "no vulnerabilities"."""
+
+    requested: bool = False
+    source: str = "osv.dev"
+    status: str = Field(
+        default="not_requested",
+        description="not_requested | complete | partial | failed",
+    )
+    queried: int = Field(default=0, description="Packages whose exact version was looked up.")
+    failed: int = Field(default=0, description="Lookups that errored (network, timeout).")
+    not_queried_unpinned: int = Field(
+        default=0, description="Packages without an exact version, so not looked up."
+    )
+    not_queried_over_limit: int = Field(
+        default=0, description="Pinned packages skipped by the per-scan query cap."
+    )
+    errors: list[str] = Field(default_factory=list)
 
 
 class ScanStats(BaseModel):
@@ -60,6 +89,7 @@ class ScanStats(BaseModel):
         default_factory=list,
         description="Files that required a legacy fallback because structured parsing failed.",
     )
+    vuln_lookup: VulnLookup = Field(default_factory=VulnLookup)
 
 
 class Inventory(BaseModel):
@@ -79,6 +109,8 @@ class Inventory(BaseModel):
     # inventory quadratic in the size of the dependency graph.
     _index: dict[tuple[str, str], Entity] = PrivateAttr(default_factory=dict)
     _indexed: tuple[int, int] = PrivateAttr(default=(0, 0))
+    _rel_index: dict[tuple[str, str, str], Relationship] = PrivateAttr(default_factory=dict)
+    _rel_indexed: tuple[int, int] = PrivateAttr(default=(0, 0))
 
     def add_entity(self, entity: Entity) -> Entity:
         """Add an entity, merging evidence into any existing match by natural key.
@@ -107,15 +139,20 @@ class Inventory(BaseModel):
 
     def add_relationship(self, relationship: Relationship) -> None:
         """Add an edge, deduplicating on (source, target, type)."""
-        for existing in self.relationships:
-            if (
-                existing.source_id == relationship.source_id
-                and existing.target_id == relationship.target_id
-                and existing.relationship == relationship.relationship
-            ):
-                existing.source_evidence.extend(relationship.source_evidence)
-                return
-        self.relationships.append(relationship)
+        stamp = (id(self.relationships), len(self.relationships))
+        if stamp != self._rel_indexed:
+            # Rebuilt if ``relationships`` was replaced or filtered elsewhere.
+            self._rel_index = {}
+            for rel in self.relationships:
+                self._rel_index.setdefault(_rel_key(rel), rel)
+        key = _rel_key(relationship)
+        existing = self._rel_index.get(key)
+        if existing is not None:
+            existing.source_evidence.extend(relationship.source_evidence)
+        else:
+            self.relationships.append(relationship)
+            self._rel_index[key] = relationship
+        self._rel_indexed = (id(self.relationships), len(self.relationships))
 
     def add_signal(self, signal: RiskSignal) -> None:
         """Add a risk signal, deduplicating on (kind, file, line)."""
@@ -149,6 +186,31 @@ class Inventory(BaseModel):
         for entity in self.entities:
             result[entity.type.value] = result.get(entity.type.value, 0) + 1
         return result
+
+
+#: Lockfile formats that record each package's own dependencies. Pipfile.lock
+#: and hash-pinned requirements pin versions but do not say who needs whom.
+GRAPH_LOCKFILES = frozenset({
+    "package-lock.json", "poetry.lock", "uv.lock", "cargo.lock", "composer.lock",
+    "gemfile.lock",
+})
+
+
+def dependencies_resolved(entity: Entity) -> bool:
+    """True when the scan knows this package's own dependencies.
+
+    A package seen only in a manifest (or in a lockfile that does not record
+    edges) has *unknown* dependencies; an empty list for it would be a false
+    claim that it is a leaf. Non-package components are judged by the linker,
+    which only emits proven edges, so for them an empty list is a statement.
+    """
+    if not isinstance(entity, Package):
+        return True
+    return any(
+        ev.kind == "lockfile" and ev.file.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        in GRAPH_LOCKFILES
+        for ev in entity.source_evidence
+    )
 
 
 def _merge_evidence(into: Entity, other: Entity) -> None:
@@ -268,3 +330,7 @@ def _extend_unique(target: list[T], values: Iterable[T]) -> None:
     for value in values:
         if value not in target:
             target.append(value)
+
+
+def _rel_key(rel: Relationship) -> tuple[str, str, str]:
+    return (rel.source_id, rel.target_id, rel.relationship.value)

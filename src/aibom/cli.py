@@ -54,6 +54,7 @@ from aibom.models.entities import EntityType
 from aibom.models.findings import Finding, SecurityScore, Severity
 from aibom.policy import production_view
 from aibom.report.html import render_html
+from aibom.risk.scoring import headline
 from aibom.service import ScanResult, run_scan
 
 
@@ -976,6 +977,9 @@ def _render(inventory: Inventory) -> None:
 
 
 def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
+    head = headline(findings)
+    style = {"action_required": "bold red", "review": "yellow"}.get(head.status, "green")
+    console.print(f"\n[{style}]{head.label}:[/] {head.detail}")
     cats = "  ".join(f"{c.category.value} {c.score}" for c in score.categories)
     grade_style = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "bold red"}
     highest = max(findings, key=lambda item: item.severity.rank).severity if findings else None
@@ -985,7 +989,7 @@ def _render_risk(findings: list[Finding], score: SecurityScore) -> None:
         else ""
     )
     console.print(
-        f"\n[bold]Security score:[/bold] "
+        "[bold]Supply-chain hygiene score (secondary):[/bold] "
         f"[{grade_style.get(score.grade, 'white')}]{score.overall}/100 "
         f"(grade {score.grade}{severity_note})[/]   [dim]{cats}[/dim]"
     )

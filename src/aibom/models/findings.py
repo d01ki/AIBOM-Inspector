@@ -55,6 +55,43 @@ class RiskCategory(str, Enum):
     CONFIGURATION = "configuration"
 
 
+class SeveritySource(BaseModel):
+    """One advisory database's rating of a vulnerability, kept so a merged
+    finding shows where its severity came from instead of a silent pick."""
+
+    advisory_id: str
+    severity: Severity | None = Field(
+        default=None, description="None when the advisory carries no rating."
+    )
+    source: str = Field(description="e.g. 'database_specific.severity' or 'CVSS_V3'.")
+    vector: str | None = Field(default=None, description="CVSS vector, when given.")
+    score: float | None = Field(default=None, description="CVSS v3 base score, when computed.")
+
+
+class Advisory(BaseModel):
+    """What a known-vulnerability finding was matched on (OSV)."""
+
+    ids: list[str] = Field(description="Every advisory id and alias merged into this finding.")
+    urls: list[str] = Field(default_factory=list, description="osv.dev page per advisory id.")
+    installed_version: str
+    fixed_version: str | None = Field(
+        default=None,
+        description="Lowest release that fixes every merged advisory; None when no "
+        "ecosystem release is known (a Git commit is never reported as a version).",
+    )
+    affected_ranges: list[str] = Field(default_factory=list)
+    match: str = Field(
+        default="exact pinned version queried against OSV",
+        description="How the package was matched to the advisory.",
+    )
+    severity_rule: str = Field(
+        default="highest rating among the merged advisories",
+        description="How the finding's severity was chosen from severity_sources.",
+    )
+    severity_sources: list[SeveritySource] = Field(default_factory=list)
+    modified: str | None = Field(default=None, description="Latest advisory modification time.")
+
+
 class Finding(BaseModel):
     """A single deterministic, evidence-backed risk finding."""
 
@@ -76,6 +113,9 @@ class Finding(BaseModel):
     evidence_level: str | None = Field(
         default=None,
         description="For path findings: proven_static | potential. Independent of severity.",
+    )
+    advisory: Advisory | None = Field(
+        default=None, description="Known-vulnerability findings: the matched advisory."
     )
 
 
