@@ -1,0 +1,62 @@
+name: Deploy to Cloud Run
+
+# Deploys main to the public site (https://aibom-inspector.com) once CI has
+# passed on that commit. Keyless: GitHub's OIDC token is exchanged for a
+# short-lived Google credential through Workload Identity Federation, and the
+# provider only accepts this workflow on main (docs/CLOUD_RUN_DEPLOYMENT.md).
+# Until the repository variables exist the job is skipped, not failed.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy at a time, in order; a running deploy is never cancelled halfway.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.GCP_PROJECT_ID != '' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
+      GCP_SERVICE: ${{ vars.GCP_SERVICE || 'aibom-inspector' }}
+    steps:
+      # The commit CI tested, not whatever main points at now.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy
+        run: bash scripts/deploy-cloud-run.sh --non-interactive
+
+      - name: Smoke test the new revision
+        run: |
+          url=$(gcloud run services describe "$GCP_SERVICE" --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" --format='value(status.url)')
+          curl -fsS --retry 5 --retry-delay 10 --retry-all-errors "$url/api/health"
+          curl -fsS --max-time 120 -X POST "$url/api/demo" -o /dev/null
+          echo "Deployed ${{ github.event.workflow_run.head_sha || github.sha }} to $url"
