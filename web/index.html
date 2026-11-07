@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip-link" href="#scanSection" data-i18n="nav.skip">Skip to repository analysis</a>
+<a class="skip-link" href="#scanSection">Skip to repository analysis</a>
 <div class="shell">
   <header class="appbar">
     <div class="appbar-inner">
@@ -26,13 +26,11 @@
         <span class="brand-name">AIBOM <span>Inspector</span></span>
       </a>
       <nav class="app-nav" aria-label="Main">
-        <a href="#analyze" data-view-link="analyze" aria-current="page" data-i18n="nav.analyze">Analyze</a>
-        <a href="#compare" data-view-link="compare" data-i18n="nav.compare">Compare changes</a>
-        <a href="#help" data-view-link="analyze" data-i18n="nav.help">Help</a>
+        <a href="#analyze" data-view-link="analyze" aria-current="page">Analyze</a>
+        <a href="#compare" data-view-link="compare">Compare changes</a>
+        <a href="#help" data-view-link="analyze">Help</a>
         <a href="https://github.com/d01ki/AIBOM-Inspector#readme"
-           target="_blank" rel="noopener noreferrer" data-i18n="nav.docs">Docs ↗</a>
-        <button type="button" class="lang-toggle" id="langToggle" lang="ja"
-                aria-label="日本語で表示">日本語</button>
+           target="_blank" rel="noopener noreferrer">Docs ↗</a>
       </nav>
     </div>
   </header>
@@ -40,43 +38,43 @@
   <main class="page" id="workspace">
   <div class="view" data-view="analyze" id="analyzeView">
     <section class="intro" aria-labelledby="page-title">
-      <h1 id="page-title" data-i18n="intro.title">See the AI models, SDKs, dependencies and risks in a repository</h1>
-      <p data-i18n="intro.body">Paste a public repository URL. AIBOM Inspector reads the code and manifests as text,
+      <h1 id="page-title">See the AI models, SDKs, dependencies and risks in a repository</h1>
+      <p>Paste a public repository URL. AIBOM Inspector reads the code and manifests as text,
         lists every dependency and AI component, and reports known vulnerabilities and risky
         agent paths. Every result points to the file and line it came from.</p>
     </section>
 
     <section class="panel scan-panel" id="scanSection" aria-labelledby="scan-title">
-      <h2 id="scan-title" class="visually-hidden" data-i18n="scan.title">Analyze a repository</h2>
+      <h2 id="scan-title" class="visually-hidden">Analyze a repository</h2>
       <div class="scan-grid">
         <div class="field">
-          <label for="repo" data-i18n="scan.repo">Repository URL</label>
+          <label for="repo">Repository URL</label>
           <input type="url" id="repo" placeholder="https://github.com/owner/repository"
                  autocomplete="off" spellcheck="false" aria-describedby="status">
         </div>
         <div class="field field-ref">
-          <label for="repoRef" data-i18n="scan.ref">Branch, tag or commit <span class="optional">optional</span></label>
+          <label for="repoRef">Branch, tag or commit <span class="optional">optional</span></label>
           <input type="text" id="repoRef" placeholder="default branch" autocomplete="off"
-                 spellcheck="false" data-i18n-attr="placeholder:scan.refPlaceholder">
+                 spellcheck="false">
         </div>
-        <button id="scan" type="button" class="primary" data-i18n="scan.button">Analyze repository</button>
+        <button id="scan" type="button" class="primary">Analyze repository</button>
       </div>
       <div class="scan-secondary">
-        <button class="link" id="runDemo" type="button" data-i18n="scan.demo">Try the bundled sample</button>
-        <span class="muted" data-i18n="scan.or">or</span>
-        <button class="link" id="loadExample" type="button" data-i18n="scan.example">use a public example URL</button>
+        <button class="link" id="runDemo" type="button">Try the bundled sample</button>
+        <span class="muted">or</span>
+        <button class="link" id="loadExample" type="button">use a public example URL</button>
       </div>
 
       <details class="disclosure" id="sampleInfo">
-        <summary data-i18n="sample.summary">What the sample contains</summary>
-        <p data-i18n="sample.body">A two-file FastAPI + OpenAI Agents app shipped with AIBOM Inspector as a test
+        <summary>What the sample contains</summary>
+        <p>A two-file FastAPI + OpenAI Agents app shipped with AIBOM Inspector as a test
           fixture. It is deliberately vulnerable: a request body is concatenated into an
           agent's instructions, and that agent can call a tool that runs shell commands. It is
           scanned offline and never executed.</p>
       </details>
       <details class="disclosure" id="coverageInfo">
-        <summary data-i18n="coverage.summary">What is analyzed, and what is not</summary>
-        <ul data-i18n="coverage.list">
+        <summary>What is analyzed, and what is not</summary>
+        <ul>
           <li><strong>Dependencies:</strong> requirements*.txt, pyproject.toml, Pipfile,
             package.json, go.mod, Cargo.toml, composer.json, Gemfile and more. Package-to-package
             relations come only from lockfiles that record them (package-lock.json, poetry.lock,
@@ -91,8 +89,8 @@
         </ul>
       </details>
       <details class="disclosure" id="dataInfo">
-        <summary data-i18n="data.summary">Where your data goes</summary>
-        <ul data-i18n="data.list">
+        <summary>Where your data goes</summary>
+        <ul>
           <li>The repository is shallow-cloned into a temporary directory on the analysis
             server and deleted when the analysis ends. Results are not stored on the server.</li>
           <li>Package names, ecosystems and exact versions are sent to
@@ -104,16 +102,16 @@
         </ul>
       </details>
       <details class="disclosure" id="advancedInfo">
-        <summary data-i18n="adv.summary">Advanced: analysis backend</summary>
+        <summary>Advanced: analysis backend</summary>
         <p class="api-line"><span id="apiLine"></span></p>
         <div class="api-endpoint" id="apiEndpointBlock">
-          <label for="apiEndpoint" data-i18n="adv.label">Backend address</label>
+          <label for="apiEndpoint">Backend address</label>
           <div class="inline-row">
             <input type="url" id="apiEndpoint" placeholder="https://your-backend.example.com"
                    autocomplete="off" spellcheck="false" aria-describedby="apiEndpointHelp">
-            <button id="saveApiEndpoint" type="button" data-i18n="adv.save">Use this backend</button>
+            <button id="saveApiEndpoint" type="button">Use this backend</button>
           </div>
-          <p class="help" id="apiEndpointHelp" data-i18n="adv.help">The repository URL and the analysis results go to
+          <p class="help" id="apiEndpointHelp">The repository URL and the analysis results go to
             this address. Start your own with <code>aibom serve</code> or the Docker image. The
             address is remembered in this browser only.</p>
         </div>
@@ -125,7 +123,7 @@
           <span class="spinner" aria-hidden="true"></span>
           <span id="progressStage">Starting…</span>
           <span class="muted" id="progressElapsed">0 s</span>
-          <button type="button" class="ghost small" id="cancelScan" data-i18n="progress.cancel">Cancel</button>
+          <button type="button" class="ghost small" id="cancelScan">Cancel</button>
         </div>
         <ol class="progress-steps" id="progressSteps" aria-label="Analysis steps" hidden></ol>
       </div>
@@ -142,47 +140,41 @@
         </div>
         <div class="exports" aria-label="Download results">
           <button class="ghost" id="download" type="button" disabled
-                  title="A self-contained page to share with people"
-                  data-i18n="exp.html" data-i18n-attr="title:exp.htmlTitle">HTML report<small>to share</small></button>
+                  title="A self-contained page to share with people">HTML report<small>to share</small></button>
           <button class="ghost" id="downloadCdx" type="button" disabled
-                  title="CycloneDX 1.6 SBOM for Dependency-Track and other SBOM tools"
-                  data-i18n="exp.cdx" data-i18n-attr="title:exp.cdxTitle">CycloneDX<small>SBOM tools</small></button>
+                  title="CycloneDX 1.6 SBOM for Dependency-Track and other SBOM tools">CycloneDX<small>SBOM tools</small></button>
           <button class="ghost" id="downloadSarif" type="button" disabled
-                  title="SARIF 2.1.0 for GitHub code scanning"
-                  data-i18n="exp.sarif" data-i18n-attr="title:exp.sarifTitle">SARIF<small>code scanning</small></button>
+                  title="SARIF 2.1.0 for GitHub code scanning">SARIF<small>code scanning</small></button>
           <button class="ghost" id="downloadInventory" type="button" disabled
-                  title="Every detected entity and relationship as raw JSON"
-                  data-i18n="exp.inv" data-i18n-attr="title:exp.invTitle">Inventory JSON<small>raw data</small></button>
+                  title="Every detected entity and relationship as raw JSON">Inventory JSON<small>raw data</small></button>
         </div>
       </header>
       <p class="stale-note" id="staleNote" hidden></p>
-      <p class="lang-note" id="langNote" data-i18n="results.langNote" hidden></p>
 
       <div id="scanResult">
       <section class="summary" id="securitySummary" aria-label="Summary"></section>
 
       <nav class="tabs" aria-label="Result sections" role="tablist">
-        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="true"><span data-i18n="tab.findings">Findings</span> <span class="tab-count" id="tabCountFindings"></span></button>
-        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="false"><span data-i18n="tab.deps">Dependencies</span> <span class="tab-count" id="tabCountDeps"></span></button>
-        <button type="button" role="tab" class="result-tab" data-tab="graph" aria-selected="false" data-i18n="tab.graph">AI usage map</button>
-        <button type="button" role="tab" class="result-tab" data-tab="agent" aria-selected="false" id="agentTab" data-i18n="tab.agent">Agent paths</button>
-        <button type="button" role="tab" class="result-tab" data-tab="inventory" aria-selected="false"><span data-i18n="tab.inventory">Inventory</span> <span class="tab-count" id="tabCountInventory"></span></button>
-        <button type="button" role="tab" class="result-tab" data-tab="compliance" aria-selected="false" data-i18n="tab.compliance">SBOM fields</button>
+        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="true">Findings <span class="tab-count" id="tabCountFindings"></span></button>
+        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="false">Dependencies <span class="tab-count" id="tabCountDeps"></span></button>
+        <button type="button" role="tab" class="result-tab" data-tab="graph" aria-selected="false">AI usage map</button>
+        <button type="button" role="tab" class="result-tab" data-tab="agent" aria-selected="false" id="agentTab">Agent paths</button>
+        <button type="button" role="tab" class="result-tab" data-tab="inventory" aria-selected="false">Inventory <span class="tab-count" id="tabCountInventory"></span></button>
+        <button type="button" role="tab" class="result-tab" data-tab="compliance" aria-selected="false">SBOM fields</button>
       </nav>
 
       <section class="tab-panel" id="findingsSection" data-panel="findings" aria-labelledby="findings-title">
         <div class="section-head">
           <div>
-            <h2 id="findings-title"><span data-i18n="tab.findings">Findings</span> <span class="count" id="findingCount"></span></h2>
-            <p class="section-description" data-i18n="findings.desc">Vulnerable packages first, with one upgrade that
+            <h2 id="findings-title">Findings <span class="count" id="findingCount"></span></h2>
+            <p class="section-description">Vulnerable packages first, with one upgrade that
               clears every advisory that has a known fixed release. Then the code and
               configuration findings: impact, evidence, and fix.</p>
           </div>
           <div class="toolbar" aria-label="Filter findings">
-            <input type="text" id="findingSearch" placeholder="Search findings" aria-label="Search findings"
-                   data-i18n-attr="placeholder:findings.search;aria-label:findings.search">
+            <input type="text" id="findingSearch" placeholder="Search findings" aria-label="Search findings">
             <select id="severityFilter" aria-label="Filter findings by severity">
-              <option value="all" data-i18n="findings.allSev">All severities</option>
+              <option value="all">All severities</option>
               <option value="critical">Critical</option>
               <option value="high">High</option>
               <option value="medium">Medium</option>
@@ -192,13 +184,13 @@
           </div>
         </div>
         <div id="vulnPackages" class="vuln-packages"></div>
-        <h3 class="subhead" id="codeFindingsTitle" data-i18n="findings.code">Code and configuration findings</h3>
+        <h3 class="subhead" id="codeFindingsTitle">Code and configuration findings</h3>
         <div class="tablewrap"><table id="findings">
-          <thead><tr><th data-i18n="col.severity">Severity</th><th class="col-rule" data-i18n="col.rule">Rule</th><th data-i18n="col.impact">Impact · evidence · fix</th><th data-i18n="col.location">Location</th></tr></thead>
+          <thead><tr><th>Severity</th><th class="col-rule">Rule</th><th>Impact · evidence · fix</th><th>Location</th></tr></thead>
           <tbody></tbody>
         </table></div>
         <details class="disclosure score-box" id="overview">
-          <summary><span data-i18n="score.summary">Supply-chain hygiene score (secondary)</span> <span id="scoreBrief"></span></summary>
+          <summary>Supply-chain hygiene score (secondary) <span id="scoreBrief"></span></summary>
           <div class="score-grid">
             <div class="score">
               <div class="num" id="scoreNum">–</div>
@@ -209,7 +201,7 @@
               <div class="chips" id="chips" aria-label="Finding severity counts"></div>
             </div>
           </div>
-          <p class="help" data-i18n="score.help">The score measures the hygiene of the detected AI components: each of
+          <p class="help">The score measures the hygiene of the detected AI components: each of
             integrity, provenance, licensing and configuration starts at 100 and loses 40 / 20 /
             10 / 3 points per critical / high / medium / low finding (at most 3 per rule); the
             total weights the average and the weakest category. It is not a pass/fail verdict:
@@ -220,26 +212,25 @@
       <section class="tab-panel" id="depsSection" data-panel="deps" aria-labelledby="deps-title" hidden>
         <div class="section-head">
           <div>
-            <h2 id="deps-title"><span data-i18n="tab.deps">Dependencies</span> <span class="count" id="depsCount"></span></h2>
+            <h2 id="deps-title">Dependencies <span class="count" id="depsCount"></span></h2>
             <p class="section-description" id="depsLead"></p>
           </div>
           <div class="toolbar" aria-label="Filter dependencies">
-            <input type="text" id="depsSearch" placeholder="Search packages" aria-label="Search packages"
-                   data-i18n-attr="placeholder:deps.search;aria-label:deps.search">
+            <input type="text" id="depsSearch" placeholder="Search packages" aria-label="Search packages">
             <select id="depsFilter" aria-label="Filter packages">
-              <option value="all" data-i18n="deps.all">All packages</option>
-              <option value="direct" data-i18n="deps.direct">Direct only</option>
-              <option value="transitive" data-i18n="deps.transitive">Transitive only</option>
-              <option value="ai" data-i18n="deps.ai">AI packages</option>
-              <option value="findings" data-i18n="deps.findings">With findings</option>
-              <option value="unknown" data-i18n="deps.unknown">Relations unknown</option>
+              <option value="all">All packages</option>
+              <option value="direct">Direct only</option>
+              <option value="transitive">Transitive only</option>
+              <option value="ai">AI packages</option>
+              <option value="findings">With findings</option>
+              <option value="unknown">Relations unknown</option>
             </select>
           </div>
         </div>
         <div class="notice" id="depsNotice" hidden></div>
         <div class="tablewrap"><table id="deps">
-          <thead><tr><th data-i18n="col.package">Package</th><th data-i18n="col.version">Version</th><th data-i18n="col.scope">Scope</th><th data-i18n="col.dependsOn">Depends on</th>
-            <th data-i18n="col.requiredBy">Required by</th><th data-i18n="col.declaredIn">Declared in</th><th data-i18n="tab.findings">Findings</th></tr></thead>
+          <thead><tr><th>Package</th><th>Version</th><th>Scope</th><th>Depends on</th>
+            <th>Required by</th><th>Declared in</th><th>Findings</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </section>
@@ -247,7 +238,7 @@
       <section class="tab-panel" id="graphSection" data-panel="graph" aria-labelledby="graph-title" hidden>
         <div class="section-head">
           <div>
-            <h2 id="graph-title" data-i18n="tab.graph">AI usage map</h2>
+            <h2 id="graph-title">AI usage map</h2>
             <p class="section-description" id="graphLead">AI components and how they connect.</p>
           </div>
         </div>
@@ -262,7 +253,7 @@
               <span><i style="background:#b9582f"></i>high</span>
               <span><i style="background:#9b701c"></i>medium</span>
               <span><i style="background:#39745b"></i>low</span>
-              <span><i style="background:#6b7280"></i><span data-i18n="legend.noFinding">no finding</span></span>
+              <span><i style="background:#6b7280"></i>no finding</span>
             </div>
             <div class="legend" id="edgeLegend" aria-label="Edge types" hidden></div>
           </div>
@@ -273,8 +264,8 @@
       <section class="tab-panel" id="agentSection" data-panel="agent" aria-labelledby="agent-title" hidden>
         <div class="section-head">
           <div>
-            <h2 id="agent-title" data-i18n="tab.agent">Agent paths</h2>
-            <p class="section-description" data-i18n="agent.desc">Which agent can reach which tool and cloud operation,
+            <h2 id="agent-title">Agent paths</h2>
+            <p class="section-description">Which agent can reach which tool and cloud operation,
               across which MCP server, and whether the supplied identity policy allows it.
               A static path is not a proven exploit, and “potentially allowed” is judged only
               against the supplied identity policies, not AWS effective authorization.
@@ -287,11 +278,11 @@
           <div>
             <div id="agentGraph" class="sec-graph"></div>
             <div class="legend sec-legend" aria-label="Edge legend">
-              <span><i class="lg-allowed"></i><span data-i18n="legend.allowed">potentially allowed</span></span>
-              <span><i class="lg-denied"></i><span data-i18n="legend.denied">explicitly denied</span></span>
-              <span><i class="lg-nomatch"></i><span data-i18n="legend.nomatch">no matching allow</span></span>
-              <span><i class="lg-unknown"></i><span data-i18n="legend.unknown">unknown</span></span>
-              <span><i class="lg-dormant"></i><span data-i18n="legend.dormant">defined, not exposed</span></span>
+              <span><i class="lg-allowed"></i>potentially allowed</span>
+              <span><i class="lg-denied"></i>explicitly denied</span>
+              <span><i class="lg-nomatch"></i>no matching allow</span>
+              <span><i class="lg-unknown"></i>unknown</span>
+              <span><i class="lg-dormant"></i>defined, not exposed</span>
             </div>
           </div>
           <div class="card detail sec-detail" id="agentDetail"></div>
@@ -302,34 +293,33 @@
       <section class="tab-panel" id="inventorySection" data-panel="inventory" aria-labelledby="inventory-title" hidden>
         <div class="section-head">
           <div>
-            <h2 id="inventory-title"><span data-i18n="tab.inventory">Inventory</span> <span class="count" id="invSummary"></span></h2>
-            <p class="section-description" data-i18n="inv.desc">Everything the scan found, including test, example
+            <h2 id="inventory-title">Inventory <span class="count" id="invSummary"></span></h2>
+            <p class="section-description">Everything the scan found, including test, example
               and documentation files. <strong>Entry-point reachability</strong> says whether
               static analysis connected a component to a production entry point; “unknown”
               means it could not tell, not that the component is unreachable. Tool binding to
               agents is shown under Agent paths.</p>
           </div>
           <div class="toolbar" aria-label="Filter inventory">
-            <input type="text" id="inventorySearch" placeholder="Search inventory" aria-label="Search inventory"
-                   data-i18n-attr="placeholder:inv.search;aria-label:inv.search">
+            <input type="text" id="inventorySearch" placeholder="Search inventory" aria-label="Search inventory">
             <select id="typeFilter" aria-label="Filter inventory by component type">
-              <option value="all" data-i18n="inv.allTypes">All types</option>
+              <option value="all">All types</option>
             </select>
             <select id="contextFilter" aria-label="Filter inventory by source context">
-              <option value="all" data-i18n="inv.allContexts">All contexts</option>
+              <option value="all">All contexts</option>
             </select>
             <select id="reachFilter" aria-label="Filter inventory by entry-point reachability">
-              <option value="all" data-i18n="inv.anyReach">Any reachability</option>
-              <option value="true" data-i18n="inv.reachable">Reachable</option>
-              <option value="false" data-i18n="inv.notReachable">Not reachable</option>
-              <option value="unknown" data-i18n="inv.reachUnknown">Reachability unknown</option>
-              <option value="n/a" data-i18n="inv.na">Not applicable</option>
+              <option value="all">Any reachability</option>
+              <option value="true">Reachable</option>
+              <option value="false">Not reachable</option>
+              <option value="unknown">Reachability unknown</option>
+              <option value="n/a">Not applicable</option>
             </select>
           </div>
         </div>
         <div class="tablewrap"><table id="inventory">
-          <thead><tr><th data-i18n="col.type">Type</th><th data-i18n="col.name">Name</th><th data-i18n="col.version">Version</th><th data-i18n="col.provider">Provider / source</th>
-            <th data-i18n="col.usage">Usage · entry-point reachability</th><th data-i18n="col.context">Context</th><th data-i18n="col.evidence">Evidence</th></tr></thead>
+          <thead><tr><th>Type</th><th>Name</th><th>Version</th><th>Provider / source</th>
+            <th>Usage · entry-point reachability</th><th>Context</th><th>Evidence</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </section>
@@ -337,8 +327,8 @@
       <section class="tab-panel" id="elementsSection" data-panel="compliance" aria-labelledby="elements-title" hidden>
         <div class="section-head">
           <div>
-            <h2 id="elements-title" data-i18n="sbom.title">SBOM fields (CISA 2026 minimum elements)</h2>
-            <p class="section-description" data-i18n="sbom.desc">How completely the generated CycloneDX file fills
+            <h2 id="elements-title">SBOM fields (CISA 2026 minimum elements)</h2>
+            <p class="section-description">How completely the generated CycloneDX file fills
               the fields listed in CISA's 2026 SBOM minimum elements. This is a machine check of
               the file this tool produced, not a certification or an audit of the repository.
               <strong>Filled</strong>: populated from evidence. <strong>Partly filled</strong>:
@@ -348,8 +338,8 @@
         </div>
         <div class="elements-summary" id="elementsSummary"></div>
         <div class="tablewrap"><table id="elements">
-          <thead><tr><th data-i18n="col.status">Status</th><th data-i18n="col.element">Element</th><th data-i18n="col.since">Since</th><th data-i18n="col.coverage">Coverage</th>
-            <th data-i18n="col.cdxField">CycloneDX field</th></tr></thead>
+          <thead><tr><th>Status</th><th>Element</th><th>Since</th><th>Coverage</th>
+            <th>CycloneDX field</th></tr></thead>
           <tbody></tbody>
         </table></div>
       </section>
@@ -358,11 +348,11 @@
     </section>
 
     <section class="panel help-panel" id="help" aria-labelledby="help-title">
-      <h2 id="help-title" data-i18n="nav.help">Help</h2>
+      <h2 id="help-title">Help</h2>
       <div class="help-grid">
         <section>
-          <h3 data-i18n="help.reposTitle">Accepted repositories</h3>
-          <ul data-i18n="help.repos">
+          <h3>Accepted repositories</h3>
+          <ul>
             <li>Public repositories on github.com, gitlab.com, bitbucket.org and codeberg.org,
               as <code>https://host/owner/repository</code>.</li>
             <li>Optional: a branch, tag or full commit SHA in the second field.</li>
@@ -371,8 +361,8 @@
           </ul>
         </section>
         <section>
-          <h3 data-i18n="help.limitsTitle">Limits and failures</h3>
-          <ul data-i18n="help.limits">
+          <h3>Limits and failures</h3>
+          <ul>
             <li>The clone times out after 120 seconds; checkouts over 300 MB or 60,000 files are
               rejected. Use the CLI on a local checkout for larger repositories.</li>
             <li>“No analysis backend”: this page is only the interface; set a backend under
@@ -382,8 +372,8 @@
           </ul>
         </section>
         <section>
-          <h3 data-i18n="help.examplesTitle">Examples by purpose</h3>
-          <ul data-i18n="help.examples">
+          <h3>Examples by purpose</h3>
+          <ul>
             <li><strong>Dependencies and advisories:</strong>
               <button class="link" type="button" data-example="https://github.com/openai/openai-quickstart-python">openai/openai-quickstart-python</button>
               (no agents; many packages).</li>
@@ -394,8 +384,8 @@
           </ul>
         </section>
         <section>
-          <h3 data-i18n="help.cliTitle">Command line</h3>
-          <ul data-i18n="help.cli">
+          <h3>Command line</h3>
+          <ul>
             <li><code>pip install "aibom[server]"</code>, then <code>aibom scan PATH</code> for a
               local checkout (private code never leaves your machine).</li>
             <li><code>aibom diff BASE HEAD --fail-on high</code> fails CI on a new risky path;
@@ -408,59 +398,59 @@
 
   <div class="view" data-view="compare" id="compareView" hidden>
     <section class="intro" aria-labelledby="compare-title">
-      <h1 id="compare-title" data-i18n="cmp.title">Compare changes between two revisions</h1>
-      <p data-i18n="cmp.body">Two scans of the same repository are compared on separate questions: did the
+      <h1 id="compare-title">Compare changes between two revisions</h1>
+      <p>Two scans of the same repository are compared on separate questions: did the
         components change, did a new path appear from untrusted input to a tool an agent can
         call, and did an agent gain cloud permissions. The component list can stay identical
         while the other two change.</p>
     </section>
 
     <section class="panel results-area compare-area" id="compareSection" aria-labelledby="compare-form-title">
-      <h2 id="compare-form-title" data-i18n="cmp.formTitle">Your repository</h2>
+      <h2 id="compare-form-title">Your repository</h2>
       <div class="compare-form">
         <div class="field compare-url">
-          <label for="compareRepo" data-i18n="scan.repo">Repository URL</label>
+          <label for="compareRepo">Repository URL</label>
           <input type="url" id="compareRepo" placeholder="https://github.com/owner/repository"
                  autocomplete="off" spellcheck="false">
         </div>
         <div class="field">
-          <label for="compareBase" data-i18n="cmp.base">Baseline</label>
+          <label for="compareBase">Baseline</label>
           <input type="text" id="compareBase" placeholder="main" autocomplete="off" spellcheck="false">
         </div>
         <div class="field">
-          <label for="compareHead" data-i18n="cmp.head">Candidate</label>
+          <label for="compareHead">Candidate</label>
           <input type="text" id="compareHead" placeholder="branch, tag, or commit SHA"
-                 autocomplete="off" spellcheck="false" data-i18n-attr="placeholder:cmp.headPlaceholder">
+                 autocomplete="off" spellcheck="false">
         </div>
-        <button id="compareRun" type="button" class="primary" data-i18n="cmp.run">Compare</button>
+        <button id="compareRun" type="button" class="primary">Compare</button>
       </div>
-      <p class="help" data-i18n="cmp.help">Compared: models, packages, services and tools (prompts are compared as
+      <p class="help">Compared: models, packages, services and tools (prompts are compared as
         paths); input-to-tool paths; and agent permissions when the repository has an
         <code>aibom-identity.yaml</code> mapping agents to IAM policy files (otherwise that part
         is reported as not evaluated). For CI, run <code>aibom diff</code> with
         <code>--fail-on high</code>.</p>
 
-      <h2 class="demo-heading" data-i18n="cmp.demoHeading">Examples with bundled data <span class="demo-badge">Demo</span></h2>
-      <p class="help" data-i18n="cmp.demoHelp">These run offline on fixtures shipped with AIBOM Inspector. They show
+      <h2 class="demo-heading">Examples with bundled data <span class="demo-badge">Demo</span></h2>
+      <p class="help">These run offline on fixtures shipped with AIBOM Inspector. They show
         what the comparison reports; they do not analyze or verify your code.</p>
       <div class="demo-grid">
         <div class="demo-card">
-          <h3 data-i18n="cmp.pathTitle">New input-to-tool path</h3>
-          <p data-i18n="cmp.pathBody">A route, a prompt builder, an agent and a tool across four files; the candidate
+          <h3>New input-to-tool path</h3>
+          <p>A route, a prompt builder, an agent and a tool across four files; the candidate
             concatenates request data into the agent's instructions.</p>
           <div class="inline-row">
-            <button id="compareDemoPy" type="button" class="ghost" data-i18n="cmp.demoPy">Python demo</button>
-            <button id="compareDemoTs" type="button" class="ghost" data-i18n="cmp.demoTs">TypeScript demo</button>
-            <button id="compareDemoFix" type="button" class="ghost" data-i18n="cmp.fixed">Bundled fixed revision</button>
+            <button id="compareDemoPy" type="button" class="ghost">Python demo</button>
+            <button id="compareDemoTs" type="button" class="ghost">TypeScript demo</button>
+            <button id="compareDemoFix" type="button" class="ghost">Bundled fixed revision</button>
           </div>
         </div>
         <div class="demo-card">
-          <h3 data-i18n="cmp.privTitle">Agent permission change</h3>
-          <p data-i18n="cmp.privBody">The code is unchanged but the identity policy grows, or an MCP tool filter is
+          <h3>Agent permission change</h3>
+          <p>The code is unchanged but the identity policy grows, or an MCP tool filter is
             removed: an agent that could only read can now write.</p>
           <div class="inline-row">
-            <button id="driftDemoPolicy" type="button" class="ghost" data-i18n="cmp.policyOnly">Policy-only change</button>
-            <button id="driftDemoMcp" type="button" class="ghost" data-i18n="cmp.mcpRemoved">MCP tool filter removed</button>
+            <button id="driftDemoPolicy" type="button" class="ghost">Policy-only change</button>
+            <button id="driftDemoMcp" type="button" class="ghost">MCP tool filter removed</button>
           </div>
         </div>
       </div>
@@ -481,8 +471,8 @@
           <span class="revision-arrow" aria-hidden="true">→</span>
           <article class="revision" id="candidateCard" aria-label="Candidate revision"></article>
         </div>
-        <h3 class="subhead" data-i18n="cmp.pathChanges">Path changes</h3>
-        <p class="help" data-i18n="cmp.pathHelp">Severity is the potential impact of the operation the tool can reach.
+        <h3 class="subhead">Path changes</h3>
+        <p class="help">Severity is the potential impact of the operation the tool can reach.
           Evidence is how much of the path was proven: <strong>Proven statically</strong> (every
           hop resolved), <strong>Potential</strong> (an assumption was needed; never Critical),
           <strong>Unknown</strong> (shown, never fails CI). Select a node for its file, line and
@@ -490,9 +480,9 @@
         <div id="pathChanges"></div>
         <div class="node-detail" id="nodeDetail" hidden></div>
         <div id="comparePrivileges"></div>
-        <h3 class="subhead" data-i18n="cmp.other">Other changes</h3>
+        <h3 class="subhead">Other changes</h3>
         <div class="tablewrap"><table id="otherChanges">
-          <thead><tr><th data-i18n="col.severity">Severity</th><th data-i18n="col.kind">Kind</th><th data-i18n="col.change">Change</th><th data-i18n="col.evidence">Evidence</th></tr></thead>
+          <thead><tr><th>Severity</th><th>Kind</th><th>Change</th><th>Evidence</th></tr></thead>
           <tbody></tbody>
         </table></div>
         <h3 class="subhead" id="compareDepTitle">AI usage map · candidate</h3>
@@ -506,7 +496,7 @@
       </div>
 
       <div class="compare-result" id="privResult" tabindex="-1" hidden>
-        <p class="overline" data-i18n="cmp.demoResult">Demo result · bundled data</p>
+        <p class="overline">Demo result · bundled data</p>
         <div class="verdicts verdicts-3">
           <div class="verdict" id="driftBomVerdict"></div>
           <div class="verdict" id="driftPrivVerdict"></div>
@@ -514,17 +504,17 @@
         </div>
         <div class="revisions" id="driftRevisions"></div>
         <div class="stage-toggle" role="group" aria-label="Revision shown in the graph">
-          <span data-i18n="cmp.show">Show:</span>
-          <button type="button" class="ghost" data-stage="baseline" aria-pressed="false" data-i18n="cmp.base">Baseline</button>
-          <button type="button" class="ghost" data-stage="candidate" aria-pressed="true" data-i18n="cmp.head">Candidate</button>
-          <button type="button" class="ghost" data-stage="fixed" aria-pressed="false" data-i18n="cmp.fixed">Bundled fixed revision</button>
-          <small data-i18n="cmp.highlighted">Highlighted: added or changed against the baseline.</small>
+          <span>Show:</span>
+          <button type="button" class="ghost" data-stage="baseline" aria-pressed="false">Baseline</button>
+          <button type="button" class="ghost" data-stage="candidate" aria-pressed="true">Candidate</button>
+          <button type="button" class="ghost" data-stage="fixed" aria-pressed="false">Bundled fixed revision</button>
+          <small>Highlighted: added or changed against the baseline.</small>
         </div>
         <div class="sec-graph-grid">
           <div id="driftGraph" class="sec-graph"></div>
           <div class="card detail sec-detail" id="driftDetail"></div>
         </div>
-        <h3 class="subhead" data-i18n="cmp.whatChanged">What changed: impact · evidence · fix</h3>
+        <h3 class="subhead">What changed: impact · evidence · fix</h3>
         <div id="driftChanges"></div>
         <h3 class="subhead" id="driftDepTitle">AI usage map · candidate</h3>
         <div class="graphgrid dep-map">
@@ -540,15 +530,14 @@
   </main>
 
   <footer class="page-footer">
-    <span data-i18n="footer.tagline">AIBOM Inspector · static, evidence-backed repository analysis</span>
-    <a href="https://github.com/d01ki/AIBOM-Inspector" target="_blank" rel="noopener noreferrer" data-i18n="footer.source">Source</a>
+    <span>AIBOM Inspector · static, evidence-backed repository analysis</span>
+    <a href="https://github.com/d01ki/AIBOM-Inspector" target="_blank" rel="noopener noreferrer">Source</a>
     <a href="https://github.com/d01ki/AIBOM-Inspector/blob/main/docs/detection-methodology.md"
-       target="_blank" rel="noopener noreferrer" data-i18n="footer.method">Methodology</a>
+       target="_blank" rel="noopener noreferrer">Methodology</a>
     <span>Apache-2.0</span>
   </footer>
 </div>
 
-<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

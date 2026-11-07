@@ -61,8 +61,8 @@ stack).
 ## Known gaps / what usually breaks
 
 Changing a response key breaks the UI silently. Run the Web UI checks with any
-API change. A new scan stage must be added to `STAGES` in `web/app.js` (and its
-Japanese label in `web/i18n.js`); `tests/test_web_ui.py` compares the two lists.
+API change. A new scan stage must be added to `STAGES` in `web/app.js`; `tests/test_web_ui.py`
+compares the two lists.
 The browser check intercepts both `/api/scan` and `/api/scan/stream` to keep
 the run offline: a new scan route needs the same interception.
 

@@ -91,8 +91,7 @@ function loadExample() {
   const input = $("repo");
   input.value = EXAMPLE_REPO;
   input.removeAttribute("aria-invalid");
-  setStatus(t("status.example", "Example URL added. Start the analysis when you are ready."),
-    false);
+  setStatus("Example URL added. Start the analysis when you are ready.", false);
   input.focus();
 }
 
@@ -127,18 +126,18 @@ const STAGES = {
   agents: "Analyze agent paths",
   report: "Build the result",
 };
-const stageLabel = (id) => t("stage." + id, STAGES[id] || id);
 
 // Each reported stage becomes a step; earlier ones are marked done.
 function showStage(id, seen) {
   seen.push(id);
-  $("progressStage").textContent = stageLabel(id) + "…";
+  const label = (s) => STAGES[s] || s;
+  $("progressStage").textContent = label(id) + "…";
   const list = $("progressSteps");
   list.hidden = false;
   list.innerHTML = seen.map((s, i) => {
     const done = i < seen.length - 1;
     return `<li class="${done ? "done" : "current"}"${done ? "" : ' aria-current="step"'}>`
-      + `${done ? "✓ " : ""}${esc(stageLabel(s))}</li>`;
+      + `${done ? "✓ " : ""}${esc(label(s))}</li>`;
   }).join("");
 }
 
@@ -150,8 +149,7 @@ async function runAnalysis(button, busyLabel, spec) {
   const hadResult = !$("results").hidden;
   const stale = $("staleNote");
   stale.hidden = !hadResult;
-  stale.textContent = t("stale.running",
-    "Showing the previous result while the new analysis runs.");
+  stale.textContent = "Showing the previous result while the new analysis runs.";
   setStatus(spec.status, false);
   const controller = new AbortController();
   activeScan = controller;
@@ -161,10 +159,8 @@ async function runAnalysis(button, busyLabel, spec) {
   const progress = { streamed: false, stage: (id) => showStage(id, seen) };
   $("progressSteps").hidden = true;
   $("progressSteps").innerHTML = "";
-  $("progressSteps").setAttribute("aria-label", t("progress.steps", "Analysis steps"));
   const tick = () => {
-    const secs = Math.floor((Date.now() - started) / 1000);
-    $("progressElapsed").textContent = t("progress.elapsed", "{s} s elapsed", { s: secs });
+    $("progressElapsed").textContent = Math.floor((Date.now() - started) / 1000) + " s elapsed";
   };
   tick();
   $("progress").hidden = false;
@@ -179,20 +175,18 @@ async function runAnalysis(button, busyLabel, spec) {
     $("results").scrollIntoView({ behavior, block: "start" });
     $("results").focus({ preventScroll: true });
   } catch (e) {
-    const keep = hadResult
-      ? t("status.keep", " The previous result is still shown below.") : "";
+    const keep = hadResult ? " The previous result is still shown below." : "";
     if (e.name === "AbortError") {
       setStatus((progress.streamed
-        ? t("status.cancelled", "Cancelled. The backend stops the analysis before its next step.")
-        : t("status.cancelledOld", "Cancelled. The page stopped waiting; the backend may still "
-          + "finish and discard the work.")) + keep, false);
+        ? "Cancelled. The backend stops the analysis before its next step."
+        : "Cancelled. The page stopped waiting; the backend may still finish and "
+          + "discard the work.") + keep, false);
     } else {
       const missing = e instanceof BackendUnavailable;
       setStatus(spec.failure + ": " + e.message + keep, true);
       if (missing) showApiEndpointField();
     }
-    stale.textContent = t("stale.failed",
-      "Showing the previous result: the latest analysis did not complete.");
+    stale.textContent = "Showing the previous result: the latest analysis did not complete.";
   } finally {
     clearInterval(timer);
     $("progress").hidden = true;
@@ -207,16 +201,15 @@ async function runAnalysis(button, busyLabel, spec) {
 function runDemo() {
   showView("analyze");
   const info = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
-  return runAnalysis($("runDemo"), t("status.busySample", "Scanning the sample…"), {
-    status: t("status.scanningSample", "Scanning the bundled sample app (offline)…"),
-    progress: t("progress.sample", "Static analysis of the bundled sample (no clone, no network)"),
-    failure: t("status.sampleFailed", "The bundled sample scan could not be completed"),
+  return runAnalysis($("runDemo"), "Scanning the sample…", {
+    status: "Scanning the bundled sample app (offline)…",
+    progress: "Static analysis of the bundled sample (no clone, no network)",
+    failure: "The bundled sample scan could not be completed",
     requestInfo: info,
     request: (signal) => postJson(apiBase() + "/api/demo", null, signal),
     render: (data) => {
       renderScan(data);
-      setStatus(t("status.sampleDone",
-        "Sample scanned. Start with the findings at the top of the result."), false);
+      setStatus("Sample scanned. Start with the findings at the top of the result.", false);
     },
   });
 }
@@ -246,33 +239,31 @@ function scan() {
   if (!isRepositoryUrl(repo)) {
     repoInput.setAttribute("aria-invalid", "true");
     setStatus(repo
-      ? t("status.badUrl", "Enter a complete repository URL, including https://.")
-      : t("status.needUrl", "Enter a repository URL to start the analysis."), true);
+      ? "Enter a complete repository URL, including https://."
+      : "Enter a repository URL to start the analysis.", true);
     repoInput.focus();
     return Promise.resolve();
   }
   repoInput.removeAttribute("aria-invalid");
   const info = { repo_url: repo, ref: ref || null, resolve: true, api: apiBase() };
-  const body = { repo_url: repo, ref: ref || null, resolve: true };
-  return runAnalysis($("scan"), t("status.busy", "Analyzing…"), {
-    status: ref
-      ? t("status.scanningAt", "Analyzing {repo} at {ref}…", { repo: repoLabel(repo), ref })
-      : t("status.scanning", "Analyzing {repo}…", { repo: repoLabel(repo) }),
-    progress: t("progress.waiting", "Waiting for the backend"),
-    failure: t("status.failed", "The analysis could not be completed"),
+  return runAnalysis($("scan"), "Analyzing…", {
+    status: "Analyzing " + repoLabel(repo) + (ref ? " at " + ref : "") + "…",
+    progress: "Waiting for the backend",
+    failure: "The analysis could not be completed",
     requestInfo: info,
     request: async (signal, progress) => {
+      const body = { repo_url: repo, ref: ref || null, resolve: true };
       const streamed = await postStream(apiBase() + "/api/scan/stream", body, signal, progress);
       if (streamed !== NO_STREAM) return streamed;
       // An older backend without the stream endpoint: one request, no stages.
-      $("progressStage").textContent = t("progress.noStages", "This backend does not report "
-        + "its steps. It clones the repository, reads supported files, looks up advisories "
-        + "and builds the report; step timings are shown when it finishes.");
+      $("progressStage").textContent = "This backend does not report its steps. It clones "
+        + "the repository, reads supported files, looks up advisories and builds the report; "
+        + "step timings are shown when it finishes.";
       return postJson(apiBase() + "/api/scan", body, signal);
     },
     render: (data) => {
       renderScan(data);
-      setStatus(t("status.done", "Analysis complete.") + " " + statsLine(repo, data.stats), false);
+      setStatus("Analysis complete. " + statsLine(repo, data.stats), false);
     },
   });
 }
@@ -283,9 +274,7 @@ function renderScan(d) {
   setExportsEnabled(true);
   const repo = d.repo_url || (lastRequest && lastRequest.repo_url);
   const demo = typeof repo === "string" && repo.startsWith("built-in://");
-  $("resultOverline").textContent = demo
-    ? t("results.overlineSample", "Bundled sample · analysis result")
-    : t("results.overline", "Analysis result");
+  $("resultOverline").textContent = demo ? "Bundled sample · analysis result" : "Analysis result";
   $("resultRepoName").textContent = repoLabel(repo);
   $("resultMeta").textContent = statsLine(repo, d.stats);
   $("resultProvenance").innerHTML = provenanceHtml(d.metadata || {});
@@ -2153,22 +2142,6 @@ function agentState(report) {
     + `supplied policies: ${allowed} path(s) potentially allowed.` };
 }
 
-// The API's headline detail is English; in Japanese it is rebuilt from the
-// same counts so the two never disagree.
-function headlineDetail(h) {
-  if (currentLang !== "ja") return h.detail;
-  const parts = (pairs) => pairs.filter(([n]) => n).map(([n, w]) => `${w} ${n} 件`).join("、");
-  if (h.status === "action_required") {
-    return t("headline.detailAction", h.detail,
-      { parts: parts([[h.critical, "critical"], [h.high, "high"]]) });
-  }
-  if (h.status === "review") {
-    return t("headline.detailReview", h.detail,
-      { parts: parts([[h.medium, "medium"], [h.low, "low"]]) });
-  }
-  return t("headline.detailNone", h.detail);
-}
-
 function renderSummary(d) {
   const h = d.headline || { status: "no_findings", label: "No findings from the applied rules",
     detail: "" };
@@ -2185,34 +2158,28 @@ function renderSummary(d) {
   const sevNote = ["critical", "high", "medium", "low"].filter(s => sevs[s])
     .map(s => `${sevs[s]} ${s}`).join(" · ");
   const tiles = [
-    tile((d.findings || []).length, t("sum.findings", "findings"),
+    tile((d.findings || []).length, "findings",
       h.status === "action_required" ? "is-bad" : h.status === "review" ? "is-warn" : "",
-      sevNote || t("sum.noneApplied", "none from the applied rules")),
+      sevNote || "none from the applied rules"),
   ];
   if (dep) {
-    tiles.push(tile(dep.total, t("sum.packages", "packages"), "",
-      t("sum.packagesNote", "{direct} direct · {transitive} transitive · relations known for "
-        + "{resolved}", { direct: dep.direct, transitive: dep.transitive,
-        resolved: dep.relations_resolved })));
+    tiles.push(tile(dep.total, "packages",
+      "", `${dep.direct} direct · ${dep.transitive} transitive · relations known for `
+        + `${dep.relations_resolved}`));
   }
   if (vuln.length) {
-    tiles.push(tile(vuln.length, t("sum.vulnerable", "vulnerable packages"), "is-bad",
-      t("sum.vulnerableNote", "{n} with a known fixed release",
-        { n: vuln.filter(v => v.recommended_version).length })));
+    tiles.push(tile(vuln.length, "vulnerable packages", "is-bad",
+      `${vuln.filter(v => v.recommended_version).length} with a known fixed release`));
   }
-  tiles.push(tile(scope.production_ai_components ?? aiTotal,
-    t("sum.ai", "AI components in production code"), "",
-    scope.excluded_non_production_entities
-      ? t("sum.aiNote", "{n} more in test/example/docs",
-        { n: scope.excluded_non_production_entities }) : ""));
+  tiles.push(tile(scope.production_ai_components ?? aiTotal, "AI components in production code",
+    "", scope.excluded_non_production_entities
+      ? `${scope.excluded_non_production_entities} more in test/example/docs` : ""));
   if (impact.length) {
-    tiles.push(tile(impact.length, t("sum.paths", "input-to-tool paths"), "is-bad",
-      t("sum.pathsNote", "untrusted input reaches a bound tool")));
+    tiles.push(tile(impact.length, "input-to-tool paths", "is-bad", "untrusted input reaches a bound tool"));
   }
   if (agent.state !== "not_detected") {
-    tiles.push(tile((d.agent_security && d.agent_security.agents || []).length,
-      t("sum.agents", "agents"), agent.state === "failed" ? "is-warn" : "",
-      agent.state.replace("_", " ")));
+    tiles.push(tile((d.agent_security && d.agent_security.agents || []).length, "agents",
+      agent.state === "failed" ? "is-warn" : "", agent.state.replace("_", " ")));
   }
 
   const contexts = {};
@@ -2231,18 +2198,15 @@ function renderSummary(d) {
   const top = (d.findings || []).slice().sort((a, b) =>
     (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9))[0];
   const start = top && h.status !== "no_findings"
-    ? `<p class="sum-start">${esc(t("sum.start", "Start with:"))} `
-      + `<button type="button" class="link" data-goto="findings">`
+    ? `<p class="sum-start">Start with: <button type="button" class="link" data-goto="findings">`
       + `${esc(top.title)}</button> (${esc(top.severity)})</p>` : "";
 
   $("securitySummary").innerHTML =
-    `<div class="headline ${esc(h.status)}">`
-    + `<p class="headline-label">${esc(t("headline." + h.status, h.label))}</p>`
-    + `<p>${esc(headlineDetail(h))}</p>${start}</div>`
+    `<div class="headline ${esc(h.status)}"><p class="headline-label">${esc(h.label)}</p>`
+    + `<p>${esc(h.detail)}</p>${start}</div>`
     + `<div class="sum-tiles">${tiles.join("")}</div>`
     + contextLine
-    + (limits.length ? `<details class="limits" open><summary>`
-      + `${esc(t("sum.limits", "Analysis limits"))} (${limits.length})`
+    + (limits.length ? `<details class="limits" open><summary>Analysis limits (${limits.length})`
       + `</summary><ul>${limits.map(n => `<li>${esc(n)}</li>`).join("")}</ul></details>` : "");
   $("securitySummary").querySelectorAll("[data-context]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -2441,8 +2405,7 @@ document.addEventListener("click", (ev) => {
     else {
       $("repo").value = example.dataset.example;
       $("repoRef").value = "";
-      setStatus(t("status.example",
-        "Example URL added. Start the analysis when you are ready."), false);
+      setStatus("Example URL added. Start the analysis when you are ready.", false);
       $("scanSection").scrollIntoView({ block: "start" });
       $("repo").focus();
     }
@@ -2455,19 +2418,6 @@ $("contextFilter").addEventListener("change", filterInventory);
 $("repoRef").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
 
 renderApiLine();
-
-setLang(initialLang(), false);
-$("langToggle").addEventListener("click", () => setLang(currentLang === "ja" ? "en" : "ja", true));
-// Static text is swapped by i18n.js; re-render the translated parts of a
-// result already on screen.
-document.addEventListener("aibom:lang", () => {
-  if (!lastResult || $("results").hidden) return;
-  const repo = lastResult.repo_url || "";
-  $("resultOverline").textContent = repo.startsWith("built-in://")
-    ? t("results.overlineSample", "Bundled sample · analysis result")
-    : t("results.overline", "Analysis result");
-  renderSummary(lastResult);
-});
 
 // Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
 const params = new URLSearchParams(location.search);

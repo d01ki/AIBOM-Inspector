@@ -53,10 +53,6 @@ h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -.01em; }
   font-weight: 600; text-decoration: none; }
 .app-nav a:hover { background: var(--surface); }
 .app-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-strong); }
-.lang-toggle { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--card); color: var(--fg); font: inherit; font-size: 14px; font-weight: 600;
-  cursor: pointer; }
-.lang-toggle:hover { background: var(--surface); }
 .page { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; flex: 1; }
 .page-footer { max-width: 1180px; width: 100%; margin: 0 auto; padding: 18px 16px 28px;
   display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 14px; }
@@ -134,7 +130,6 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-strong)
 .exports button { display: flex; flex-direction: column; align-items: flex-start;
   min-height: 48px; line-height: 1.25; }
 .exports small { font-size: 12px; font-weight: 500; color: var(--muted); }
-.lang-note { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
 .stale-note { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft);
   font-size: 15px; }
 

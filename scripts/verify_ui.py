@@ -14,8 +14,7 @@ dependency map with directed, evidence-labelled edges
 (``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``). It then loads the
 sample at 403 px and 1280 px wide and checks the page does not scroll
 sideways, every result tab is on screen, and map labels stay readable
-(``<out>/ui-demos-viewport-<width>.png``), and switches the page to Japanese
-and back (``<out>/ui-demos-lang-ja.png``).
+(``<out>/ui-demos-viewport-<width>.png``).
 
 A fixture run also checks that the scan went through ``/api/scan/stream`` and
 that the backend reported its stages.
@@ -146,53 +145,6 @@ def _viewport_checks(
     return checks, failures
 
 
-def _language_checks(
-    browser: Any, page: Any, port: int, out: Path
-) -> tuple[dict[str, Any], list[str]]:
-    """Default from the browser language; switch on a phone-width page, reload, switch back."""
-    ja_browser = browser.new_page(locale="ja-JP")
-    ja_browser.goto(f"http://127.0.0.1:{port}/")
-    default_ja = ja_browser.evaluate("() => document.documentElement.lang")
-    ja_browser.close()
-    page.set_viewport_size({"width": 403, "height": 900})
-    page.goto(f"http://127.0.0.1:{port}/")
-    page.locator("#runDemo").click()
-    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
-    page.locator("#langToggle").click()
-    measure = """() => ({
-      lang: document.documentElement.lang,
-      headline: document.querySelector('#securitySummary .headline-label').textContent,
-      tab: document.querySelector('[data-tab="findings"] span').textContent,
-      note_shown: !document.getElementById('langNote').hidden,
-      page_overflow_px: document.documentElement.scrollWidth - window.innerWidth,
-      tabs_off_screen: [...document.querySelectorAll('.result-tab')].filter(t => !t.hidden)
-        .filter(t => t.getBoundingClientRect().right > window.innerWidth + 1).length,
-    })"""
-    checks: dict[str, Any] = {"default_for_ja_browser": default_ja, "ja": page.evaluate(measure)}
-    page.screenshot(path=str(out / f"ui-{DEMOS}-lang-ja.png"), full_page=True)
-    page.reload()
-    checks["remembered"] = page.evaluate("() => document.documentElement.lang")
-    page.locator("#langToggle").click()
-    page.locator("#runDemo").click()
-    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
-    checks["en"] = page.evaluate(measure)
-    failures = []
-    ja, en = checks["ja"], checks["en"]
-    if default_ja != "ja":
-        failures.append("language: a ja-JP browser does not open in Japanese")
-    if ja["lang"] != "ja" or ja["headline"] != "対応が必要" or ja["tab"] != "検出内容":
-        failures.append(f"language: Japanese not applied: {ja}")
-    if not ja["note_shown"]:
-        failures.append("language: the 'scanner output stays English' note is not shown")
-    if ja["page_overflow_px"] > 0 or ja["tabs_off_screen"]:
-        failures.append(f"language: Japanese layout overflows at 403px: {ja}")
-    if checks["remembered"] != "ja":
-        failures.append("language: choice not remembered across a reload")
-    if en["lang"] != "en" or en["headline"] != "Action required" or en["note_shown"]:
-        failures.append(f"language: switching back to English failed: {en}")
-    return checks, failures
-
-
 def _graph_checks(page: Any, host: str, legend: str, detail: str) -> dict[str, Any]:
     """Count nodes/edges/arrows in one graph and read the best-connected node's panel."""
     checks: dict[str, Any] = {
@@ -257,7 +209,7 @@ def run_demos(out: Path) -> int:
             except Exception as exc:  # noqa: BLE001 - any launch failure is BLOCKED
                 print(f"BLOCKED: chromium unavailable: {exc}", file=sys.stderr)
                 return BLOCKED
-            page = browser.new_page(viewport={"width": 1400, "height": 1000}, locale="en-US")
+            page = browser.new_page(viewport={"width": 1400, "height": 1000})
             page.on(
                 "console",
                 lambda msg: report["console_errors"].append(msg.text)
@@ -287,9 +239,6 @@ def run_demos(out: Path) -> int:
                 checks, problems = _viewport_checks(page, port, width, out)
                 report["checks"][f"viewport-{width}"] = checks
                 failures += problems
-            checks, problems = _language_checks(browser, page, port, out)
-            report["checks"]["language"] = checks
-            failures += problems
             browser.close()
     finally:
         server.should_exit = True
@@ -332,7 +281,7 @@ def run(fixture_name: str, out: Path) -> int:
             except Exception as exc:  # noqa: BLE001 - any launch failure is BLOCKED
                 print(f"BLOCKED: chromium unavailable: {exc}", file=sys.stderr)
                 return BLOCKED
-            page = browser.new_page(viewport={"width": 1400, "height": 1000}, locale="en-US")
+            page = browser.new_page(viewport={"width": 1400, "height": 1000})
             page.on(
                 "console",
                 lambda msg: report["console_errors"].append(msg.text)

@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 WEB = Path(__file__).resolve().parents[1] / "web"
-# The page is markup + one stylesheet + two scripts, served side by side.
-PARTS = ("index.html", "app.css", "i18n.js", "app.js")
+# The page is markup + one stylesheet + one script, served side by side.
+PARTS = ("index.html", "app.css", "app.js")
 
 
 @pytest.fixture(scope="module")
@@ -30,9 +30,7 @@ def page() -> str:
 def test_the_page_loads_its_stylesheet_and_script() -> None:
     markup = (WEB / "index.html").read_text(encoding="utf-8")
     assert '<link rel="stylesheet" href="app.css">' in markup
-    assert '<script src="i18n.js"></script>\n<script src="app.js"></script>' in markup, (
-        "i18n.js defines t() and must load before app.js"
-    )
+    assert '<script src="app.js"></script>' in markup
     assert "<style>" not in markup and "<script>" not in markup
 
 
@@ -150,31 +148,6 @@ def _stage_ids() -> set[str]:
     return set(re.findall(r"^  (\w+):", stages.group(1), re.M))
 
 
-def _ja_keys() -> set[str]:
-    source = (WEB / "i18n.js").read_text(encoding="utf-8")
-    block = source.split("const JA = {", 1)[1].split("\n};", 1)[0]
-    return set(re.findall(r'^  "([\w.]+)":', block, re.M))
-
-
-def _used_keys() -> set[str]:
-    markup = (WEB / "index.html").read_text(encoding="utf-8")
-    script = (WEB / "app.js").read_text(encoding="utf-8")
-    keys = set(re.findall(r'data-i18n="([\w.]+)"', markup))
-    for attrs in re.findall(r'data-i18n-attr="([^"]+)"', markup):
-        keys |= {pair.split(":", 1)[1] for pair in attrs.split(";")}
-    keys |= {k for k in re.findall(r'\bt\("([\w.]+)"', script) if not k.endswith(".")}
-    # Dynamic families: t("stage." + id, ...) and t("headline." + status, ...).
-    keys |= {"stage." + k for k in _stage_ids()}
-    keys |= {f"headline.{s}" for s in ("action_required", "review", "no_findings")}
-    return keys
-
-
-def test_every_translated_key_has_japanese_and_none_is_unused() -> None:
-    ja, used = _ja_keys(), _used_keys()
-    assert used - ja == set(), "keys used without a Japanese entry"
-    assert ja - used == set(), "Japanese entries nothing uses (stale)"
-
-
 def test_stream_stages_match_the_backend() -> None:
     """The UI labels exactly the stage ids the server can send."""
     root = WEB.parent / "src" / "aibom"
@@ -184,9 +157,8 @@ def test_stream_stages_match_the_backend() -> None:
     assert _stage_ids() == backend
 
 
-def test_the_language_switch_is_wired() -> None:
-    markup = (WEB / "index.html").read_text(encoding="utf-8")
+
+def test_the_scan_reads_the_stage_stream_with_a_fallback() -> None:
     script = (WEB / "app.js").read_text(encoding="utf-8")
-    assert 'id="langToggle"' in markup and 'id="langNote"' in markup
-    assert "setLang(initialLang(), false);" in script
     assert "/api/scan/stream" in script and "NO_STREAM" in script
+    assert 'id="progressSteps"' in (WEB / "index.html").read_text(encoding="utf-8")
