@@ -8,6 +8,17 @@ Dependencies tab, selects the best-connected node, and records:
 * ``<out>/ui-<fixture>.png``      - screenshot of the dependency graph
 * ``<out>/ui-<fixture>.json``     - DOM measurements + console errors + status
 
+``--fixture demos`` instead clicks the bundled offline demos (sample scan,
+privilege drift, MCP tool exposure, compare) and checks that each one draws a
+dependency map with directed, evidence-labelled edges
+(``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``). It then loads the
+sample at 403 px and 1280 px wide and checks the page does not scroll
+sideways, every result tab is on screen, and map labels stay readable
+(``<out>/ui-demos-viewport-<width>.png``).
+
+A fixture run also checks that the scan went through ``/api/scan/stream`` and
+that the backend reported its stages.
+
 Exit code: 0 PASS, 1 FAIL (an assertion about the page failed), 2 BLOCKED
 (Playwright or a browser is unavailable). Never reports PASS for a check it
 could not run.
@@ -71,7 +82,183 @@ def _serve(fixture: Path, port: int) -> Any:
     return server
 
 
+DEMOS = "demos"
+# (name, page, button that starts it, dependency-map host, legend, detail panel)
+_DEMO_CASES = (
+    ("sample", "/", "#runDemo", "graph", "edgeLegend", "graphDetail"),
+    ("privilege-drift", "/#compare", "#driftDemoPolicy", "driftDepGraph", "driftDepLegend",
+     "driftDepDetail"),
+    ("mcp-tool-exposure", "/#compare", "#driftDemoMcp", "driftDepGraph", "driftDepLegend",
+     "driftDepDetail"),
+    ("compare", "/#compare", "#compareDemoPy", "compareDepGraph", "compareDepLegend",
+     "compareDepDetail"),
+)
+#: Narrow phone and desktop widths from the review's acceptance criteria.
+_VIEWPORTS = (403, 1280)
+#: Smallest rendered map label height, in CSS pixels, that still reads.
+_MIN_LABEL_PX = 9.0
+
+
+def _viewport_checks(
+    page: Any, port: int, width: int, out: Path
+) -> tuple[dict[str, Any], list[str]]:
+    """Load the sample at ``width`` and measure what a reader can actually reach."""
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(f"http://127.0.0.1:{port}/")
+    page.locator("#runDemo").click()
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    checks: dict[str, Any] = page.evaluate(
+        """(w) => {
+          const tabs = [...document.querySelectorAll('.result-tab')].filter(t => !t.hidden);
+          return {
+            page_overflow_px: document.documentElement.scrollWidth - window.innerWidth,
+            tabs: tabs.length,
+            tabs_off_screen: tabs.filter(t => {
+              const r = t.getBoundingClientRect(); return r.right > w + 1 || r.left < -1;
+            }).map(t => t.dataset.tab),
+            headline: document.querySelector('#securitySummary .headline-label').textContent,
+            body_font_px: parseFloat(getComputedStyle(document.body).fontSize),
+          };
+        }""",
+        width,
+    )
+    page.screenshot(path=str(out / f"ui-{DEMOS}-viewport-{width}.png"), full_page=True)
+    page.locator('[data-tab="graph"]').click()
+    page.wait_for_selector("#graph svg", timeout=60_000)
+    checks["min_label_px"] = page.evaluate(
+        "() => Math.min(...[...document.querySelectorAll('#graph .node text')]"
+        ".map(t => t.getBoundingClientRect().height))"
+    )
+    page.locator("#graphSection").screenshot(path=str(out / f"ui-{DEMOS}-viewport-{width}-map.png"))
+    failures = []
+    prefix = f"viewport {width}px: "
+    if checks["page_overflow_px"] > 0:
+        failures.append(prefix + f"page scrolls sideways by {checks['page_overflow_px']}px")
+    if checks["tabs_off_screen"]:
+        failures.append(prefix + f"tabs off screen: {checks['tabs_off_screen']}")
+    if checks["min_label_px"] < _MIN_LABEL_PX:
+        failures.append(prefix + f"map labels {checks['min_label_px']:.1f}px < {_MIN_LABEL_PX}px")
+    if checks["body_font_px"] < 15:
+        failures.append(prefix + "body text below 15px")
+    if checks["headline"] != "Action required":
+        failures.append(prefix + "sample with a critical finding is not headed 'Action required'")
+    return checks, failures
+
+
+def _graph_checks(page: Any, host: str, legend: str, detail: str) -> dict[str, Any]:
+    """Count nodes/edges/arrows in one graph and read the best-connected node's panel."""
+    checks: dict[str, Any] = {
+        "nodes": page.locator(f"#{host} .node").count(),
+        "edges": page.locator(f"#{host} line.edge").count(),
+        "edges_with_arrow": page.locator(f"#{host} line.edge[marker-end]").count(),
+        "edges_with_evidence": page.evaluate(
+            "(h) => (document.getElementById(h)._links || [])"
+            ".filter(l => l.evidence && l.evidence.length).length",
+            host,
+        ),
+    }
+    checks["edge_legend"] = page.locator(f"#{legend}").inner_text() if checks["edges"] else ""
+    best = page.evaluate(
+        """(h) => {
+          const host = document.getElementById(h);
+          const nodes = host._nodes || [];
+          const links = host._links || [];
+          let best = -1, score = -1;
+          nodes.forEach((n, i) => {
+            const s = links.filter(l => l.s.id === n.id || l.t.id === n.id).length;
+            if (s > score) { score = s; best = i; }
+          });
+          return best;
+        }""",
+        host,
+    )
+    if best >= 0:
+        page.locator(f"#{host} .node").nth(best).locator("circle").click()
+        checks["detail_panel"] = page.locator(f"#{detail}").inner_text()
+    return checks
+
+
+def _graph_failures(checks: dict[str, Any], prefix: str = "") -> list[str]:
+    failures = []
+    if checks.get("nodes", 0) == 0:
+        failures.append(prefix + "graph rendered no nodes")
+    if checks.get("edges", 0) != checks.get("edges_with_arrow", -1):
+        failures.append(prefix + "some edges have no direction marker")
+    if checks.get("edges", 0) and not checks.get("edge_legend"):
+        failures.append(prefix + "edges drawn without an edge-type legend")
+    if "Connections" not in checks.get("detail_panel", "Connections"):
+        failures.append(prefix + "detail panel does not list connections")
+    return failures
+
+
+def run_demos(out: Path) -> int:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("BLOCKED: playwright is not installed", file=sys.stderr)
+        return BLOCKED
+    out.mkdir(parents=True, exist_ok=True)
+    port = _free_port()
+    server = _serve(FIXTURES / "vulnerable-ai-app", port)  # demos never clone
+    report: dict[str, Any] = {"fixture": DEMOS, "checks": {}, "console_errors": []}
+    failures: list[str] = []
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch()
+            except Exception as exc:  # noqa: BLE001 - any launch failure is BLOCKED
+                print(f"BLOCKED: chromium unavailable: {exc}", file=sys.stderr)
+                return BLOCKED
+            page = browser.new_page(viewport={"width": 1400, "height": 1000})
+            page.on(
+                "console",
+                lambda msg: report["console_errors"].append(msg.text)
+                if msg.type == "error"
+                else None,
+            )
+            page.on("pageerror", lambda err: report["console_errors"].append(str(err)))
+            for name, path, button, host, legend, detail in _DEMO_CASES:
+                page.goto(f"http://127.0.0.1:{port}{path}")
+                page.locator(button).click()
+                if host == "graph":
+                    page.locator('[data-tab="graph"]').click(timeout=60_000)
+                page.wait_for_selector(f"#{host} svg, #{host} p", timeout=60_000)
+                checks = _graph_checks(page, host, legend, detail)
+                # Demo edges are all evidence-backed; an unlabelled one is a bug.
+                if checks["edges_with_evidence"] != checks["edges"]:
+                    failures.append(f"{name}: some edges carry no evidence")
+                if checks["edges"] == 0:
+                    failures.append(f"{name}: dependency map has no edges")
+                failures += _graph_failures(checks, f"{name}: ")
+                report["checks"][name] = checks
+                page.locator(f"#{host}").locator("xpath=ancestor::div[contains(@class,"
+                                                 "'graphgrid')]").screenshot(
+                    path=str(out / f"ui-{DEMOS}-{name}.png")
+                )
+            for width in _VIEWPORTS:
+                checks, problems = _viewport_checks(page, port, width, out)
+                report["checks"][f"viewport-{width}"] = checks
+                failures += problems
+            browser.close()
+    finally:
+        server.should_exit = True
+    if report["console_errors"]:
+        failures.append("browser console errors")
+    report["failures"] = failures
+    report["status"] = "FAIL" if failures else "PASS"
+    (out / f"ui-{DEMOS}.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
+    )
+    summary = {k: {"nodes": v["nodes"], "edges": v["edges"]} if "nodes" in v else v
+               for k, v in report["checks"].items()}
+    print(json.dumps({"fixture": DEMOS, "status": report["status"], **summary,
+                      "failures": failures}))  # ASCII: Windows consoles are cp932
+    return FAIL if failures else PASS
+
+
 def run(fixture_name: str, out: Path) -> int:
+    if fixture_name == DEMOS:
+        return run_demos(out)
     fixture = FIXTURES / fixture_name
     if not fixture.is_dir():
         print(f"FAIL: no fixture {fixture}", file=sys.stderr)
@@ -109,52 +296,36 @@ def run(fixture_name: str, out: Path) -> int:
                 body.update(resolve=False, vulns=False)
                 route.continue_(post_data=json.dumps(body))
 
+            # Both the stream and the plain fallback: never let either go online.
             page.route("**/api/scan", static_only)
+            page.route("**/api/scan/stream", static_only)
+            streamed: list[Any] = []
+            page.on("response", lambda r: streamed.append(r)
+                    if r.url.endswith("/api/scan/stream") else None)
             repo = f"https://github.com/example/{fixture_name}"
             page.goto(f"http://127.0.0.1:{port}/?repo={repo}")
             page.locator('[data-tab="graph"]').click(timeout=60_000)
             page.wait_for_selector("#graph svg, #graph p", timeout=60_000)
 
-            nodes = page.locator("#graph .node").count()
-            edges = page.locator("#graph line.edge").count()
-            arrows = page.locator("#graph line.edge[marker-end]").count()
-            legend = page.locator("#edgeLegend").inner_text() if edges else ""
-            report["checks"].update(
-                nodes=nodes, edges=edges, edges_with_arrow=arrows, edge_legend=legend
-            )
-
-            # Select the node with the most incident edges and read its panel.
-            best = page.evaluate(
-                """() => {
-                  const host = document.getElementById('graph');
-                  const nodes = host._nodes || [];
-                  const links = host._links || [];
-                  let best = -1, score = -1;
-                  nodes.forEach((n, i) => {
-                    const s = links.filter(l => l.s.id === n.id || l.t.id === n.id).length;
-                    if (s > score) { score = s; best = i; }
-                  });
-                  return best;
-                }"""
-            )
-            if best >= 0:
-                page.locator("#graph .node").nth(best).click()
-                report["checks"]["detail_panel"] = page.locator("#graphDetail").inner_text()
+            report["checks"].update(_graph_checks(page, "graph", "edgeLegend", "graphDetail"))
+            lines = [json.loads(line) for r in streamed for line in r.text().splitlines()
+                     if line.strip()]
+            report["checks"]["stream_stages"] = [ln["stage"] for ln in lines if "stage" in ln]
+            report["checks"]["stream_result"] = any("result" in ln for ln in lines)
+            report["checks"]["status_text"] = page.locator("#status").text_content()
             page.locator("#graphSection").screenshot(path=str(out / f"ui-{fixture_name}.png"))
             browser.close()
     finally:
         server.should_exit = True
 
     checks = report["checks"]
-    failures = []
-    if checks.get("nodes", 0) == 0:
-        failures.append("graph rendered no nodes")
-    if checks.get("edges", 0) != checks.get("edges_with_arrow", -1):
-        failures.append("some edges have no direction marker")
-    if checks.get("edges", 0) and not checks.get("edge_legend"):
-        failures.append("edges drawn without an edge-type legend")
-    if "Connections" not in checks.get("detail_panel", "Connections"):
-        failures.append("detail panel does not list connections")
+    failures = _graph_failures(checks)
+    stages = checks.get("stream_stages", [])
+    if not checks.get("stream_result") or stages[:2] != ["clone", "collect"] \
+            or stages[-1:] != ["report"]:
+        failures.append(f"scan did not stream its stages and result: {stages}")
+    if "resolve" in stages or "vulns" in stages:
+        failures.append("the offline check reached a network stage (resolve/vulns)")
     if report["console_errors"]:
         failures.append("browser console errors")
     report["failures"] = failures
@@ -165,7 +336,7 @@ def run(fixture_name: str, out: Path) -> int:
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
     )
     print(json.dumps({"fixture": fixture_name, "status": report["status"], **checks,
-                      "failures": failures}, ensure_ascii=False))
+                      "failures": failures}))  # ASCII: Windows consoles are cp932
     return status
 
 

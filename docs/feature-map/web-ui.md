@@ -2,8 +2,8 @@
 
 ## Overview
 
-A single dependency-free HTML file (`web/index.html`, about 3,500 lines) that
-drives the API. It contains the scan form, the result tabs (agent security,
+A dependency-free page with no build step (`web/index.html`, `app.css`,
+`app.js`) that drives the API. It contains the scan form, the result tabs (agent security,
 findings, Dependencies, inventory, exports), the compare and drift view, and
 the hero demos. It also works when served from GitHub Pages with a separate
 backend (`?api=`).
@@ -16,7 +16,7 @@ selects a backend.
 
 ## Source
 
-`web/index.html`.
+`web/index.html`, `web/app.css`, `web/app.js`, `web/favicon.svg`.
 
 ## Depends on
 
@@ -61,6 +61,30 @@ The page has no JS unit-test harness. Behavior is only proven by the
 browser run. The attack-path visualization (impact and exposure paths) is not
 yet covered by a browser check.
 
+The page is `web/index.html` + `app.css` + `app.js` (+ `favicon.svg`), served
+side by side with no build step; the structural test reads all three. The UI
+is English only.
+
+Progress: a repository scan reads `/api/scan/stream` and lists each stage as
+the backend reports it; Cancel closes the stream, which stops the server-side
+scan at the next stage. A backend without the stream endpoint (404/405) gets
+the plain `/api/scan`, with elapsed time only.
+
+What broke before, and the check that now holds it:
+
+- A critical finding read as a pass because "76 / B" was the biggest thing on
+  screen. The summary leads with the API's `headline`; the score sits in a
+  collapsed "secondary" disclosure. `verify_ui.py --fixture demos` fails if the
+  sample is not headed "Action required".
+- The map shrank to an unreadable 351 px on a phone, and tabs scrolled out of
+  view. The demos check loads the sample at 403 px and 1280 px and fails on
+  page-level sideways scroll, a tab off screen, or a map label under 9 px.
+- Bigger node labels moved the centre of a node group into empty space, so
+  clicking the group missed; the check clicks the node's circle.
+- "No edges" looked like "no dependencies". The Dependencies tab renders the
+  API's full `dependencies` table and says "relations unresolved" when no
+  edge-recording lockfile exists; the map says when it has nothing to connect.
+
 ```json verify
 {
   "id": "web-ui",
@@ -72,7 +96,7 @@ yet covered by a browser check.
     "tests/test_web_ui.py"
   ],
   "smoke": [],
-  "ui": ["vulnerable-ai-app", "vulnerable-ts-agent"],
+  "ui": ["vulnerable-ai-app", "vulnerable-ts-agent", "demos"],
   "manual": [
     "A human reviews the screenshot for layout and readability."
   ]

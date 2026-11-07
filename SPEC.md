@@ -132,7 +132,7 @@ license violations).
 Rule-based and deterministic. Each finding: `rule_id`, severity
 (info/low/medium/high/critical), evidence, remediation. The authoritative rule
 table (TDR-001–012, AIBOM-PROMPT-004, AIBOM-IMPACT-001, OSV-*) is in
-[README.md](README.md#risk-rules--scoring); rule logic lives in
+[docs/usage.md](docs/usage.md#risk-rules--scoring); rule logic lives in
 `src/aibom/risk/rules.py`.
 
 **Package vulnerabilities:** the dependency collector extracts AI/ML libraries

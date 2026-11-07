@@ -37,6 +37,35 @@ class ScanMetadata(BaseModel):
     tool_version: str
     target: str
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    ref: str | None = Field(default=None, description="Requested branch, tag, or commit.")
+    commit: str | None = Field(
+        default=None, description="Commit the scanned checkout was at, read from .git."
+    )
+    source_url_template: str | None = Field(
+        default=None,
+        description="URL with {path} and {line} placeholders, pinned to `commit`.",
+    )
+
+
+class VulnLookup(BaseModel):
+    """What the known-vulnerability lookup did, so a failed or partial lookup
+    is never read as "no vulnerabilities"."""
+
+    requested: bool = False
+    source: str = "osv.dev"
+    status: str = Field(
+        default="not_requested",
+        description="not_requested | complete | partial | failed",
+    )
+    queried: int = Field(default=0, description="Packages whose exact version was looked up.")
+    failed: int = Field(default=0, description="Lookups that errored (network, timeout).")
+    not_queried_unpinned: int = Field(
+        default=0, description="Packages without an exact version, so not looked up."
+    )
+    not_queried_over_limit: int = Field(
+        default=0, description="Pinned packages skipped by the per-scan query cap."
+    )
+    errors: list[str] = Field(default_factory=list)
 
 
 class ScanStats(BaseModel):
@@ -60,6 +89,7 @@ class ScanStats(BaseModel):
         default_factory=list,
         description="Files that required a legacy fallback because structured parsing failed.",
     )
+    vuln_lookup: VulnLookup = Field(default_factory=VulnLookup)
 
 
 class Inventory(BaseModel):
@@ -156,6 +186,31 @@ class Inventory(BaseModel):
         for entity in self.entities:
             result[entity.type.value] = result.get(entity.type.value, 0) + 1
         return result
+
+
+#: Lockfile formats that record each package's own dependencies. Pipfile.lock
+#: and hash-pinned requirements pin versions but do not say who needs whom.
+GRAPH_LOCKFILES = frozenset({
+    "package-lock.json", "poetry.lock", "uv.lock", "cargo.lock", "composer.lock",
+    "gemfile.lock",
+})
+
+
+def dependencies_resolved(entity: Entity) -> bool:
+    """True when the scan knows this package's own dependencies.
+
+    A package seen only in a manifest (or in a lockfile that does not record
+    edges) has *unknown* dependencies; an empty list for it would be a false
+    claim that it is a leaf. Non-package components are judged by the linker,
+    which only emits proven edges, so for them an empty list is a statement.
+    """
+    if not isinstance(entity, Package):
+        return True
+    return any(
+        ev.kind == "lockfile" and ev.file.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        in GRAPH_LOCKFILES
+        for ev in entity.source_evidence
+    )
 
 
 def _merge_evidence(into: Entity, other: Entity) -> None:
