@@ -418,7 +418,7 @@ class LockfileCollector(Collector):
         index = _line_index(lines, _RE_TOML_NAME)
         for entry in _as_dicts(data.get("package")):
             name = _as_str(entry.get("name"))
-            if not name:
+            if not name or _is_uv_project(entry):
                 continue
             lineno = index.get(name, 1)
             self._emit(
@@ -733,6 +733,18 @@ def _poetry_digest(files: Any) -> tuple[str, str, str | None] | None:
     entries.sort(key=lambda f: (not str(f.get("file", "")).endswith(".tar.gz"), str(f.get("file"))))
     chosen = entries[0]
     return _normalize_digest(None, str(chosen["hash"]), _as_str(chosen.get("file")))
+
+
+def _is_uv_project(entry: dict[str, Any]) -> bool:
+    """The scanned project itself (``virtual``) or its own root (``editable = "."``).
+
+    uv.lock records the project as a ``[[package]]`` whose dependencies are
+    the direct ones; it is not a dependency, so it is never emitted.
+    """
+    source = entry.get("source")
+    if not isinstance(source, dict):
+        return False
+    return "virtual" in source or source.get("editable") == "."
 
 
 def _uv_digest(entry: dict[str, Any]) -> tuple[str, str, str | None] | None:
