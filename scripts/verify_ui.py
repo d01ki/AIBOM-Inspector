@@ -14,7 +14,9 @@ dependency map with directed, evidence-labelled edges
 (``<out>/ui-demos-<demo>.png`` and ``<out>/ui-demos.json``). It then loads the
 sample at 403 px and 1280 px wide and checks the page does not scroll
 sideways, every result tab is on screen, and map labels stay readable
-(``<out>/ui-demos-viewport-<width>.png``). Finally it replays the demos with
+(``<out>/ui-demos-viewport-<width>.png``). The sample's Dependencies tab must
+draw one node per package and one lockfile-cited arrow per recorded dependency
+(``<out>/ui-demos-dependency-graph.png``). Finally it replays the demos with
 every repository-controlled string in the API responses carrying an HTML
 payload, and fails if any view renders it as markup (escaping regression).
 
@@ -171,6 +173,43 @@ def _taint(value: Any, key: str | None = None) -> Any:
     return value
 
 
+def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str, Any], list[str]]:
+    """The sample's package graph matches the API's dependency table, edge for edge."""
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(f"http://127.0.0.1:{port}/")
+    with page.expect_response(lambda r: r.url.endswith("/api/demo")) as response:
+        page.locator("#runDemo").click()
+    summary = response.value.json()["dependencies"]["summary"]
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    page.locator('[data-tab="deps"]').click()
+    page.wait_for_selector("#depsGraph svg", timeout=60_000)
+    checks: dict[str, Any] = page.evaluate(
+        """() => ({
+          nodes: document.querySelectorAll('#depsGraph .node').length,
+          edges: document.querySelectorAll('#depsGraph line.edge').length,
+          edges_citing_lockfile: [...document.querySelectorAll('#depsGraph line.edge title')]
+            .filter(t => /\.lock:\d+\)$/.test(t.textContent)).length,
+          left_to_right: [...document.querySelectorAll('#depsGraph line.edge')]
+            .every(l => +l.getAttribute('x2') > +l.getAttribute('x1')),
+        })"""
+    )
+    page.locator("#depsSection").screenshot(path=str(out / f"ui-{DEMOS}-dependency-graph.png"))
+    page.locator("#depsGraph .node circle").first.dispatch_event("click")
+    checks["detail"] = page.locator("#depsDetail").inner_text()
+    checks["api"] = {"total": summary["total"], "edges": summary["edges"]}
+    failures = []
+    if checks["nodes"] != summary["total"] or checks["edges"] != summary["edges"]:
+        failures.append(f"dependency graph: drew {checks['nodes']} nodes / {checks['edges']} "
+                        f"edges, API has {summary['total']} / {summary['edges']}")
+    if checks["edges_citing_lockfile"] != checks["edges"]:
+        failures.append("dependency graph: an edge does not cite its lockfile line")
+    if not checks["left_to_right"]:
+        failures.append("dependency graph: an arrow points backwards (layering broke)")
+    if ".lock:" not in checks["detail"]:
+        failures.append("dependency graph: the detail panel shows no lockfile evidence")
+    return checks, failures
+
+
 def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
     """Render every demo view from tainted API data; nothing may become markup."""
 
@@ -304,6 +343,9 @@ def run_demos(out: Path) -> int:
                 checks, problems = _viewport_checks(page, port, width, out)
                 report["checks"][f"viewport-{width}"] = checks
                 failures += problems
+            checks, problems = _dependency_graph_checks(page, port, out)
+            report["checks"]["dependency-graph"] = checks
+            failures += problems
             checks, problems = _injection_checks(page, port)
             report["checks"]["injection"] = checks
             failures += problems

@@ -110,6 +110,10 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-strong)
 .spinner { width: 16px; height: 16px; border: 2px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.view-toggle { display: inline-flex; gap: 4px; align-self: flex-start; }
+.view-toggle [aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong);
+  border-color: var(--accent); }
+.deps-map .help { margin-top: 0; }
 .progress-steps { margin: 8px 0 0; padding: 0 0 0 4px; list-style: none; font-size: 14px;
   color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .progress-steps .done { color: var(--low); }

@@ -122,3 +122,26 @@ def test_a_malformed_lockfile_does_not_fail_the_scan(tmp_path: Path) -> None:
     inv = Inventory(metadata=ScanMetadata(tool_version="test", target=str(tmp_path)))
     LockfileCollector(tmp_path).collect(inv)
     assert inv.by_type(EntityType.PACKAGE) == []
+
+
+def test_the_uv_project_itself_is_not_a_dependency(tmp_path: Path) -> None:
+    """uv.lock lists the project (``source = { virtual = "." }``) as a package.
+
+    It is the thing being scanned, not something it depends on: reporting it
+    made every uv project appear as its own transitive dependency.
+    """
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n\n'
+        '[[package]]\nname = "my-app"\nversion = "0.1.0"\n'
+        'source = { virtual = "." }\n'
+        'dependencies = [\n    { name = "httpx" },\n]\n\n'
+        '[[package]]\nname = "httpx"\nversion = "0.28.1"\n'
+        'source = { registry = "https://pypi.org/simple" }\n\n'
+        '[[package]]\nname = "tool"\nversion = "1.0.0"\n'
+        'source = { editable = "." }\n',
+        encoding="utf-8",
+    )
+    inv = Inventory(metadata=ScanMetadata(tool_version="test", target=str(tmp_path)))
+    LockfileCollector(tmp_path).collect(inv)
+    names = {e.name for e in inv.by_type(EntityType.PACKAGE)}
+    assert names == {"httpx"}  # registry packages stay; the project is not one

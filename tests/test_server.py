@@ -520,3 +520,25 @@ def test_responses_carry_security_headers(client: TestClient) -> None:
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     report = client.post("/api/demo/report")
     assert "script-src 'self'" in report.headers["content-security-policy"]
+
+
+def test_the_sample_demo_maps_its_dependencies_from_a_lockfile(client: TestClient) -> None:
+    """The bundled sample ships a uv.lock, so its package graph is drawable."""
+    deps = client.post("/api/demo").json()["dependencies"]
+    summary, packages = deps["summary"], deps["packages"]
+    assert summary["graph_lockfiles"] == ["uv.lock"]
+    assert summary["direct"] == 3 and summary["transitive"] > 20
+    assert summary["relations_resolved"] == summary["total"]
+    assert summary["edges"] > 40
+    names = {p["name"] for p in packages}
+    assert "impact-demo" not in names  # the project itself is not a dependency
+    by_name = {p["name"]: p for p in packages}
+    assert {"fastapi", "openai-agents", "pydantic"} <= {
+        p["name"] for p in packages if p["scope"] == "direct"
+    }
+    starlette = by_name["starlette"]["id"]
+    assert starlette in by_name["fastapi"]["depends_on"]
+    # Every drawn edge cites the lockfile line that records it.
+    for p in packages:
+        for target in p["depends_on"]:
+            assert p["edge_evidence"][target].startswith("uv.lock:")
