@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from aibom import __version__
 from aibom.agent_security.analyzer import analyze as analyze_agents
+from aibom.agent_security.drift import compare_reports as compare_privileges
+from aibom.agent_security.models import AgentSecurityReport
 from aibom.agent_security.safeio import InputError
 from aibom.agent_security.scenario import SCENARIOS, run_scenario, scenario_root
 from aibom.compliance.minimum_elements import evaluate_cyclonedx
@@ -28,13 +30,14 @@ from aibom.demo import (
 from aibom.drift import compare_scan_results
 from aibom.export.cyclonedx import to_cyclonedx
 from aibom.export.sarif import to_sarif
-from aibom.graph import build_graph
+from aibom.graph import build_dependency_list, build_graph
 from aibom.impact import build_impact_paths, build_unresolved_impacts
 from aibom.policy import production_ai_component_count, production_view
 from aibom.report.html import coverage_notes, render_html
 from aibom.risk.scoring import headline
 from aibom.server.clone import CloneError, clone_repo, normalize_repo_url
 from aibom.service import ScanResult, run_scan
+from aibom.vuln.osv import group_by_package
 
 # A cloner takes a URL (and optional git ref) and returns a context manager
 # yielding the checkout path.
@@ -197,6 +200,7 @@ def create_app() -> FastAPI:
                     display_target=f"{display}@{req.base_ref}",
                     ref=req.base_ref,
                 )
+                base_agents = _agent_report(base_path, baseline, f"{display}@{req.base_ref}")
             with cloner(req.repo_url, ref=req.head_ref) as head_path:
                 candidate = run_scan(
                     head_path,
@@ -204,9 +208,14 @@ def create_app() -> FastAPI:
                     display_target=f"{display}@{req.head_ref}",
                     ref=req.head_ref,
                 )
+                head_agents = _agent_report(head_path, candidate, f"{display}@{req.head_ref}")
         except CloneError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _to_drift_payload(baseline, candidate)
+        payload = _to_drift_payload(baseline, candidate)
+        payload["agent_privileges"] = _privilege_payload(
+            payload, base_agents, head_agents, req
+        )
+        return payload
 
     @app.post("/api/diff/demo")
     def diff_demo(
@@ -272,6 +281,49 @@ def _to_drift_payload(baseline: ScanResult, candidate: ScanResult) -> dict[str, 
         "baseline_paths": _paths_payload(baseline),
         "candidate_paths": _paths_payload(candidate),
     }
+
+
+def _agent_report(
+    path: Path, result: ScanResult, label: str
+) -> AgentSecurityReport | str:
+    """The revision's agent analysis, or why it could not run."""
+    try:
+        return analyze_agents(path, result.inventory, display_target=label)
+    except (InputError, FileNotFoundError) as exc:
+        return str(exc)
+
+
+def _privilege_payload(
+    payload: dict[str, Any],
+    before: AgentSecurityReport | str,
+    after: AgentSecurityReport | str,
+    req: DiffRequest,
+) -> dict[str, Any]:
+    """Agent privilege drift for a real repository, or the reason it was not evaluated.
+
+    Needs ``aibom-identity.yaml`` (agent -> identity -> policy files) in the
+    repository; without it nothing is guessed and the result says so.
+    """
+    if isinstance(before, str) or isinstance(after, str):
+        return {"status": "failed",
+                "reason": before if isinstance(before, str) else str(after)}
+    if not (before.scope.manifest or after.scope.manifest):
+        return {
+            "status": "not_evaluated",
+            "reason": "neither revision has an aibom-identity.yaml, so agents have no "
+            "known identity or policy to compare",
+        }
+    bom = payload["drift"].get("bom") or {}
+    report = compare_privileges(
+        before,
+        after,
+        bom_identical=bom.get("identical"),
+        bom_differences=[*bom.get("added", []), *bom.get("removed", []),
+                         *bom.get("changed", [])],
+        retest_command=f"aibom diff <baseline> <candidate> --agent-privileges "
+        f"# {req.base_ref} vs {req.head_ref}",
+    )
+    return {"status": "evaluated", "report": report.model_dump(mode="json")}
 
 
 def _paths_payload(result: ScanResult) -> dict[str, Any]:
@@ -379,6 +431,8 @@ def _to_payload(
         "score": result.score.model_dump() | {"grade": result.score.grade},
         "findings": [f.model_dump() for f in result.findings],
         "graph": build_graph(inv, result.findings),
+        "dependencies": build_dependency_list(inv, result.findings),
+        "vulnerable_packages": group_by_package(result.findings),
         "inventory": inv.model_dump(),
         "cyclonedx": bom,
         "minimum_elements": evaluate_cyclonedx(bom).to_dict(),

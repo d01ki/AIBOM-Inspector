@@ -369,6 +369,34 @@ def recommended_upgrade(per_advisory: list[str | None]) -> str | None:
     return max(keyed)[1] if keyed else None
 
 
+def group_by_package(findings: list[Finding]) -> list[dict[str, Any]]:
+    """Known-vulnerability findings grouped per package with one upgrade target.
+
+    ``recommended_version`` is the lowest version that clears every advisory
+    with a known fix; advisories without a known fix are counted separately,
+    so the recommendation never claims more than it covers.
+    """
+    groups: dict[str, list[Finding]] = {}
+    for f in findings:
+        if f.advisory is not None and f.entity_id:
+            groups.setdefault(f.entity_id, []).append(f)
+    out: list[dict[str, Any]] = []
+    for entity_id, items in groups.items():
+        fixes = [f.advisory.fixed_version for f in items if f.advisory]
+        worst = max(items, key=lambda f: f.severity.rank).severity
+        out.append({
+            "entity_id": entity_id,
+            "package": items[0].entity_name,
+            "installed_version": items[0].advisory.installed_version if items[0].advisory else None,
+            "severity": worst.value,
+            "advisories": [f.rule_id for f in items],
+            "recommended_version": recommended_upgrade(fixes),
+            "without_known_fix": sum(1 for v in fixes if not v),
+        })
+    out.sort(key=lambda g: (-Severity(g["severity"]).rank, str(g["package"]).lower()))
+    return out
+
+
 def _norm_name(name: str, ecosystem: str | None) -> str:
     eco = (ecosystem or "").lower()
     if eco == "pypi":

@@ -207,3 +207,47 @@ def test_html_report_draws_directed_edges() -> None:
     html = render_html(result.inventory, result.findings, result.score)
     assert "marker-end='url(#graph-arrow)'" in html
     assert "openai depends on form-data-encoder (package-lock.json:" in html
+
+
+# --- review backlog #37: the dependency table lists every package -------------
+
+def test_dependency_list_keeps_plain_packages_and_marks_unknown_relations(
+    tmp_path: Path,
+) -> None:
+    from aibom.graph import build_dependency_list, build_graph
+    from aibom.service import run_scan
+
+    (tmp_path / "requirements.txt").write_text(
+        "openai-agents==0.1.0\nfastapi==0.110.0\npydantic==2.6.0\n", encoding="utf-8"
+    )
+    result = run_scan(tmp_path)
+    table = build_dependency_list(result.inventory, result.findings)
+    names = {row["name"] for row in table["packages"]}
+    assert {"fastapi", "pydantic", "openai-agents"} <= names
+    assert table["summary"]["total"] == 3
+    assert table["summary"]["relations_resolved"] == 0
+    assert all(row["relations"] == "unknown" for row in table["packages"])
+    assert all(row["depends_on"] == [] for row in table["packages"])  # no invented edges
+    # The AI usage graph still filters plain packages; the table does not.
+    graph_names = {n["label"] for n in build_graph(result.inventory, result.findings)["nodes"]}
+    assert "fastapi" not in graph_names
+
+
+def test_dependency_list_reports_lockfile_edges_with_evidence(tmp_path: Path) -> None:
+    from aibom.graph import build_dependency_list
+    from aibom.service import run_scan
+
+    (tmp_path / "poetry.lock").write_text(
+        '[[package]]\nname = "flask"\nversion = "3.0.0"\n\n'
+        '[package.dependencies]\nwerkzeug = ">=3.0"\n\n'
+        '[[package]]\nname = "werkzeug"\nversion = "3.0.1"\n',
+        encoding="utf-8",
+    )
+    result = run_scan(tmp_path)
+    table = build_dependency_list(result.inventory, result.findings)
+    rows = {row["name"]: row for row in table["packages"]}
+    assert rows["flask"]["relations"] == "resolved"
+    assert rows["flask"]["depends_on"] == [rows["werkzeug"]["id"]]
+    assert rows["werkzeug"]["required_by"] == [rows["flask"]["id"]]
+    assert rows["flask"]["edge_evidence"][rows["werkzeug"]["id"]].startswith("poetry.lock:")
+    assert table["summary"]["graph_lockfiles"] == ["poetry.lock"]

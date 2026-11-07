@@ -13,10 +13,10 @@ from typing import Any
 
 from aibom.exposure import build_exposure_paths
 from aibom.impact import build_impact_paths
-from aibom.inventory import Inventory
-from aibom.models.entities import RelationshipType
+from aibom.inventory import GRAPH_LOCKFILES, Inventory, dependencies_resolved
+from aibom.models.entities import Package, RelationshipType
 from aibom.models.findings import Finding, Severity
-from aibom.policy import production_view
+from aibom.policy import entity_in_production_scope, production_view
 
 
 def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]:
@@ -110,3 +110,79 @@ def build_graph(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]
         "exposure_paths": exposure_paths,
         "impact_paths": impact_paths,
     }
+
+
+def build_dependency_list(inventory: Inventory, findings: list[Finding]) -> dict[str, Any]:
+    """Every package in the inventory, with what is known about its relations.
+
+    Unlike :func:`build_graph` nothing is filtered out: this is the complete
+    dependency table (the same set CycloneDX lists as components). A package's
+    ``relations`` is ``resolved`` only when a lockfile that records dependency
+    edges covers it; otherwise its own dependencies are ``unknown`` — never
+    presented as "none".
+    """
+    packages = [e for e in inventory.entities if isinstance(e, Package)]
+    ids = {p.id for p in packages}
+    depends: dict[str, list[str]] = {p.id: [] for p in packages}
+    required_by: dict[str, list[str]] = {p.id: [] for p in packages}
+    edge_evidence: dict[tuple[str, str], str] = {}
+    for r in inventory.relationships:
+        if r.relationship is not RelationshipType.DEPENDS_ON:
+            continue
+        if r.source_id in ids and r.target_id in ids and r.target_id not in depends[r.source_id]:
+            depends[r.source_id].append(r.target_id)
+            required_by[r.target_id].append(r.source_id)
+            if r.source_evidence:
+                edge_evidence[(r.source_id, r.target_id)] = r.source_evidence[0].location()
+    worst: dict[str, Severity] = {}
+    counts: dict[str, int] = {}
+    for f in findings:
+        if f.entity_id in ids:
+            counts[f.entity_id] = counts.get(f.entity_id, 0) + 1
+            current = worst.get(f.entity_id)
+            if current is None or f.severity.rank > current.rank:
+                worst[f.entity_id] = f.severity
+    rows: list[dict[str, Any]] = []
+    for p in sorted(packages, key=lambda p: (p.dependency_scope.value, p.name.lower())):
+        files = sorted({ev.file for ev in p.source_evidence})
+        rows.append({
+            "id": p.id,
+            "name": p.name,
+            "ecosystem": p.ecosystem,
+            "version": p.version,
+            "version_pinned": p.version_pinned,
+            "purl": p.purl,
+            "scope": p.dependency_scope.value,
+            "ai": p.ai,
+            "sources": files,
+            "locations": [ev.location() for ev in p.source_evidence[:4]],
+            "from_lockfile": any(ev.kind == "lockfile" for ev in p.source_evidence),
+            "relations": "resolved" if dependencies_resolved(p) else "unknown",
+            "depends_on": depends[p.id],
+            "required_by": required_by[p.id],
+            "edge_evidence": {
+                target: edge_evidence[(p.id, target)]
+                for target in depends[p.id] if (p.id, target) in edge_evidence
+            },
+            "finding_count": counts.get(p.id, 0),
+            "severity": worst[p.id].value if p.id in worst else None,
+            "production": entity_in_production_scope(p),
+            "source_contexts": sorted(c.value for c in p.source_contexts),
+        })
+    lockfiles = sorted({
+        f for row in rows if row["from_lockfile"] for f in row["sources"]
+        if f.replace("\\", "/").rsplit("/", 1)[-1].lower() in GRAPH_LOCKFILES
+    })
+    return {
+        "packages": rows,
+        "summary": {
+            "total": len(rows),
+            "direct": sum(1 for r in rows if r["scope"] == "direct"),
+            "transitive": sum(1 for r in rows if r["scope"] == "transitive"),
+            "ai": sum(1 for r in rows if r["ai"]),
+            "relations_resolved": sum(1 for r in rows if r["relations"] == "resolved"),
+            "edges": sum(len(r["depends_on"]) for r in rows),
+            "graph_lockfiles": lockfiles,
+        },
+    }
+

@@ -329,3 +329,24 @@ def test_ignore_rule_matches_any_alias(monkeypatch: Any, tmp_path: Any) -> None:
     assert kept.inventory.stats.vuln_lookup.status == "complete"
     dropped = service.run_scan(tmp_path, vulns=True, ignore_rules=["CVE-2025-43859"])
     assert not any(f.rule_id == "GHSA-vqfr-h8mv-ghfj" for f in dropped.findings)
+
+
+def test_group_by_package_gives_one_upgrade_for_all_fixed_advisories() -> None:
+    from aibom.vuln.osv import group_by_package
+
+    pkg = _pinned("werkzeug", "3.0.1")
+    vulns = [
+        {"id": "GHSA-aaaa-0000-0001", "database_specific": {"severity": "HIGH"},
+         "affected": [{"ranges": [{"type": "ECOSYSTEM",
+                                   "events": [{"introduced": "0"}, {"fixed": "3.0.3"}]}]}]},
+        {"id": "GHSA-aaaa-0000-0002", "database_specific": {"severity": "MODERATE"},
+         "affected": [{"ranges": [{"type": "ECOSYSTEM",
+                                   "events": [{"introduced": "0"}, {"fixed": "3.0.6"}]}]}]},
+        {"id": "PYSEC-0000-0003", "affected": [{"ranges": [{"type": "GIT", "events": [
+            {"introduced": "0"}, {"fixed": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}]}]}]},
+    ]
+    [group] = group_by_package(_scan(pkg, vulns))
+    assert group["package"] == "werkzeug" and group["severity"] == "high"
+    assert group["recommended_version"] == "3.0.6"
+    assert group["without_known_fix"] == 1
+    assert len(group["advisories"]) == 3

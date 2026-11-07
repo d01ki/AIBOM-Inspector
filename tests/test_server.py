@@ -352,3 +352,38 @@ def test_scan_passes_the_ref_to_the_cloner_and_records_it(client: TestClient) ->
     ).json()
     assert data["metadata"]["ref"] == "drift-candidate"
     assert data["metadata"]["target"].endswith("AIBOM-Inspector.git")
+
+
+PRIV = Path(__file__).resolve().parents[1] / "examples" / "agent-privilege-drift"
+
+
+def test_repository_compare_includes_agent_privileges_when_mapped() -> None:
+    """Privilege drift is not demo-only: /api/diff runs it on a real checkout."""
+
+    @contextmanager
+    def clone(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        yield PRIV / ("candidate" if ref == "head" else "baseline")
+
+    app = create_app()
+    app.dependency_overrides[get_cloner] = lambda: clone
+    body = TestClient(app).post(
+        "/api/diff",
+        json={"repo_url": "https://github.com/o/r", "base_ref": "base", "head_ref": "head"},
+    ).json()
+    priv = body["agent_privileges"]
+    assert priv["status"] == "evaluated"
+    assert any(c["gates"] for c in priv["report"]["changes"])
+
+
+def test_repository_compare_without_identity_manifest_is_not_evaluated(
+    client: TestClient,
+) -> None:
+    body = client.post(
+        "/api/diff",
+        json={"repo_url": "https://github.com/o/r",
+              "base_ref": "drift-baseline", "head_ref": "drift-candidate"},
+    ).json()
+    priv = body["agent_privileges"]
+    assert priv["status"] == "not_evaluated"
+    assert "aibom-identity.yaml" in priv["reason"]
+
