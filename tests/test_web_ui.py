@@ -17,17 +17,26 @@ from pathlib import Path
 
 import pytest
 
-WEB = Path(__file__).resolve().parents[1] / "web" / "index.html"
+WEB = Path(__file__).resolve().parents[1] / "web"
+# The page is markup + one stylesheet + one script, served side by side.
+PARTS = ("index.html", "app.css", "app.js")
 
 
 @pytest.fixture(scope="module")
 def page() -> str:
-    return WEB.read_text(encoding="utf-8")
+    return "\n".join((WEB / name).read_text(encoding="utf-8") for name in PARTS)
+
+
+def test_the_page_loads_its_stylesheet_and_script() -> None:
+    markup = (WEB / "index.html").read_text(encoding="utf-8")
+    assert '<link rel="stylesheet" href="app.css">' in markup
+    assert '<script src="app.js"></script>' in markup
+    assert "<style>" not in markup and "<script>" not in markup
 
 
 def _results_rule(page: str) -> str:
     """The base ``.results`` declaration block."""
-    match = re.search(r"\n  \.results \{(.*?)\}", page, re.S)
+    match = re.search(r"\n\.results \{(.*?)\}", page, re.S)
     assert match, ".results rule not found; did the stylesheet get restructured?"
     return match.group(1)
 
