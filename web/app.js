@@ -512,6 +512,13 @@ function renderDependencies(dep) {
     return;
   }
   const s = dep.summary;
+  // The graph is drawn when first shown; a new result starts it afresh.
+  depsData = dep;
+  $("depsGraph").innerHTML = "";
+  const graphButton = document.querySelector('[data-deps-view="graph"]');
+  graphButton.disabled = !s.edges;
+  graphButton.title = s.edges ? "" : "No lockfile records package-to-package dependencies";
+  setDepsView(s.edges ? "graph" : "table");
   const byId = Object.fromEntries(dep.packages.map((p, i) => [p.id, { ...p, index: i }]));
   $("depsCount").textContent = `(${s.total})`;
   $("depsLead").textContent = `${s.total} package(s): ${s.direct} direct (declared by the `
@@ -905,6 +912,94 @@ function svgEl(name, attrs) {
 const MAIN_GRAPH = { host: "graph", legend: "edgeLegend", detail: "graphDetail", main: true };
 const DRIFT_GRAPH = { host: "driftDepGraph", legend: "driftDepLegend", detail: "driftDepDetail" };
 const COMPARE_GRAPH = { host: "compareDepGraph", legend: "compareDepLegend", detail: "compareDepDetail" };
+// Package -> package dependencies from the lockfile, laid out by depth.
+const DEPS_GRAPH = { host: "depsGraph", legend: "depsLegend", detail: "depsDetail",
+  layout: "layers", title: "Dependency graph" };
+
+// Columns by dependency depth: each package sits one column to the right of
+// the deepest package that depends on it (longest path), so every arrow runs
+// left to right and a shared dependency such as typing-extensions ends up at
+// the far right instead of pulling arrows backwards. Rows are by name.
+function layerLayout(nodes, links, pad) {
+  const depth = {};
+  nodes.forEach(n => { depth[n.id] = 0; });
+  // Relaxation; bounded by the node count, so a cyclic lockfile still ends.
+  for (let round = 0; round < nodes.length; round++) {
+    let changed = false;
+    for (const l of links) {
+      if (depth[l.t.id] < depth[l.s.id] + 1 && depth[l.s.id] + 1 < nodes.length) {
+        depth[l.t.id] = depth[l.s.id] + 1;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const deepest = Math.max(0, ...Object.values(depth));
+  const columns = [];
+  nodes.forEach(n => {
+    const d = depth[n.id] ?? deepest + 1;
+    (columns[d] = columns[d] || []).push(n);
+  });
+  const COL = 190, ROW = 44;
+  const rows = Math.max(...columns.map(c => (c ? c.length : 0)));
+  const W = pad * 2 + Math.max(1, columns.length - 1) * COL;
+  const H = pad * 2 + Math.max(1, rows - 1) * ROW;
+  // Left column by name; every later column by the mean height of the
+  // packages that depend on it (barycenter), which removes most crossings.
+  const parents = {};
+  links.forEach(l => { (parents[l.t.id] = parents[l.t.id] || []).push(l.s); });
+  columns.forEach((col, i) => {
+    if (!col) return;
+    const key = (n) => {
+      const ys = (parents[n.id] || []).filter(p => p.y != null && p.x < pad + i * COL);
+      return ys.length ? ys.reduce((sum, p) => sum + p.y, 0) / ys.length : Infinity;
+    };
+    col.sort((a, b) => (i ? key(a) - key(b) : 0) || a.label.localeCompare(b.label));
+    const top = (H - (col.length - 1) * ROW) / 2;
+    col.forEach((n, j) => { n.x = pad + i * COL; n.y = top + j * ROW; });
+  });
+  return { W, H };
+}
+
+// The dependency table as a graph: one node per package, one edge per
+// lockfile-recorded dependency, each citing its lockfile line.
+function dependencyGraph(dep) {
+  const ids = new Set(dep.packages.map(p => p.id));
+  return {
+    nodes: dep.packages.map(p => ({
+      id: p.id, label: p.name, type: "package", severity: p.severity, direct: p.scope === "direct",
+      version: p.version, scope: p.scope, location: (p.locations || [])[0],
+      source_contexts: p.source_contexts,
+    })),
+    edges: dep.packages.flatMap(p => p.depends_on.filter(t => ids.has(t)).map(t => ({
+      source: p.id, target: t, type: "depends_on",
+      evidence: p.edge_evidence[t] ? [p.edge_evidence[t]] : [],
+    }))),
+  };
+}
+
+let depsData = null;
+function setDepsView(mode) {
+  const graph = mode === "graph";
+  document.querySelectorAll("[data-deps-view]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.depsView === mode)));
+  $("depsMap").hidden = !graph;
+  $("depsTable").hidden = graph;
+  $("depsToolbar").hidden = graph;
+  if (graph) drawDepsGraph();
+}
+
+// Drawn only while the Dependencies tab is visible: a hidden host has no
+// width, and the zoom would be computed for nothing.
+function drawDepsGraph() {
+  const host = $("depsGraph");
+  if (!depsData || $("depsSection").hidden) return;
+  if (!host.querySelector("svg")) {
+    renderGraph(dependencyGraph(depsData), lastResult ? lastResult.findings : [], DEPS_GRAPH);
+  } else {
+    setZoom(host, "default");
+  }
+}
 
 function renderGraph(graph, findings, view = MAIN_GRAPH) {
   const ctx = { detail: view.detail, findings: findings || [], exposure: graph.exposure_paths || [] };
@@ -934,7 +1029,8 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   tools.hidden = false;
   detailReset(ctx);
 
-  const W = 800, H = 520, PAD = 46;
+  let W = 800, H = 520;
+  const PAD = 46;
   const nodes = graph.nodes.map((n, i) => {
     const a = (i / graph.nodes.length) * Math.PI * 2;
     return { ...n, x: W/2 + Math.cos(a)*150, y: H/2 + Math.sin(a)*150, vx:0, vy:0 };
@@ -942,12 +1038,16 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   const byId = {}; nodes.forEach(n => byId[n.id] = n);
   const links = graph.edges.map(e => ({ s: byId[e.source], t: byId[e.target], type: e.type,
     evidence: e.evidence || [] })).filter(l => l.s && l.t);
-  nodes.forEach(n => { n.radius = n.type === "agent" ? 11 : 8.5; });
+  nodes.forEach(n => { n.radius = n.type === "agent" || n.direct ? 11 : 8.5; });
   const adj = {}; nodes.forEach(n => adj[n.id] = new Set());
   links.forEach(l => { adj[l.s.id].add(l.t.id); adj[l.t.id].add(l.s.id); });
 
-  simulate(nodes, links, W, H);
-  fit(nodes, W, H, PAD);
+  if (view.layout === "layers") {
+    ({ W, H } = layerLayout(nodes, links, PAD));
+  } else {
+    simulate(nodes, links, W, H);
+    fit(nodes, W, H, PAD);
+  }
 
   if (!links.length) {
     const note = document.createElement("p");
@@ -959,7 +1059,7 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   }
 
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group",
-    "aria-label": "AI usage map" });
+    "aria-label": view.title || "AI usage map" });
   const defs = svgEl("defs", {});
   const types = [...new Set(links.map(l => l.type))];
   types.forEach(type => {
@@ -1232,6 +1332,11 @@ function detailShow(node, links, ctx) {
     + `<h3 class="dt-name">${esc(node.label)}</h3>`
     + `<button type="button" class="ghost small copy-name">Copy name</button>`;
   if (node.provider) html += `<div class="muted">Provider: ${esc(node.provider)}</div>`;
+  if (node.version) html += `<div class="muted">Version: <code>${esc(node.version)}</code></div>`;
+  if (node.scope) {
+    html += `<div class="muted">${node.scope === "direct" ? "Direct dependency (declared by the "
+      + "project)" : "Transitive dependency (resolved by the lockfile)"}</div>`;
+  }
   if (node.location) html += `<div class="muted">Location: <code>${esc(node.location)}</code></div>`;
   if (node.usage) html += `<div class="muted">${esc(usageLabel(node.usage))}</div>`;
   if (node.source_contexts && node.source_contexts.length) {
@@ -1691,6 +1796,7 @@ function selectTab(name) {
     panel.hidden = panel.dataset.panel !== name;
   });
   if (name === "graph") setZoom($("graph"), "default");
+  if (name === "deps" && !$("depsMap").hidden) drawDepsGraph();
 }
 document.querySelectorAll(".result-tab").forEach(tab => {
   tab.addEventListener("click", () => selectTab(tab.dataset.tab));
@@ -2415,6 +2521,8 @@ document.addEventListener("click", (ev) => {
 });
 $("cancelScan").addEventListener("click", () => { if (activeScan) activeScan.abort(); });
 $("depsSearch").addEventListener("input", filterDeps);
+document.querySelectorAll("[data-deps-view]").forEach(b =>
+  b.addEventListener("click", () => setDepsView(b.dataset.depsView)));
 $("depsFilter").addEventListener("change", filterDeps);
 $("contextFilter").addEventListener("change", filterInventory);
 $("repoRef").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });

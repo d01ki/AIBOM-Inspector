@@ -18,9 +18,18 @@ proves it. The edge rules are in
   (`source`, `target`, `type`, `evidence[]`). The demo APIs carry one map per
   revision: `/api/agent-drift/demo` → `revisions.<stage>.graph`,
   `/api/diff/demo` → `baseline.graph` / `candidate.graph`.
-- UI: results → **Dependencies** tab → click a node → *Connections*. The
-  privilege-drift and MCP demos draw a *Dependency map* that follows the
+- UI: results → **Dependencies** tab → *Graph* (the default when a lockfile
+  records relations) draws package → package arrows from the lockfile, laid
+  out by depth (longest path, so every arrow runs left to right); click a
+  package for its version, scope and the lockfile line of each edge. *Table*
+  lists the same packages. The **AI usage map** tab shows the AI components.
+  The privilege-drift and MCP demos draw a *Dependency map* that follows the
   Baseline / Candidate / Fixed toggle; the Compare demo draws the candidate's.
+- Demo: the bundled sample (`tests/fixtures/impact-demo`) ships a real
+  `uv.lock` (generated with `uv lock` for its three pins), so *Try the bundled
+  sample* shows a 44-package graph with 77 lockfile-cited edges offline.
+  `impact-demo-baseline` carries the same `uv.lock`, so the same-file drift demo
+  still compares identical components (`test_same_components_can_gain_a_new_critical_blast_radius`).
 
 ## Source
 
@@ -99,6 +108,10 @@ counts, the panel text, and console errors).
 
 ## Known gaps / what usually breaks
 
+- uv.lock lists the scanned project itself as a `[[package]]`
+  (`source = { virtual = "." }`); it used to appear as its own transitive
+  dependency. `_is_uv_project` skips it, held by
+  `test_the_uv_project_itself_is_not_a_dependency`.
 - `pnpm-lock.yaml` and `yarn.lock` are not parsed (no package nodes or edges
   for those projects).
 - PHP and Ruby source imports are not linked (`openai-php/client`,
@@ -125,7 +138,9 @@ counts, the panel text, and console errors).
     "src/aibom/export/cyclonedx.py",
     "src/aibom/report/html.py",
     "web/index.html",
-    "tests/fixtures/locked-ai-app/*"
+    "web/app.js",
+    "tests/fixtures/locked-ai-app/*",
+    "tests/fixtures/impact-demo/*"
   ],
   "tests": [
     "tests/test_dependency_edges.py",

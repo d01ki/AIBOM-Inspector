@@ -38,8 +38,8 @@ HTTP request body   routes/api.py:11
 
 - **Inventory:** AI models, datasets, prompts, agents, MCP servers and
   providers in Python and TypeScript/JavaScript, plus every package across
-  PyPI, npm, Go, crates.io, Maven, RubyGems, Packagist and NuGet, with
-  lockfile dependencies.
+  PyPI, npm, Go, crates.io, Maven, RubyGems, Packagist and NuGet, with a
+  dependency graph drawn from the lockfile (each arrow cites its line).
 - **Attack paths:** follows untrusted input (HTTP, CLI, env, files,
   retrieval) through prompts into a tool bound to an agent, and into what the
   tool does: shell, file writes, network. Each path is labelled

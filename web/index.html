@@ -215,7 +215,11 @@
             <h2 id="deps-title">Dependencies <span class="count" id="depsCount"></span></h2>
             <p class="section-description" id="depsLead"></p>
           </div>
-          <div class="toolbar" aria-label="Filter dependencies">
+          <div class="view-toggle" role="group" aria-label="Dependency view">
+            <button type="button" class="ghost small" data-deps-view="graph" aria-pressed="false">Graph</button>
+            <button type="button" class="ghost small" data-deps-view="table" aria-pressed="true">Table</button>
+          </div>
+          <div class="toolbar" id="depsToolbar" aria-label="Filter dependencies">
             <input type="text" id="depsSearch" placeholder="Search packages" aria-label="Search packages">
             <select id="depsFilter" aria-label="Filter packages">
               <option value="all">All packages</option>
@@ -228,7 +232,20 @@
           </div>
         </div>
         <div class="notice" id="depsNotice" hidden></div>
-        <div class="tablewrap"><table id="deps">
+        <div class="deps-map" id="depsMap" hidden>
+          <p class="help">Each arrow points from a package to a package it depends on, as
+            recorded in the lockfile (select a package for the line). A package sits to the
+            right of everything that depends on it. Direct dependencies, declared by the
+            project, are drawn larger; red and orange packages have findings.</p>
+          <div class="graphgrid">
+            <div>
+              <div id="depsGraph" class="graph-canvas"></div>
+              <div class="legend" id="depsLegend" aria-label="Edge types" hidden></div>
+            </div>
+            <div class="card detail" id="depsDetail"></div>
+          </div>
+        </div>
+        <div class="tablewrap" id="depsTable"><table id="deps">
           <thead><tr><th>Package</th><th>Version</th><th>Scope</th><th>Depends on</th>
             <th>Required by</th><th>Declared in</th><th>Findings</th></tr></thead>
           <tbody></tbody>
