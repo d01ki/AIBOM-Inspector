@@ -29,7 +29,8 @@ def test_scan_renders_inventory_and_score() -> None:
     result = runner.invoke(app, ["scan", str(FIXTURE)])
     assert result.exit_code == 0
     assert "inventory" in result.stdout.lower()
-    assert "Security score" in result.stdout
+    assert "hygiene score" in result.stdout
+    assert "Action required:" in result.stdout  # critical/high outranks the grade
     assert "TDR-001" in result.stdout  # a finding surfaced
 
 
@@ -42,7 +43,7 @@ def test_scan_missing_target_exits_2() -> None:
 def test_scan_quiet_suppresses_tables() -> None:
     result = runner.invoke(app, ["scan", str(FIXTURE), "--quiet"])
     assert result.exit_code == 0
-    assert "Security score" not in result.stdout
+    assert "hygiene score" not in result.stdout
 
 
 def test_scan_writes_json_inventory(tmp_path: Any) -> None:
@@ -146,7 +147,7 @@ def test_no_target_interactive_prompts_and_scans(monkeypatch: Any) -> None:
     result = runner.invoke(app, ["scan"], input=f"{FIXTURE}\n")
     assert result.exit_code == 0
     assert "What should I scan?" in result.stdout
-    assert "Security score" in result.stdout
+    assert "hygiene score" in result.stdout
 
 
 def test_url_target_disallowed_host_exits_2() -> None:
@@ -166,7 +167,7 @@ def test_url_target_clones_and_scans(monkeypatch: Any) -> None:
     url = "https://github.com/owner/repo"
     out_result = runner.invoke(app, ["scan", url])
     assert out_result.exit_code == 0
-    assert "Security score" in out_result.stdout
+    assert "hygiene score" in out_result.stdout
 
 
 def test_url_target_records_url_as_metadata_target(monkeypatch: Any, tmp_path: Path) -> None:
@@ -199,7 +200,7 @@ def test_menu_demo_scan(monkeypatch: Any) -> None:
     assert result.exit_code == 0
     assert "Bundled sample app" in result.stdout
     assert "Untrusted input reaching a bound tool" in result.stdout
-    assert "Security score" in result.stdout
+    assert "hygiene score" in result.stdout
     assert "AIBOM-IMPACT-001" in result.stdout
 
 
@@ -207,7 +208,7 @@ def test_menu_quit(monkeypatch: Any) -> None:
     monkeypatch.setattr("aibom.cli._stdin_is_tty", lambda: True)
     result = runner.invoke(app, [], input="q\n")
     assert result.exit_code == 0
-    assert "Security score" not in result.stdout
+    assert "hygiene score" not in result.stdout
 
 
 def test_menu_invalid_choice_reprompts(monkeypatch: Any) -> None:

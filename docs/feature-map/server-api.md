@@ -8,7 +8,7 @@ the CLI, and returns JSON or HTML. It also serves the web UI from `/`.
 
 ## Entry points
 
-`GET /api/health`; `POST /api/scan`, `/api/demo`, `/api/agent-drift/demo`,
+`GET /api/health`; `POST /api/scan`, `/api/scan/stream`, `/api/demo`, `/api/agent-drift/demo`,
 `/api/report`, `/api/demo/report`, `/api/diff`, `/api/diff/demo`,
 `/api/sarif`, `/api/demo/sarif`.
 
@@ -23,13 +23,18 @@ Scan pipeline, Exports, Drift, Agent security. `git` is needed for real clones.
 ## Normal paths
 
 A valid GitHub URL is cloned shallowly, scanned, and cleaned up. A demo
-endpoint works with no network.
+endpoint works with no network. `/api/scan/stream` runs the same scan in a
+worker thread and streams NDJSON: `{"stage": id}` as each step starts (`clone`,
+`collect`, `lockfiles`, `link`, `resolve`, `risk`, `vulns`, `agents`,
+`report`; skipped steps are not sent), then `{"result": payload}`. When the
+client disconnects, the worker stops at the next stage boundary.
 
 ## Error paths
 
 A non-HTTPS or non-allowlisted URL, an SSRF-style host, a missing ref, or a
 clone timeout returns 4xx with an actionable message. Clone errors never leak
-the temp path.
+the temp path. On the stream, a bad URL is still a plain 400 before streaming;
+a clone failure after streaming started is an `{"error", "status"}` line.
 
 ## Boundaries
 
@@ -56,7 +61,10 @@ stack).
 ## Known gaps / what usually breaks
 
 Changing a response key breaks the UI silently. Run the Web UI checks with any
-API change.
+API change. A new scan stage must be added to `STAGES` in `web/app.js`; `tests/test_web_ui.py`
+compares the two lists.
+The browser check intercepts both `/api/scan` and `/api/scan/stream` to keep
+the run offline: a new scan route needs the same interception.
 
 ```json verify
 {

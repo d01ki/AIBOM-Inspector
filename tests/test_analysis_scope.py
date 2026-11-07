@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aibom import __version__
 from aibom.collectors.repo import RepoCollector
 from aibom.graph import build_graph
@@ -14,6 +16,7 @@ from aibom.report.html import render_html
 from aibom.risk.engine import evaluate
 from aibom.risk.scoring import score_findings
 from aibom.service import run_scan
+from tests.conftest import FIXTURE
 
 
 def _collect(target: Path) -> Inventory:
@@ -106,3 +109,30 @@ def test_direct_risk_engine_evaluation_applies_production_scope() -> None:
     findings = evaluate(inventory)
     assert findings == []
     assert score_findings(findings).overall == 100
+
+
+def test_run_scan_reports_progress_stages_in_order() -> None:
+
+    seen: list[str] = []
+    run_scan(FIXTURE, progress=seen.append)
+    assert seen == ["collect", "lockfiles", "link", "risk"]
+    seen.clear()
+    run_scan(FIXTURE, lockfiles=False, progress=seen.append)
+    assert "lockfiles" not in seen  # a skipped step is never reported
+
+
+def test_a_progress_callback_that_raises_stops_the_scan() -> None:
+
+    class Stop(Exception):
+        pass
+
+    seen: list[str] = []
+
+    def cancel_at_link(stage: str) -> None:
+        seen.append(stage)
+        if stage == "link":
+            raise Stop
+
+    with pytest.raises(Stop):
+        run_scan(FIXTURE, progress=cancel_at_link)
+    assert seen == ["collect", "lockfiles", "link"]  # risk never started

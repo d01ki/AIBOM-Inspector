@@ -6,10 +6,13 @@ run fully offline and never touch git or the network.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -301,3 +304,163 @@ def test_agent_drift_demo_is_offline_and_verifies_the_fix(
 
 def test_agent_drift_demo_rejects_an_unknown_scenario(client: TestClient) -> None:
     assert client.post("/api/agent-drift/demo?scenario=nope").status_code == 400
+
+
+def _assert_evidenced_graph(graph: dict) -> None:
+    ids = {n["id"] for n in graph["nodes"]}
+    assert graph["edges"], "a demo dependency map must not be empty"
+    for edge in graph["edges"]:
+        assert {edge["source"], edge["target"]} <= ids
+        assert edge["evidence"], f"edge without evidence: {edge}"
+
+
+@pytest.mark.parametrize("scenario", ["agent-privilege-drift", "mcp-tool-exposure"])
+def test_agent_drift_demo_returns_a_dependency_map_per_revision(
+    client: TestClient, scenario: str
+) -> None:
+    data = client.post(f"/api/agent-drift/demo?scenario={scenario}").json()
+    for stage in ("baseline", "candidate", "fixed"):
+        _assert_evidenced_graph(data["revisions"][stage]["graph"])
+
+
+@pytest.mark.parametrize("language", ["python", "typescript"])
+def test_compare_demo_returns_both_dependency_maps(client: TestClient, language: str) -> None:
+    data = client.post(f"/api/diff/demo?language={language}&scenario=cross-file").json()
+    for side in ("baseline", "candidate"):
+        _assert_evidenced_graph(data[side]["graph"])
+
+
+def test_sample_demo_graph_edges_all_cite_evidence(client: TestClient) -> None:
+    _assert_evidenced_graph(client.post("/api/demo").json()["graph"])
+
+
+# --- review backlog: headline, coverage notes, scan ref -----------------------
+
+def test_scan_payload_leads_with_a_headline_and_coverage(client: TestClient) -> None:
+    data = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+              "resolve": False, "vulns": False},
+    ).json()
+    assert data["headline"]["status"] == "action_required"
+    assert any("OSV" in note for note in data["coverage_notes"])
+    assert data["stats"]["vuln_lookup"]["status"] == "not_requested"
+
+
+def test_scan_passes_the_ref_to_the_cloner_and_records_it(client: TestClient) -> None:
+    data = client.post(
+        "/api/scan",
+        json={"repo_url": "https://github.com/d01ki/AIBOM-Inspector", "ref": "drift-candidate",
+              "resolve": False, "vulns": False},
+    ).json()
+    assert data["metadata"]["ref"] == "drift-candidate"
+    assert data["metadata"]["target"].endswith("AIBOM-Inspector.git")
+
+
+PRIV = Path(__file__).resolve().parents[1] / "examples" / "agent-privilege-drift"
+
+
+def test_repository_compare_includes_agent_privileges_when_mapped() -> None:
+    """Privilege drift is not demo-only: /api/diff runs it on a real checkout."""
+
+    @contextmanager
+    def clone(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        yield PRIV / ("candidate" if ref == "head" else "baseline")
+
+    app = create_app()
+    app.dependency_overrides[get_cloner] = lambda: clone
+    body = TestClient(app).post(
+        "/api/diff",
+        json={"repo_url": "https://github.com/o/r", "base_ref": "base", "head_ref": "head"},
+    ).json()
+    priv = body["agent_privileges"]
+    assert priv["status"] == "evaluated"
+    assert any(c["gates"] for c in priv["report"]["changes"])
+
+
+def test_repository_compare_without_identity_manifest_is_not_evaluated(
+    client: TestClient,
+) -> None:
+    body = client.post(
+        "/api/diff",
+        json={"repo_url": "https://github.com/o/r",
+              "base_ref": "drift-baseline", "head_ref": "drift-candidate"},
+    ).json()
+    priv = body["agent_privileges"]
+    assert priv["status"] == "not_evaluated"
+    assert "aibom-identity.yaml" in priv["reason"]
+
+
+
+def _stream_lines(resp: httpx.Response) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+
+
+def test_scan_stream_reports_each_stage_then_the_same_payload(client: TestClient) -> None:
+    body = {"repo_url": "https://github.com/d01ki/AIBOM-Inspector",
+            "resolve": False, "vulns": False}
+    resp = client.post("/api/scan/stream", json=body)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/x-ndjson")
+    lines = _stream_lines(resp)
+    stages = [line["stage"] for line in lines if "stage" in line]
+    # Offline scan: no HF resolve or OSV lookup stage is claimed.
+    assert stages == ["clone", "collect", "lockfiles", "link", "risk", "agents", "report"]
+    assert "result" in lines[-1]
+    plain = client.post("/api/scan", json=body).json()
+    assert lines[-1]["result"].keys() == plain.keys()
+
+
+def test_scan_stream_rejects_a_bad_url_before_streaming(client: TestClient) -> None:
+    resp = client.post("/api/scan/stream", json={"repo_url": "not a url"})
+    assert resp.status_code == 400
+
+
+def test_scan_stream_reports_a_clone_failure_as_an_error_line() -> None:
+    @contextmanager
+    def failing_clone(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        raise CloneError("ref not found")
+        yield FIXTURE  # pragma: no cover
+
+    app = create_app()
+    app.dependency_overrides[get_cloner] = lambda: failing_clone
+    resp = TestClient(app).post(
+        "/api/scan/stream", json={"repo_url": "https://github.com/a/b", "ref": "nope"}
+    )
+    lines = _stream_lines(resp)
+    assert lines[0] == {"stage": "clone"}
+    assert lines[-1] == {"error": "ref not found", "status": 400}
+    assert not any("result" in line for line in lines)
+
+
+def test_closing_the_scan_stream_stops_the_work_at_the_next_stage() -> None:
+    import asyncio
+    import threading
+
+    from aibom.server.app import ScanCancelled, ScanRequest, _stream_scan
+
+    release = threading.Event()
+    exited_with: list[type[BaseException] | None] = []
+
+    @contextmanager
+    def slow_clone(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        release.wait(10)
+        try:
+            yield FIXTURE
+        except BaseException as exc:
+            exited_with.append(type(exc))
+            raise
+        exited_with.append(None)
+
+    async def disconnect_after_first_line() -> None:
+        stream = _stream_scan(ScanRequest(repo_url="https://github.com/a/b"), slow_clone)
+        assert await anext(stream) == '{"stage": "clone"}\n'
+        await stream.aclose()  # what Starlette does when the client goes away
+        release.set()
+
+    asyncio.run(disconnect_after_first_line())
+    for _ in range(100):
+        if exited_with:
+            break
+        threading.Event().wait(0.05)
+    assert exited_with == [ScanCancelled]  # the scan never ran past "collect"

@@ -118,6 +118,9 @@ def test_every_shipped_source_file_is_mapped() -> None:
 
 
 def test_ui_fixtures_exist() -> None:
+    # "demos" is verify_ui.py's built-in demo walk, not a fixture directory.
     for feature in FEATURES:
         for fixture in feature.ui:
+            if fixture == "demos":
+                continue
             assert (ROOT / "tests" / "fixtures" / fixture).is_dir(), fixture

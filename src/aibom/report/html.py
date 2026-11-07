@@ -16,9 +16,11 @@ from aibom.compliance.minimum_elements import (
 )
 from aibom.export.cyclonedx import SbomContext, to_cyclonedx
 from aibom.graph import build_graph
-from aibom.inventory import Inventory
+from aibom.inventory import Inventory, dependencies_resolved
+from aibom.models.entities import Package
 from aibom.models.findings import Finding, SecurityScore, Severity
 from aibom.policy import production_view
+from aibom.risk.scoring import headline
 
 _SEVERITY_COLOR = {
     Severity.CRITICAL: "#b3123b",
@@ -106,6 +108,16 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; font-size: 12p
 .impact-path strong { display: block; margin-bottom: 4px; color: #7e2532; }
 .impact-path .route { display: block; margin-bottom: 4px; font-weight: 650; }
 footer { margin-top: 40px; color: #8a929e; font-size: 12px; }
+.headline { border-radius: 10px; padding: 14px 18px; margin: 18px 0; border: 1px solid #ccd3dc;
+  background: #fff; }
+.headline strong { font-size: 20px; display: block; }
+.headline.action_required { border-left: 6px solid #b3123b; }
+.headline.review { border-left: 6px solid #b8860b; }
+.headline.no_findings { border-left: 6px solid #2e8b57; }
+.coverage { font-size: 13px; color: #3b4452; background: #fff; border: 1px solid #e1e5ea;
+  border-radius: 8px; padding: 10px 14px; margin: 0 0 16px; }
+.coverage li { margin: 2px 0; }
+.adv { font-size: 12px; color: #3b4452; margin-top: 4px; }
 """
 
 _TYPE_COLOR = {
@@ -136,6 +148,9 @@ def render_html(
         f"<p class='sub'>{escape(meta.target)} · "
         f"{escape(meta.tool)} {escape(meta.tool_version)} · {escape(meta.created_at)}"
         f"{_stats_suffix(inventory)}</p>",
+        _provenance(inventory),
+        _headline(findings),
+        _coverage_notes(inventory),
         _scope_notice(inventory),
         # "Nothing found" must not read as a triumphant 100/A.
         _score_cards(score)
@@ -149,13 +164,105 @@ def render_html(
         _graph_section(inventory, findings),
         _inventory_section(inventory),
         _minimum_elements_section(inventory, sbom_context),
-        "<footer>Static, evidence-backed analysis. Scores are computed from deterministic "
-        "rules only (no LLM). Each category starts at 100 and loses points per finding "
+        "<footer>Static, evidence-backed analysis. The headline is decided by the worst "
+        "finding; the hygiene score is secondary and is not a pass/fail verdict. Scores "
+        "are computed from deterministic rules only (no LLM). Each category starts at "
+        "100 and loses points per finding "
         "(critical 40 / high 20 / medium 10 / low 3, max 3 findings per rule); overall = "
         "0.55 &times; mean + 0.45 &times; worst category.</footer>",
         "</div></body></html>",
     ]
     return "".join(parts)
+
+
+def _provenance(inventory: Inventory) -> str:
+    meta = inventory.metadata
+    if not meta.commit and not meta.ref:
+        return ""
+    bits = []
+    if meta.ref:
+        bits.append(f"ref <code>{escape(meta.ref)}</code>")
+    if meta.commit:
+        bits.append(f"commit <code>{escape(meta.commit)}</code>")
+    return f"<p class='sub'>Analyzed {' · '.join(bits)}</p>"
+
+
+def _headline(findings: list[Finding]) -> str:
+    head = headline(findings)
+    return (
+        f"<div class='headline {escape(head.status)}'><strong>{escape(head.label)}</strong>"
+        f"{escape(head.detail)}</div>"
+    )
+
+
+def coverage_notes(inventory: Inventory) -> list[str]:
+    """Plain-language limits of this scan; shared by the HTML report and the API."""
+    notes: list[str] = []
+    packages = [e for e in inventory.entities if isinstance(e, Package)]
+    unresolved = [p for p in packages if not dependencies_resolved(p)]
+    if packages and unresolved:
+        notes.append(
+            f"Dependency relations unresolved for {len(unresolved)} of {len(packages)} "
+            "package(s): no lockfile that records dependency edges covers them, so their "
+            "own (transitive) dependencies are unknown, not absent."
+        )
+    lookup = inventory.stats.vuln_lookup
+    if not lookup.requested:
+        notes.append("Known-vulnerability lookup (OSV) was not run for this scan.")
+    else:
+        if lookup.failed:
+            notes.append(
+                f"Advisory lookup failed for {lookup.failed} package(s); they are not "
+                "reported as vulnerability-free."
+            )
+        if lookup.not_queried_unpinned:
+            notes.append(
+                f"{lookup.not_queried_unpinned} package(s) have no exact version, so they "
+                "were not looked up in OSV."
+            )
+        if lookup.not_queried_over_limit:
+            notes.append(
+                f"{lookup.not_queried_over_limit} pinned package(s) were over the per-scan "
+                "lookup limit and were not checked."
+            )
+    if inventory.stats.parse_errors:
+        notes.append(
+            f"{len(inventory.stats.parse_errors)} file(s) could not be parsed structurally "
+            "and were read with a pattern fallback."
+        )
+    return notes
+
+
+def _coverage_notes(inventory: Inventory) -> str:
+    notes = coverage_notes(inventory)
+    if not notes:
+        return ""
+    items = "".join(f"<li>{escape(n)}</li>" for n in notes)
+    return f"<div class='coverage'><strong>Analysis limits</strong><ul>{items}</ul></div>"
+
+
+def _advisory_html(f: Finding) -> str:
+    adv = f.advisory
+    if adv is None:
+        return ""
+    links = ", ".join(
+        f"<a href='{escape(url)}'>{escape(url.rsplit('/', 1)[-1])}</a>" for url in adv.urls
+    )
+    others = [i for i in adv.ids if not any(url.endswith("/" + i) for url in adv.urls)]
+    rated = ", ".join(
+        f"{escape(s.advisory_id)}: {escape(s.severity.value if s.severity else 'unrated')}"
+        f" ({escape(s.source)}{', ' + str(s.score) if s.score is not None else ''})"
+        for s in adv.severity_sources
+    )
+    ranges = "; ".join(adv.affected_ranges) or "not stated"
+    return (
+        f"<div class='adv'>Advisories: {links}"
+        f"{' · aliases ' + escape(', '.join(others)) if others else ''}<br>"
+        f"Installed {escape(adv.installed_version)} · affected {escape(ranges)} · "
+        f"fixed in {escape(adv.fixed_version or 'unknown')} · {escape(adv.match)}<br>"
+        f"Severity: {escape(adv.severity_rule)} — {rated}"
+        f"{' · updated ' + escape(adv.modified) if adv.modified else ''}</div>"
+    )
 
 
 def _stats_suffix(inventory: Inventory) -> str:
@@ -202,7 +309,7 @@ def _score_cards(score: SecurityScore) -> str:
     return (
         "<div class='cards'>"
         f"<div class='score'><div class='num' style='color:{color}'>{score.overall}</div>"
-        f"<div class='grade'>/ 100 · grade {grade}</div></div>"
+        f"<div class='grade'>/ 100 · hygiene grade {grade} (secondary)</div></div>"
         f"<div class='cats'>{''.join(bars)}</div>"
         "</div>"
     )
@@ -224,7 +331,10 @@ def _severity_chips(score: SecurityScore) -> str:
 
 def _findings_section(findings: list[Finding]) -> str:
     if not findings:
-        return "<h2>Findings</h2><div class='empty'>No risk findings. 🎉</div>"
+        return (
+            "<h2>Findings</h2><div class='empty'>No findings from the applied rules in the "
+            "analyzed scope.</div>"
+        )
     rows: list[str] = []
     for f in findings:
         locations = ", ".join(ev.location() for ev in f.source_evidence[:4]) or "—"
@@ -242,7 +352,7 @@ def _findings_section(findings: list[Finding]) -> str:
             f"<td><code>{escape(f.rule_id)}</code></td>"
             f"<td><strong>{escape(f.title)}</strong><br>{escape(f.description)}"
             f"{flow}"
-            f"<div class='rem'>Fix: {escape(f.remediation)}</div></td>"
+            f"<div class='rem'>Fix: {escape(f.remediation)}</div>{_advisory_html(f)}</td>"
             f"<td>{escape(f.entity_name or '—')}<br><code>{escape(locations)}</code></td>"
             "</tr>"
         )
