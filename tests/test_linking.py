@@ -113,3 +113,84 @@ def test_linker_never_leaves_the_scan_root(tmp_path: Path) -> None:
     reader = _SourceReader(tmp_path)
     assert reader.lines("inside.py") == ["import openai"]
     assert reader.lines("../outside.py") is None
+
+
+# ── MCP servers, their tools, and what launches them ─────────────────────────
+
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+
+@pytest.fixture(scope="module")
+def mcp_app() -> Inventory:
+    return run_scan(EXAMPLES / "mcp-tool-exposure" / "candidate").inventory
+
+
+def _edge(inv: Inventory, src: str, kind: str, tgt: str) -> object:
+    by_id = {e.id: e for e in inv.entities}
+    for rel in inv.relationships:
+        if (by_id[rel.source_id].name, rel.relationship.value, by_id[rel.target_id].name) == (
+            src, kind, tgt
+        ):
+            return rel
+    raise AssertionError(f"missing edge {src} {kind} {tgt}")
+
+
+SERVER = "mcp-server@servers/storage_server.py"
+
+
+def test_mcp_tools_are_served_by_the_server_in_their_file(mcp_app: Inventory) -> None:
+    for tool, line in (("read_asset", 17), ("purge_asset", 23), ("run_maintenance", 30)):
+        rel = _edge(mcp_app, f"{tool}@servers/storage_server.py", "served_by", SERVER)
+        ev = rel.source_evidence[0]  # type: ignore[attr-defined]
+        assert (ev.file, ev.line_start) == ("servers/storage_server.py", line)
+
+
+def test_mcp_server_depends_on_the_imported_sdk(mcp_app: Inventory) -> None:
+    rel = _edge(mcp_app, SERVER, "depends_on", "mcp")
+    assert rel.source_evidence[0].line_start == 9  # type: ignore[attr-defined]
+    edges = _named_edges(mcp_app)
+    assert (SERVER, "depends_on", "openai-agents") not in edges
+
+
+def test_mcp_config_and_agent_launch_the_server_they_name(mcp_app: Inventory) -> None:
+    config = _edge(mcp_app, "mcp-config@.mcp.json", "invokes", SERVER)
+    assert config.source_evidence[0].location() == ".mcp.json:5"  # type: ignore[attr-defined]
+    agent = _edge(mcp_app, "agent-instructions@app/agent.py:13", "invokes", SERVER)
+    assert agent.source_evidence[0].location() == "app/agent.py:8"  # type: ignore[attr-defined]
+
+
+def test_mcp_demo_graph_has_no_isolated_component_but_the_unused_sdk(
+    mcp_app: Inventory,
+) -> None:
+    graph = build_graph(mcp_app, [])
+    linked = {e["source"] for e in graph["edges"]} | {e["target"] for e in graph["edges"]}
+    isolated = {n["label"] for n in graph["nodes"] if n["id"] not in linked}
+    # openai-agents is imported by agent.py, but no model is named there, so
+    # nothing proves which component uses it: it stays unlinked, not guessed.
+    assert isolated == {"openai-agents"}
+
+
+def test_a_similar_file_name_does_not_launch_the_server(tmp_path: Path) -> None:
+    (tmp_path / "server.py").write_text(
+        "from mcp.server.fastmcp import FastMCP\nmcp = FastMCP('x')\n"
+        "@mcp.tool()\ndef ping() -> str:\n    return 'pong'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("mcp==1.9.0\n", encoding="utf-8")
+    (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers": {"x": {"command": "python",\n "args": ["my_server.py"]}}}\n',
+        encoding="utf-8",
+    )
+    edges = _named_edges(run_scan(tmp_path).inventory)
+    assert not any(kind == "invokes" and tgt.startswith("mcp-server@") for _, kind, tgt in edges)
+    assert ("ping@server.py", "served_by", "mcp-server@server.py") in edges
+
+
+def test_prompt_tool_bindings_cite_the_agent_constructor() -> None:
+    inv = run_scan(FIXTURES / "xfile-py-candidate").inventory
+    rel = _edge(inv, "agent-instructions@assistant/main.py:12", "invokes",
+                "run_diagnostic@tools/executor.py")
+    ev = rel.source_evidence[0]  # type: ignore[attr-defined]
+    assert ev.file == "assistant/main.py" and ev.matched_pattern == "agent-tool-binding"
+    for any_rel in inv.relationships:
+        assert any_rel.source_evidence, f"edge without evidence: {any_rel}"

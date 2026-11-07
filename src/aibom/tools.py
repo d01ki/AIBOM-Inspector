@@ -19,6 +19,7 @@ from aibom.models.entities import (
     Tool,
     ToolCapability,
 )
+from aibom.models.evidence import Evidence
 
 _PRIVILEGED = {"system", "developer"}
 
@@ -54,11 +55,27 @@ def link_tools(inventory: Inventory) -> None:
             ):
                 _raise(bound, "potentially_reachable")
                 bound.trust_boundary = bound.trust_boundary or prompt.trust_boundary
+            if not prompt.source_evidence:
+                continue  # no constructor line to cite: no edge
+            cited = prompt.source_evidence[0]
             inventory.add_relationship(
                 Relationship(
                     source_id=prompt.id,
                     target_id=bound.id,
                     relationship=RelationshipType.INVOKES,
+                    # tool_refs come from this agent constructor's tools= list.
+                    source_evidence=[
+                        Evidence(
+                            file=cited.file,
+                            line_start=cited.line_start,
+                            line_end=cited.line_end,
+                            snippet=f"agent constructor binds tool {name}",
+                            matched_pattern="agent-tool-binding",
+                            confidence=min(cited.confidence, 0.9),
+                            detector_id=cited.detector_id,
+                            kind="binding",
+                        )
+                    ],
                 )
             )
 

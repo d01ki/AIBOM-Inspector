@@ -3,7 +3,7 @@
 Detectors find models, services and datasets in source; collectors find the
 packages a manifest or lockfile declares. Without a link between the two, the
 dependency map shows a model and the SDK that calls it as unrelated islands.
-This module draws two kinds of edge, and only when the scanned files prove it:
+This module draws these edges, and only when the scanned files prove it:
 
 ``model --served_by--> service``
     The model's provider (attributed by its detector at a cited line) names an
@@ -14,6 +14,16 @@ This module draws two kinds of edge, and only when the scanned files prove it:
     the edge's evidence), *and* the package belongs to the component's provider
     family, so ``gpt-4o-mini`` in a file importing both ``openai`` and
     ``transformers`` links only to ``openai``.
+
+``mcp tool --served_by--> mcp server``
+    The tool is registered (``@mcp.tool()``) in the one file that also creates
+    the MCP server; the edge cites the tool's definition line.
+
+``mcp config | prompt --invokes--> mcp server``
+    An MCP client config, or the source file of an agent prompt, names the
+    server's script by its repo-relative path (``"args": ["servers/x.py"]``);
+    the edge cites that line. A prompt edge is co-location in the agent's file,
+    so it is weaker (0.5) than a config entry.
 
 Anything that cannot be shown this way is left unlinked rather than guessed.
 Files are read as text, bounded in size, and never executed.
@@ -31,9 +41,11 @@ from aibom.models.entities import (
     Entity,
     Model,
     Package,
+    Prompt,
     Relationship,
     RelationshipType,
     Service,
+    Tool,
 )
 from aibom.models.evidence import Evidence
 
@@ -59,6 +71,7 @@ _PROVIDER_TOKENS: dict[str, tuple[str, ...]] = {
     "groq": ("groq",),
     "ollama": ("ollama",),
     "vercel-ai-gateway": ("@ai-sdk/gateway",),
+    "mcp": ("mcp", "@modelcontextprotocol/"),
 }
 
 # Packages whose provider is not spelled in their name.
@@ -120,10 +133,12 @@ def link_components(inventory: Inventory, root: str | Path) -> None:
     for model in (e for e in inventory.entities if isinstance(e, Model)):
         _link_model_to_service(inventory, model, services)
 
+    reader = _SourceReader(base)
+    _link_mcp(inventory, reader)
+
     packages = [e for e in inventory.entities if isinstance(e, Package) and e.ai]
     if not packages:
         return
-    reader = _SourceReader(base)
     for component in inventory.entities:
         provider = _provider_of(component)
         if provider is None:
@@ -142,6 +157,8 @@ def _provider_of(entity: Entity) -> str | None:
     if isinstance(entity, Model):
         value = entity.provider
     elif isinstance(entity, Service):
+        if entity.kind == "mcp" and _is_source(entity):
+            return "mcp"  # an MCP server in code, not a client config
         value = entity.name if entity.kind == "api" else None
     elif isinstance(entity, Dataset):
         value = entity.source
@@ -151,6 +168,91 @@ def _provider_of(entity: Entity) -> str | None:
         return None
     value = value.strip().lower()
     return value if value in _PROVIDER_TOKENS else None
+
+
+def _is_source(entity: Entity) -> bool:
+    return any(Path(ev.file).suffix.lower() in _SOURCE_ECOSYSTEM for ev in entity.source_evidence)
+
+
+def _link_mcp(inventory: Inventory, reader: _SourceReader) -> None:
+    """Tools to the MCP server defining them; configs and agents to the server they launch."""
+    servers: dict[str, list[Service]] = {}
+    for entity in inventory.entities:
+        if isinstance(entity, Service) and entity.kind == "mcp" and _is_source(entity):
+            for file in dict.fromkeys(ev.file for ev in entity.source_evidence):
+                servers.setdefault(file, []).append(entity)
+
+    for tool in (e for e in inventory.entities if isinstance(e, Tool)):
+        if tool.framework != "mcp" or not tool.source_evidence:
+            continue
+        cited = tool.source_evidence[0]
+        here = servers.get(cited.file, [])
+        if len(here) != 1:
+            continue  # no server, or ambiguous: leave unlinked
+        _add_link(
+            inventory, tool, here[0], RelationshipType.SERVED_BY, cited.file,
+            cited.line_start, f"mcp tool {tool.tool_name} registered on this server",
+            "mcp-tool-server", 0.9, cited.line_end,
+        )
+
+    launchers: list[tuple[Entity, float]] = [
+        (e, 0.8)
+        for e in inventory.entities
+        if isinstance(e, Service) and e.kind == "mcp" and not _is_source(e)
+    ]
+    launchers += [(e, 0.5) for e in inventory.entities if isinstance(e, Prompt)]
+    for server_file, here in servers.items():
+        if len(here) != 1:
+            continue
+        pattern = re.compile(
+            rf"(?<![\w./\\-])(?:\./)?{re.escape(server_file)}(?![\w/\\-])"
+        )
+        for launcher, confidence in launchers:
+            for rel in dict.fromkeys(ev.file for ev in launcher.source_evidence):
+                if rel == server_file:
+                    continue
+                hit = reader.find(rel, pattern)
+                if hit is None:
+                    continue
+                lineno, line = hit
+                _add_link(
+                    inventory, launcher, here[0], RelationshipType.INVOKES, rel, lineno,
+                    line.strip()[:200], "mcp-server-launch", confidence,
+                )
+                break
+
+
+def _add_link(
+    inventory: Inventory,
+    source: Entity,
+    target: Entity,
+    kind: RelationshipType,
+    file: str,
+    line: int,
+    snippet: str,
+    pattern: str,
+    confidence: float,
+    line_end: int | None = None,
+) -> None:
+    inventory.add_relationship(
+        Relationship(
+            source_id=source.id,
+            target_id=target.id,
+            relationship=kind,
+            source_evidence=[
+                Evidence(
+                    file=file,
+                    line_start=line,
+                    line_end=line_end or line,
+                    snippet=snippet,
+                    matched_pattern=pattern,
+                    confidence=confidence,
+                    detector_id=DETECTOR_ID,
+                    kind="link",
+                )
+            ],
+        )
+    )
 
 
 def _serves_kind(package: Package, dataset: bool) -> bool:

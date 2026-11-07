@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aibom.detectors.flow import is_potential
-from aibom.inventory import Inventory
+from aibom.inventory import Inventory, dependencies_resolved
 from aibom.models.analysis import Reachability
 from aibom.models.entities import (
     Agent,
@@ -147,6 +147,8 @@ def _metadata(inventory: Inventory, ctx: SbomContext) -> dict[str, Any]:
     properties = [
         _prop("aibom:target", meta.target),
         _prop("aibom:scan_created_at", meta.created_at),
+        *([_prop("aibom:ref", meta.ref)] if meta.ref else []),
+        *([_prop("aibom:commit", meta.commit)] if meta.commit else []),
         _prop("cisa:coverage", coverage),
         _prop("cisa:coverage-note", coverage_note),
         _prop(
@@ -535,7 +537,12 @@ def _service(service: Service, ctx: SbomContext) -> dict[str, Any]:
 
 
 def _dependencies(inventory: Inventory) -> list[dict[str, Any]]:
-    """Every component gets an entry — a leaf's empty ``dependsOn`` is a claim.
+    """An entry for every component whose relations are known.
+
+    A leaf's empty ``dependsOn`` is a claim, so it is made only where the scan
+    knows it (a graph-recording lockfile, or a linker-proven component). A
+    package seen only in a manifest gets no entry of its own — CycloneDX reads a
+    missing entry as "unknown" — and declares that as a known unknown instead.
 
     The primary component is the root: everything nothing else depends on hangs
     off it, so the graph spans the whole inventory instead of leaving components
@@ -553,8 +560,13 @@ def _dependencies(inventory: Inventory) -> list[dict[str, Any]]:
 
     depended_on = {target for targets in depends.values() for target in targets}
     roots = [ref for ref in known if ref not in depended_on]
+    resolved = {e.id for e in inventory.entities if dependencies_resolved(e)}
     entries = [{"ref": _PRIMARY_REF, "dependsOn": roots}]
-    entries.extend({"ref": ref, "dependsOn": depends[ref]} for ref in known)
+    entries.extend(
+        {"ref": ref, "dependsOn": depends[ref]}
+        for ref in known
+        if ref in resolved or depends[ref]
+    )
     return entries
 
 
@@ -618,6 +630,12 @@ def _declare_unknowns(comp: dict[str, Any], entity: Entity) -> None:
             continue
         reasons = _UNKNOWN_REASONS[field_id]
         props.append(_unknown(field_id, reasons.get(kind, reasons["*"])))
+    if not dependencies_resolved(entity):
+        props.append(_unknown(
+            "component-dependency-relationship",
+            "no lockfile recording dependency edges covers this package, so its own "
+            "dependencies are unknown (not 'none')",
+        ))
 
 
 def _unknown(field_id: str, reason: str) -> dict[str, str]:

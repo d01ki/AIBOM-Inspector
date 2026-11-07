@@ -34,3 +34,5 @@ Thumbs.db
 inventory.json
 # Artifact drop created by the ./aibom launcher
 aibom-out/
+# Evidence written by scripts/verify.py and scripts/verify_ui.py
+verify-out/

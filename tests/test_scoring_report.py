@@ -129,3 +129,40 @@ def test_html_escapes_entity_names() -> None:
     html = render_html(inv, [], score_findings([]))
     assert "<img src=x onerror=alert(1)>" not in html
     assert "&lt;img" in html
+
+
+# --- review backlog #36: the headline is decided by the worst finding ---------
+
+def _sev_finding(severity: str) -> Finding:
+
+    return Finding(rule_id="R", title="t", severity=Severity(severity),
+                   category=RiskCategory.INTEGRITY, description="d", remediation="r")
+
+
+def test_a_critical_finding_is_action_required_whatever_the_score() -> None:
+    from aibom.risk.scoring import headline, score_findings
+
+    findings = [_sev_finding("critical")]
+    assert score_findings(findings).grade in {"B", "C"}  # a "good-looking" grade
+    head = headline(findings)
+    assert head.status == "action_required" and head.critical == 1
+    assert "1 critical" in head.detail
+
+
+def test_medium_only_is_review_and_nothing_is_not_called_safe() -> None:
+    from aibom.risk.scoring import headline
+
+    assert headline([_sev_finding("medium"), _sev_finding("low")]).status == "review"
+    empty = headline([])
+    assert empty.status == "no_findings"
+    assert "not a proof" in empty.detail and "safe" not in empty.label.lower()
+
+
+def test_html_report_leads_with_the_headline_and_limits() -> None:
+    from aibom.service import run_scan
+    from tests.conftest import FIXTURE
+
+    result = run_scan(FIXTURE)
+    html = render_html(result.inventory, result.findings, result.score)
+    assert html.index("Action required") < html.index("hygiene grade")
+    assert "Known-vulnerability lookup (OSV) was not run" in html
