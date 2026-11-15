@@ -1,4 +1,4 @@
-"""Deterministic risk rules (SPEC §6, TDR-001…010).
+"""Deterministic risk rules (docs/usage.md, "Risk rules & scoring").
 
 Each rule is a pure function ``Inventory -> list[Finding]``. Rules never execute
 or load anything; they reason only over the inventory's entities, signals, and

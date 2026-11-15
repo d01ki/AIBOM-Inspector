@@ -2,7 +2,7 @@
 
 ## Overview
 
-A FastAPI app (`aibom serve`, the Docker image, render.com) that shallow-clones
+A FastAPI app (`aibom serve`, the Docker image, Cloud Run) that shallow-clones
 a public repository URL into a temporary directory, runs the same pipeline as
 the CLI, and returns JSON or HTML. It also serves the web UI from `/`.
 

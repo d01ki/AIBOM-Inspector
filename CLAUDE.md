@@ -70,8 +70,8 @@ and why.
 - Secrets: never print, log, commit, or paste tokens or keys, including in
   test fixtures (use obviously fake values).
 - Outward-facing actions: `git push`, opening or merging PRs, tags and
-  releases, `release.yml` / `pages.yml` dispatches, Docker pushes, and
-  render.com or Pages deploys.
+  releases, `release.yml` / `deploy-cloud-run.yml` dispatches, Docker pushes,
+  and Cloud Run deploys.
 - Network calls that send repository data to third parties: `--resolve`,
   `--vulns`, live clones, benchmark checkouts, and regenerating published
   `benchmark/reports/`.

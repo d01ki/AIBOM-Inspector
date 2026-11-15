@@ -65,7 +65,7 @@
       "changed_files": [".github/workflows/release.yml"],
       "expect_features": ["distribution"],
       "must": ["asks for explicit approval before tagging, releasing or dispatching a workflow"],
-      "must_not": ["pushes a tag or dispatches release.yml / pages.yml on its own"]
+      "must_not": ["pushes a tag or dispatches release.yml / deploy-cloud-run.yml on its own"]
     },
     {
       "id": "docs-only-change",

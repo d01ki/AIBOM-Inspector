@@ -1,6 +1,6 @@
 """Risk engine — deterministic, evidence-backed risk findings + scoring.
 
-The engine runs a registry of rules (SPEC §6, TDR-001…010) over an
+The engine runs a registry of rules (docs/usage.md, "Risk rules & scoring") over an
 :class:`~aibom.inventory.Inventory` and produces :class:`~aibom.models.findings.Finding`
 objects. Rules are pure and rule-based: given the same inventory they always
 produce the same findings. LLM assistance, where added later, is limited to

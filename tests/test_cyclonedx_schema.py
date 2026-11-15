@@ -1,6 +1,6 @@
 """Validate exported AIBOMs against the *official* CycloneDX 1.6 JSON schema.
 
-This is the SPEC §7/§9 acceptance metric: the AIBOM must be schema-valid so it
+This is the acceptance metric for the export: the AIBOM must be schema-valid so it
 is accepted by ecosystem tooling (e.g. Dependency-Track). Validation uses the
 schema bundled in ``cyclonedx-python-lib``.
 """
