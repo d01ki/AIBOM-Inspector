@@ -9,7 +9,7 @@ Design constraints:
 * **Network-optional.** Any transport error is swallowed; the entity is simply
   left unresolved. A scan must never fail because the hub is unreachable.
 * **Cache-backed / offline-friendly.** Responses are cached as JSON on disk, so
-  repeated scans and air-gapped runs work against a snapshot (SPEC §3).
+  repeated scans and air-gapped runs work against a snapshot.
 * **Static.** It reads metadata only. It never downloads or loads weights.
 * **Injectable.** ``HuggingFaceResolver`` takes a client, so tests supply a fake
   and never touch the network.
@@ -17,15 +17,15 @@ Design constraints:
 
 from __future__ import annotations
 
+import http.client
 import json
-import re
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Protocol
 
 from aibom.inventory import Inventory
-from aibom.models.entities import Dataset, Model
+from aibom.models.entities import Dataset, Model, is_hf_repo_id
 
 _HF_API = "https://huggingface.co/api"
 _USER_AGENT = "aibom-inspector (+https://github.com/d01ki/AIBOM-Inspector)"
@@ -37,13 +37,6 @@ _FORMAT_BY_SUFFIX = {
     ".pt": "pt", ".pth": "pth", ".ckpt": "ckpt", ".pkl": "pickle", ".pickle": "pickle",
     ".msgpack": "msgpack", ".bin": "bin", ".pb": "pb",
 }
-
-# HF repo ids look like "org/name"; anything else is a local path or bare id.
-_RE_HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w\-.]*/[\w\-.]+$")
-
-
-def _looks_like_hf_repo_id(name: str) -> bool:
-    return bool(_RE_HF_REPO_ID.match(name))
 
 
 class HubClient(Protocol):
@@ -90,7 +83,13 @@ class HFClient:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,  # e.g. a reply cut off mid-body
+            TimeoutError,
+            ValueError,
+            OSError,
+        ):
             return None
         if not isinstance(data, dict):
             return None
@@ -142,7 +141,7 @@ class HuggingFaceResolver:
     # -- per-entity ------------------------------------------------------------
 
     def _resolve_model(self, model: Model) -> None:
-        if model.provider != "huggingface" or not _looks_like_hf_repo_id(model.name):
+        if model.provider != "huggingface" or not is_hf_repo_id(model.name):
             return
         meta = self.client.fetch_model(model.name)
         if meta is None:
@@ -163,7 +162,7 @@ class HuggingFaceResolver:
         model.resolved = True
 
     def _resolve_dataset(self, dataset: Dataset) -> None:
-        if dataset.source != "huggingface" or not _looks_like_hf_repo_id(dataset.name):
+        if dataset.source != "huggingface" or not is_hf_repo_id(dataset.name):
             return
         meta = self.client.fetch_dataset(dataset.name)
         if meta is None:

@@ -146,3 +146,13 @@ def test_lockfile_package_states_its_dependencies(tmp_path: Path) -> None:
     deps = {d["ref"]: d["dependsOn"] for d in doc["dependencies"]}
     assert deps[by_name["flask"]] == [by_name["werkzeug"]]
     assert deps[by_name["werkzeug"]] == []  # a lockfile-proven leaf
+
+
+def test_a_hub_purl_is_only_built_from_a_whole_repo_id() -> None:
+    from aibom.export.cyclonedx import _hf_purl
+
+    assert _hf_purl("acme/foo", "huggingface", "abc123") == "pkg:huggingface/acme/foo@abc123"
+    # A name from scanned code that is not exactly org/name gets no purl.
+    for name in ("acme/foo\n", "acme/..", "local/path/model"):
+        assert _hf_purl(name, "huggingface", None) is None, name
+    assert _hf_purl("acme/foo", "openai", None) is None

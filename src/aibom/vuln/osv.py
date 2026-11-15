@@ -20,6 +20,7 @@ mirroring the resolvers:
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import re
@@ -86,7 +87,13 @@ class OSVClient:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,  # e.g. a reply cut off mid-body
+            TimeoutError,
+            ValueError,
+            OSError,
+        ) as exc:
             raise VulnLookupError(f"OSV query for {name} failed: {exc}") from exc
         if not isinstance(data, dict):
             raise VulnLookupError(f"OSV query for {name} returned an unexpected reply")

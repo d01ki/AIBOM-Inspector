@@ -8,6 +8,7 @@ repeated scans and merges are stable and content-addressable.
 from __future__ import annotations
 
 import hashlib
+import re
 from enum import Enum
 
 from pydantic import BaseModel, Field, computed_field
@@ -20,6 +21,18 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.evidence import Evidence
+
+_RE_HF_REPO_ID = re.compile(r"[A-Za-z0-9][\w\-.]*/[\w\-.]+", re.ASCII)
+
+
+def is_hf_repo_id(name: str) -> bool:
+    """Whether ``name`` is shaped like a Hugging Face ``org/name`` repo id.
+
+    The name comes from scanned code and ends up in a hub URL and a purl, so
+    the whole string must match (ASCII only, nothing after the name), and a
+    dots-only name such as ``org/..`` is not an id.
+    """
+    return bool(_RE_HF_REPO_ID.fullmatch(name)) and not name.endswith(("/.", "/.."))
 
 
 class EntityType(str, Enum):

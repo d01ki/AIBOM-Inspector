@@ -301,6 +301,27 @@ def test_osv_client_raises_on_transport_error(monkeypatch: Any) -> None:
         OSVClient().query("h11", "PyPI", "0.14.0")
 
 
+def test_osv_client_raises_on_a_truncated_reply(monkeypatch: Any) -> None:
+    """A reply cut off mid-body is a failed lookup, not a crashed scan.
+
+    ``http.client`` errors are neither ``URLError`` nor ``OSError``, so they
+    used to escape the client and fail the whole scan with a 500.
+    """
+    import http.client
+    import urllib.request
+
+    import pytest
+
+    from aibom.vuln.osv import OSVClient, VulnLookupError
+
+    def truncated(*_a: Any, **_k: Any) -> Any:
+        raise http.client.IncompleteRead(b'{"vulns": [')
+
+    monkeypatch.setattr(urllib.request, "urlopen", truncated)
+    with pytest.raises(VulnLookupError):
+        OSVClient().query("h11", "PyPI", "0.14.0")
+
+
 def test_cvss3_base_scores_match_the_specification_examples() -> None:
     from aibom.vuln.osv import cvss3_base_score
 

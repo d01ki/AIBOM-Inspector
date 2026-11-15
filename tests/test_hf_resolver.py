@@ -127,3 +127,29 @@ def test_offline_client_uses_cache_only(tmp_path: Any) -> None:
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     cache_file.write_text('{"author": "acme"}', encoding="utf-8")
     assert client.fetch_model("acme/foo") == {"author": "acme"}
+
+
+def test_a_truncated_hub_reply_leaves_the_entity_unresolved(monkeypatch: Any) -> None:
+    """The hub being flaky must never fail a scan.
+
+    ``http.client`` errors are neither ``URLError`` nor ``OSError``, so a reply
+    cut off mid-body used to escape the client.
+    """
+    import http.client
+    import urllib.request
+
+    def truncated(*_a: Any, **_k: Any) -> Any:
+        raise http.client.IncompleteRead(b'{"author": ')
+
+    monkeypatch.setattr(urllib.request, "urlopen", truncated)
+    assert HFClient().fetch_model("acme/foo") is None
+
+
+def test_a_repo_id_is_the_whole_name_and_nothing_after_it() -> None:
+    """Only ``org/name`` is sent to the hub; a model name comes from scanned code."""
+    from aibom.models.entities import is_hf_repo_id
+
+    assert is_hf_repo_id("acme/foo-1.5_b")
+    for not_an_id in ("acme/foo\n", "acme/foo/extra", "acme/foo?x=1", "acme/..", "./foo",
+                      "foo", "acme/ foo"):
+        assert not is_hf_repo_id(not_an_id), not_an_id
