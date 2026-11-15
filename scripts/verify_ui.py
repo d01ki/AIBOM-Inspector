@@ -16,12 +16,14 @@ sample at 403 px and 1280 px wide and checks the page does not scroll
 sideways, every result tab is on screen, and map labels stay readable
 (``<out>/ui-demos-viewport-<width>.png``). The sample's Dependencies tab must
 draw one node per package and one lockfile-cited arrow per recorded dependency
-(``<out>/ui-demos-dependency-graph.png``). Finally it replays the demos with
-every repository-controlled string in the API responses carrying an HTML
+(``<out>/ui-demos-dependency-graph.png``). It checks that the page can be
+translated by a browser while every ``<code>``, graph and component name opts
+out, and that a dependency cycle still lays out. Finally it replays the demos
+with every repository-controlled string in the API responses carrying an HTML
 payload, and fails if any view renders it as markup (escaping regression).
 
 A fixture run also checks that the scan went through ``/api/scan/stream`` and
-that the backend reported its stages.
+that the server reported its stages.
 
 Exit code: 0 PASS, 1 FAIL (an assertion about the page failed), 2 BLOCKED
 (Playwright or a browser is unavailable). Never reports PASS for a check it
@@ -101,6 +103,17 @@ _DEMO_CASES = (
 _VIEWPORTS = (403, 1280)
 #: Smallest rendered map label height, in CSS pixels, that still reads.
 _MIN_LABEL_PX = 9.0
+
+
+def _open(page: Any, port: int, path: str) -> None:
+    """Load ``path`` with nothing left over from the previous check.
+
+    ``goto`` to a URL that differs only in its ``#fragment`` does not reload
+    the page, so the previous demo's result stayed on screen and satisfied the
+    next demo's wait before its own response had arrived.
+    """
+    page.goto(f"http://127.0.0.1:{port}{path}")
+    page.reload()
 
 
 def _viewport_checks(
@@ -210,6 +223,79 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
     return checks, failures
 
 
+def _translation_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
+    """The page may be translated; what it quotes from the repository may not.
+
+    Run on the rendered sample, with the package graph and a node's detail
+    panel open: every ``<code>`` and graph must opt out of translation, and the
+    page as a whole must not.
+    """
+    page.goto(f"http://127.0.0.1:{port}/")
+    page.locator("#runDemo").click()
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    page.locator('[data-tab="deps"]').click()
+    page.wait_for_selector("#depsGraph svg", timeout=60_000)
+    page.locator("#depsGraph .node circle").first.dispatch_event("click")
+    checks: dict[str, Any] = page.evaluate(
+        """() => {
+          const open = (el) => !el.closest('[translate="no"]');
+          const all = (selector) => [...document.querySelectorAll(selector)];
+          return {
+            page_opts_out: document.documentElement.getAttribute('translate') === 'no'
+              || !!document.querySelector('meta[name="google"][content="notranslate"]'),
+            marked: all('[translate="no"]').length,
+            code_open: all('code, pre').filter(open).length,
+            graphs_open: all('svg').filter(open).length,
+            names_open: all('#deps tbody tr[data-row] td:first-child strong, '
+              + '#inventory tbody tr[data-row] td:nth-child(2), #depsDetail .dt-name')
+              .filter(open).length,
+            heading_translatable: open(document.getElementById('findings-title')),
+          };
+        }"""
+    )
+    failures = []
+    if checks["page_opts_out"]:
+        failures.append("translation: the whole page opts out, so a browser cannot translate it")
+    if not checks["heading_translatable"]:
+        failures.append("translation: a section heading is marked untranslatable")
+    for key, what in (("code_open", "<code>/<pre> element(s)"), ("graphs_open", "graph(s)"),
+                      ("names_open", "package or component name(s)")):
+        if checks[key]:
+            failures.append(f"translation: {checks[key]} {what} could be rewritten by a translator")
+    if not checks["marked"]:
+        failures.append("translation: nothing on the rendered sample is marked verbatim")
+    return checks, failures
+
+
+def _cyclic_layout_checks(page: Any) -> tuple[dict[str, Any], list[str]]:
+    """Packages that depend on each other still get a finite, compact drawing.
+
+    A two-package cycle used to climb to the depth cap, leave empty columns
+    behind and make the graph's height NaN.
+    """
+    checks: dict[str, Any] = page.evaluate(
+        """() => {
+          const nodes = ['app', 'x', 'y', 'a', 'b'].map(id => ({ id, label: id }));
+          const at = Object.fromEntries(nodes.map(n => [n.id, n]));
+          const links = [['app', 'x'], ['a', 'b'], ['b', 'a']]
+            .map(([s, t]) => ({ s: at[s], t: at[t] }));
+          const size = layerLayout(nodes, links, 46);
+          return {
+            finite: [size.W, size.H, ...nodes.flatMap(n => [n.x, n.y])].every(Number.isFinite),
+            columns: new Set(nodes.map(n => n.x)).size,
+            width: size.W,
+          };
+        }"""
+    )
+    failures = []
+    if not checks["finite"]:
+        failures.append("dependency graph: a dependency cycle produced a non-finite layout")
+    elif checks["columns"] > 4:
+        failures.append(f"dependency graph: a cycle spread 5 packages over {checks['columns']} "
+                        "columns (empty depths were not removed)")
+    return checks, failures
+
+
 def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
     """Render every demo view from tainted API data; nothing may become markup."""
 
@@ -234,7 +320,7 @@ def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
             page.locator("#graph .node circle").first.dispatch_event("click")
     checks["sample"] = page.evaluate(count)
     for button in ("#compareDemoPy", "#driftDemoPolicy", "#driftDemoMcp"):
-        page.goto(f"http://127.0.0.1:{port}/#compare")
+        _open(page, port, "/#compare")
         page.locator(button).click()
         page.wait_for_selector("#compareResult:not([hidden]), #privResult:not([hidden])",
                                timeout=60_000)
@@ -322,7 +408,7 @@ def run_demos(out: Path) -> int:
             )
             page.on("pageerror", lambda err: report["console_errors"].append(str(err)))
             for name, path, button, host, legend, detail in _DEMO_CASES:
-                page.goto(f"http://127.0.0.1:{port}{path}")
+                _open(page, port, path)
                 page.locator(button).click()
                 if host == "graph":
                     page.locator('[data-tab="graph"]').click(timeout=60_000)
@@ -345,6 +431,12 @@ def run_demos(out: Path) -> int:
                 failures += problems
             checks, problems = _dependency_graph_checks(page, port, out)
             report["checks"]["dependency-graph"] = checks
+            failures += problems
+            checks, problems = _translation_checks(page, port)
+            report["checks"]["translation"] = checks
+            failures += problems
+            checks, problems = _cyclic_layout_checks(page)
+            report["checks"]["cyclic-layout"] = checks
             failures += problems
             checks, problems = _injection_checks(page, port)
             report["checks"]["injection"] = checks
@@ -406,8 +498,6 @@ def run(fixture_name: str, out: Path) -> int:
                 body.update(resolve=False, vulns=False)
                 route.continue_(post_data=json.dumps(body))
 
-            # Both the stream and the plain fallback: never let either go online.
-            page.route("**/api/scan", static_only)
             page.route("**/api/scan/stream", static_only)
             streamed: list[Any] = []
             page.on("response", lambda r: streamed.append(r)

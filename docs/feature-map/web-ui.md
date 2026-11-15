@@ -5,14 +5,13 @@
 A dependency-free page with no build step (`web/index.html`, `app.css`,
 `app.js`) that drives the API. It contains the scan form, the result tabs (agent security,
 findings, Dependencies, inventory, exports), the compare and drift view, and
-the hero demos. It also works when served from GitHub Pages with a separate
-backend (`?api=`).
+the hero demos. The page is served by the API server and calls only its own
+origin; there is no separate backend to select.
 
 ## Entry points
 
 `aibom serve`, then `http://localhost:8000/`. `?repo=<url>` pre-fills the
-form and starts the scan, `?demo=1` runs the bundled demo, and `?api=<url>`
-selects a backend.
+form and starts the scan, and `?demo=1` runs the bundled demo.
 
 ## Source
 
@@ -30,13 +29,16 @@ clicking a node lists its connections with evidence.
 
 ## Error paths
 
-A backend error shows a status message, not a blank page. A missing DOM id
-must not throw at load (guarded by `tests/test_web_ui.py`).
+A server error shows a status message, not a blank page. With no server
+behind the page (opened from a file or a static host) the `/api/health` check
+on load says so, and `?repo=` / `?demo=1` do not start. A missing DOM id must
+not throw at load (guarded by `tests/test_web_ui.py`).
 
 ## Boundaries
 
-An empty graph shows "No components to graph." and hides the legends. Long
-labels are truncated with `…`.
+An empty graph shows "Nothing to map." and hides the legends. Long labels are
+truncated with `…`. Packages that depend on each other (a cycle in the
+lockfile) still get a finite layered layout.
 
 ## How to verify
 
@@ -44,7 +46,9 @@ labels are truncated with `…`.
 |---|---|
 | `pytest tests/test_web_ui.py` | structural guards: no dangling `$("id")`, results not hidden by CSS |
 | `python scripts/verify_ui.py --fixture <f>` | headless Chromium: real render, edge arrows, legend, panel text, no console errors, plus a screenshot |
+| `python scripts/verify_ui.py --fixture demos` | every demo, both viewports, the package graph, the translation marks, a cyclic layout, and the injection replay |
 | a human looks at the screenshot | layout and readability. **Manual** |
+| a human translates the page in a browser | the translation itself: headless Chromium has no translator, so the check only proves the page allows it and which elements opt out. **Manual** |
 
 ## Expected results
 
@@ -63,14 +67,38 @@ yet covered by a browser check.
 
 The page is `web/index.html` + `app.css` + `app.js` (+ `favicon.svg`), served
 side by side with no build step; the structural test reads all three. The UI
-is English only.
+text is English; a browser may translate it.
 
 Progress: a repository scan reads `/api/scan/stream` and lists each stage as
-the backend reports it; Cancel closes the stream, which stops the server-side
-scan at the next stage. A backend without the stream endpoint (404/405) gets
-the plain `/api/scan`, with elapsed time only.
+the server reports it; Cancel closes the stream, which stops the server-side
+scan at the next stage. The page ships with its server, so it has no fallback
+to the plain `/api/scan` (which stays for API clients).
 
 What broke before, and the check that now holds it:
+
+- The whole page opted out of translation (`translate="no"` on `<html>` and
+  the `notranslate` meta), so a browser's Translate did nothing. The opt-out
+  now sits on identifiers only: `app.js` marks every `<code>`, `<pre>` and
+  `<svg>` as it enters the page, and names outside `<code>` carry
+  `translate="no"` in their template. A new template that prints a
+  repository-controlled name outside `<code>` needs the attribute (or
+  `verbatim()`); `verify_ui.py --fixture demos` fails when a `<code>`, a graph
+  or a package/component name is left open.
+- A "Backend address" field and `?api=<url>` let a link point the page at any
+  server: the repository URL went there and its reply was drawn as the result.
+  It existed for a statically hosted copy of the page. Both are gone, `api()`
+  is the only function that calls `fetch`, and `tests/test_web_ui.py` fails on
+  a second caller or an absolute API URL.
+- A lockfile with two packages that depend on each other made the package
+  graph's height `NaN` (the cycle climbed to the depth cap and left empty
+  columns). `layerLayout` numbers only the depths in use; the demos check lays
+  out a cyclic graph in the browser.
+- Dragging a node moved its label 4 px up, because drag and draw computed the
+  label position separately; both use `labelY()`.
+- `verify_ui.py` went to `/#compare` three times in a row. That does not
+  reload the page, so the previous demo's result satisfied the next demo's
+  wait and the MCP demo was measured on the privilege-drift graph. Each demo
+  now starts from a reloaded page (`_open`).
 
 - `esc()` escaped `<` and `&` but not quotes, so a repository file named
   `a" onfocus="…` broke out of an `aria-label` in the Compare view (HTML

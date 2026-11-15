@@ -337,25 +337,26 @@ aibom demo
 
 ## Web app
 
-`./aibom ui`, open the printed URL, then click **Scan the bundled sample app**
+`./aibom ui`, open the printed URL, then click **Try the bundled sample**
 (a two-file FastAPI + OpenAI Agents fixture shipped with the tool: a request
 body reaches the agent's instructions, and the agent is bound to a tool that
 runs shell commands).
-After that, paste a repository URL for a normal scan. **Compare revisions**
-runs the offline Python/TypeScript cross-file demos (and the fixed revision),
-or two refs of a public repository through `POST /api/diff`. Without Docker:
+After that, paste a repository URL for a normal scan. **Compare changes** is
+the security drift analysis: it runs the offline Python/TypeScript cross-file
+demos (and the fixed revision) and the agent-permission demos, or compares two
+refs of a public repository through `POST /api/diff`. Without Docker:
 
 ```bash
 pip install -e ".[server]"         # in the venv from "Install without Docker"
 aibom serve                        # then open http://localhost:8000
 ```
 
-**The page is only the interface; the analysis runs on the backend.** Served by
-`aibom serve` they are the same origin and it just works. If you host `web/`
-somewhere static (GitHub Pages, a CDN), the page checks for a backend on load
-and asks for its address — the **Analysis backend** field, remembered in the
-browser, or `?api=https://backend.example.com` for a shareable link. Point it at
-a backend reachable over HTTPS whose `AIBOM_CORS_ORIGINS` allows your page.
+**The page and the API are one server.** `aibom serve` (and the Docker image)
+serves the page at `/` and the API under `/api/`, and the page only ever calls
+its own origin. A copy of `web/` on a static host has no analysis behind it: it
+checks `/api/health` on load and says so. The page can be translated by the
+browser; package names, file paths, rule ids and the graphs are marked
+`translate="no"` so they stay exactly as they are in the repository.
 
 The backend shallow-clones the URL into a throwaway temp dir, runs the same
 static pipeline as the CLI, and returns JSON — it **never executes the cloned

@@ -3,43 +3,8 @@ const SEV_COLOR = { critical: "#a7333f", high: "#b9582f", medium: "#9b701c", low
 const EXAMPLE_REPO = "https://github.com/openai/openai-quickstart-python";
 const $ = (id) => document.getElementById(id);
 
-// The backend serves this page, so the API lives at this page's origin.
-// Static hosting (e.g. GitHub Pages) can point elsewhere via ?api=https://host.
-const API_BASE_KEY = "aibom.apiBase";
-
-// localStorage throws in some privacy modes; a saved backend is a convenience,
-// never a requirement.
-function storedApiBase() {
-  try {
-    return localStorage.getItem(API_BASE_KEY) || "";
-  } catch (_) {
-    return "";
-  }
-}
-
-function storeApiBase(value) {
-  try {
-    if (value) localStorage.setItem(API_BASE_KEY, value);
-    else localStorage.removeItem(API_BASE_KEY);
-  } catch (_) { /* nothing to do: the address still applies to this page load */ }
-}
-
-let apiOverride = new URLSearchParams(location.search).get("api") || storedApiBase();
-
-function apiBase() {
-  if (apiOverride) return apiOverride.replace(/\/$/, "");
-  return /^https?:$/.test(location.protocol) && location.host
-    ? location.origin : "http://localhost:8000";
-}
-
-// Raised when the address we are talking to is not an AIBOM Inspector backend
-// (a static host answering with HTML, or nothing listening at all). The UI
-// reacts by asking for a backend address instead of printing "HTTP 404".
-class BackendUnavailable extends Error {}
-
 let lastRequest = null;
 let lastResult = null;
-let scannerVersion = "";
 
 // Escapes for text *and* quoted attribute values. Scanned repositories control
 // names and file paths (a file may be called `a" onfocus="...`), and many of
@@ -48,6 +13,28 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;
 function esc(s) {
   return (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => ESC[c]);
 }
+
+// Browser translation may rewrite the prose, never an identifier: a package
+// name, file path, rule id or version must read exactly as it does in the
+// repository. Names carry translate="no" where they are rendered (`verbatim`
+// for a bare value); every <code>, <pre> and graph is marked here, as it
+// enters the page.
+const VERBATIM = "code, pre, svg";
+function verbatim(s) {
+  return `<span translate="no">${esc(s)}</span>`;
+}
+function markVerbatim(root) {
+  if (root.matches(VERBATIM)) root.setAttribute("translate", "no");
+  root.querySelectorAll(VERBATIM).forEach((el) => el.setAttribute("translate", "no"));
+}
+markVerbatim(document.body);
+new MutationObserver((records) => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) markVerbatim(node);
+    }
+  }
+}).observe(document.body, { childList: true, subtree: true });
 function evLoc(ev) {
   if (!ev) return "";
   return ev.line_start === ev.line_end ? `${ev.file}:${ev.line_start}`
@@ -116,7 +103,7 @@ function showResultBody() {
 // cancelled run never wipes it.
 let activeScan = null;
 
-// Stage ids sent by /api/scan/stream, in the order the backend runs them.
+// Stage ids sent by /api/scan/stream, in the order the server runs them.
 const STAGES = {
   clone: "Fetch the repository",
   collect: "Read files and manifests",
@@ -180,13 +167,11 @@ async function runAnalysis(button, busyLabel, spec) {
     const keep = hadResult ? " The previous result is still shown below." : "";
     if (e.name === "AbortError") {
       setStatus((progress.streamed
-        ? "Cancelled. The backend stops the analysis before its next step."
-        : "Cancelled. The page stopped waiting; the backend may still finish and "
+        ? "Cancelled. The server stops the analysis before its next step."
+        : "Cancelled. The page stopped waiting; the server may still finish and "
           + "discard the work.") + keep, false);
     } else {
-      const missing = e instanceof BackendUnavailable;
       setStatus(spec.failure + ": " + e.message + keep, true);
-      if (missing) showApiEndpointField();
     }
     stale.textContent = "Showing the previous result: the latest analysis did not complete.";
   } finally {
@@ -202,13 +187,13 @@ async function runAnalysis(button, busyLabel, spec) {
 
 function runDemo() {
   showView("analyze");
-  const info = { repo_url: "built-in://impact-demo", resolve: false, api: apiBase(), demo: true };
+  const info = { repo_url: "built-in://impact-demo", resolve: false, demo: true };
   return runAnalysis($("runDemo"), "Scanning the sample…", {
     status: "Scanning the bundled sample app (offline)…",
     progress: "Static analysis of the bundled sample (no clone, no network)",
     failure: "The bundled sample scan could not be completed",
     requestInfo: info,
-    request: (signal) => postJson(apiBase() + "/api/demo", null, signal),
+    request: (signal) => postJson("/api/demo", null, signal),
     render: (data) => {
       renderScan(data);
       setStatus("Sample scanned. Start with the findings at the top of the result.", false);
@@ -247,22 +232,14 @@ function scan() {
     return Promise.resolve();
   }
   repoInput.removeAttribute("aria-invalid");
-  const info = { repo_url: repo, ref: ref || null, resolve: true, api: apiBase() };
+  const info = { repo_url: repo, ref: ref || null, resolve: true };
   return runAnalysis($("scan"), "Analyzing…", {
     status: "Analyzing " + repoLabel(repo) + (ref ? " at " + ref : "") + "…",
-    progress: "Waiting for the backend",
+    progress: "Waiting for the server",
     failure: "The analysis could not be completed",
     requestInfo: info,
-    request: async (signal, progress) => {
-      const body = { repo_url: repo, ref: ref || null, resolve: true };
-      const streamed = await postStream(apiBase() + "/api/scan/stream", body, signal, progress);
-      if (streamed !== NO_STREAM) return streamed;
-      // An older backend without the stream endpoint: one request, no stages.
-      $("progressStage").textContent = "This backend does not report its steps. It clones "
-        + "the repository, reads supported files, looks up advisories and builds the report; "
-        + "step timings are shown when it finishes.";
-      return postJson(apiBase() + "/api/scan", body, signal);
-    },
+    request: (signal, progress) => postStream("/api/scan/stream",
+      { repo_url: repo, ref: ref || null, resolve: true }, signal, progress),
     render: (data) => {
       renderScan(data);
       setStatus("Analysis complete. " + statsLine(repo, data.stats), false);
@@ -432,10 +409,12 @@ function advisoryHtml(f) {
     + `${s.score != null ? " " + esc(s.score) : ""})</span>`).join(" · ");
   const where = (f.source_evidence || []).slice(0, 2).map(srcLink).join(", ");
   return `<li class="advisory" data-severity="${esc(f.severity)}">${sevTag(f.severity)} `
-    + `<strong>${links}</strong>${aliases.length ? ` <span class="muted">also ${esc(aliases.join(", "))}</span>` : ""}`
+    + `<strong translate="no">${links}</strong>`
+    + `${aliases.length ? ` <span class="muted">also ${verbatim(aliases.join(", "))}</span>` : ""}`
     + `<p>${esc(f.description)}</p><dl class="adv-facts">`
     + `<dt>Installed</dt><dd><code>${esc(a.installed_version)}</code> (${esc(a.match)})</dd>`
-    + `<dt>Affected</dt><dd>${esc((a.affected_ranges || []).join("; ") || "not stated by the advisory")}</dd>`
+    + `<dt>Affected</dt><dd>${(a.affected_ranges || []).length
+      ? verbatim(a.affected_ranges.join("; ")) : "not stated by the advisory"}</dd>`
     + `<dt>Fixed in</dt><dd>${a.fixed_version ? `<code>${esc(a.fixed_version)}</code>`
       : "no fixed release recorded"}</dd>`
     + `<dt>Severity</dt><dd>${esc(a.severity_rule)}: ${rated}</dd>`
@@ -465,7 +444,7 @@ function renderFindings(d) {
         ? ` ${g.without_known_fix} advisory(ies) have no fixed release recorded.` : "";
       return `<article class="vuln-card" data-row="true" `
         + `data-severities="${esc([...new Set(items.map(i => i.severity))].join(" "))}">`
-        + `<header>${sevTag(g.severity)} <strong>${esc(g.package)}</strong> `
+        + `<header>${sevTag(g.severity)} <strong translate="no">${esc(g.package)}</strong> `
         + `<code>${esc(g.installed_version || "")}</code> <span class="muted">`
         + `${items.length} advisor${items.length === 1 ? "y" : "ies"}</span></header>`
         + `<p class="upgrade">${upgrade}${esc(none)}</p>`
@@ -499,7 +478,7 @@ function renderFindings(d) {
         + `<td><span class="sev" data-severity="${esc(f.severity)}">${esc(f.severity)}</span></td>`
         + `<td><code>${esc(f.rule_id)}</code></td>`
         + `<td><strong class="finding-title">${esc(f.title)}</strong>${findingThreeParts(f)}</td>`
-        + `<td>${esc(f.entity_name || "—")}<br>${locs}</td></tr>`;
+        + `<td>${verbatim(f.entity_name || "—")}<br>${locs}</td></tr>`;
     }).join("");
   }
 }
@@ -507,7 +486,7 @@ function renderFindings(d) {
 function renderDependencies(dep) {
   const body = $("deps").querySelector("tbody");
   if (!dep) {
-    $("depsLead").textContent = "This backend did not return a dependency table.";
+    $("depsLead").textContent = "The server returned no dependency table.";
     body.innerHTML = "";
     return;
   }
@@ -536,7 +515,8 @@ function renderDependencies(dep) {
       + `${esc(s.graph_lockfiles.join(", "))}. The rest show “unknown”.`;
   const name = (id) => {
     const p = byId[id];
-    return p ? `<button type="button" class="link dep-jump" data-dep="${p.index}">${esc(p.name)}</button>` : esc(id);
+    return p ? `<button type="button" class="link dep-jump" data-dep="${p.index}" translate="no">`
+      + `${esc(p.name)}</button>` : verbatim(id);
   };
   body.innerHTML = dep.packages.length ? dep.packages.map((p, i) => {
     const deps = p.relations === "unknown"
@@ -557,8 +537,8 @@ function renderDependencies(dep) {
     const ctx = p.production ? "" : ` <span class="tag">${esc(p.source_contexts.join(", "))}</span>`;
     return `<tr id="dep-${i}" data-row="true" data-scope="${esc(p.scope)}" data-ai="${p.ai}" `
       + `data-findings="${p.finding_count ? "yes" : "no"}" data-relations="${esc(p.relations)}">`
-      + `<td><strong>${esc(p.name)}</strong>${p.ai ? ' <span class="tag ai">AI</span>' : ""}${ctx}`
-      + `<br><span class="muted">${esc(p.ecosystem || "")}${p.purl ? " · " + esc(p.purl) : ""}</span></td>`
+      + `<td><strong translate="no">${esc(p.name)}</strong>${p.ai ? ' <span class="tag ai">AI</span>' : ""}${ctx}`
+      + `<br><span class="muted" translate="no">${esc(p.ecosystem || "")}${p.purl ? " · " + esc(p.purl) : ""}</span></td>`
       + `<td>${version}</td><td>${esc(p.scope)}</td><td>${deps}</td><td>${req}</td>`
       + `<td>${where || "—"}</td><td>${findings}</td></tr>`;
   }).join("") : `<tr><td colspan="7" class="empty">No dependency manifest or lockfile was found.</td></tr>`;
@@ -626,10 +606,10 @@ function renderInventory(d) {
     const scope = e.type === "package" && e.dependency_scope ? ` <span class="muted">${esc(e.dependency_scope)}</span>` : "";
     return `<tr data-row="true" data-type="${esc(e.type)}" data-reach="${esc(reach)}" `
       + `data-contexts="${esc((e.source_contexts || []).join(" "))}">`
-      + `<td>${typeCell}</td><td>${esc(e.name)}</td>`
+      + `<td>${typeCell}</td><td translate="no">${esc(e.name)}</td>`
       + `<td>${version ? `<code>${esc(version)}</code>` : '<span class="muted">unknown</span>'}${scope}</td>`
-      + `<td>${esc(prov)}</td><td>${usageCell(e, reach)}</td>`
-      + `<td>${esc(contexts)}</td><td>${loc}<br><span class="muted">${esc(detectors)}</span></td></tr>`;
+      + `<td translate="no">${esc(prov)}</td><td>${usageCell(e, reach)}</td>`
+      + `<td>${esc(contexts)}</td><td>${loc}<br><span class="muted" translate="no">${esc(detectors)}</span></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="empty">No components were discovered.</td></tr>`;
 
   const fill = (id, values, label) => {
@@ -648,38 +628,47 @@ function renderInventory(d) {
 }
 
 // The exports re-run the same request as the result on screen (same ref).
-function exportRequest() {
-  return lastRequest.demo
-    ? { method: "POST" }
-    : { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: lastRequest.repo_url, ref: lastRequest.ref || null,
-          resolve: lastRequest.resolve }) };
+function exportBody() {
+  return lastRequest.demo ? null
+    : { repo_url: lastRequest.repo_url, ref: lastRequest.ref || null,
+        resolve: lastRequest.resolve };
 }
 
-async function download() {
+// Runs one server-built export with its button showing progress.
+async function serverExport(buttonId, busyLabel, failure, build) {
   if (!lastRequest) return;
-  const button = $("download");
+  const button = $(buttonId);
   const original = button.innerHTML;
   button.disabled = true;
-  button.textContent = "Building report…";
-  setStatus("Building the HTML report (the backend re-runs the analysis)…", false);
+  button.textContent = busyLabel;
   try {
-    const endpoint = lastRequest.demo ? "/api/demo/report" : "/api/report";
-    const resp = await fetch(lastRequest.api + endpoint, exportRequest());
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "aibom-report.html";
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    setStatus("Report downloaded.", false);
+    await build();
   } catch (e) {
-    setStatus("Report failed: " + e.message, true);
+    setStatus(failure + ": " + e.message, true);
   } finally {
     button.disabled = false;
     button.innerHTML = original;
   }
+}
+
+function download() {
+  return serverExport("download", "Building report…", "Report failed", async () => {
+    setStatus("Building the HTML report (the server re-runs the analysis)…", false);
+    const resp = await api(lastRequest.demo ? "/api/demo/report" : "/api/report",
+      { body: exportBody() });
+    // A refused or failed report is JSON with the reason; a report is HTML.
+    if (!resp.ok) await readJson(resp);
+    saveBlob(await resp.blob(), "aibom-report.html", "Report");
+  });
+}
+
+// SARIF is built server-side so the file matches `aibom scan --sarif` exactly.
+function downloadSarif() {
+  return serverExport("downloadSarif", "Building SARIF…", "SARIF export failed", async () => {
+    const data = await postJson(lastRequest.demo ? "/api/demo/sarif" : "/api/sarif",
+      exportBody());
+    saveJson(data, "aibom-findings.sarif", "SARIF log");
+  });
 }
 
 function downloadCycloneDX() {
@@ -687,8 +676,17 @@ function downloadCycloneDX() {
   saveJson(lastResult.cyclonedx, "aibom.cdx.json", "CycloneDX SBOM");
 }
 
+function downloadInventory() {
+  if (!lastResult || !lastResult.inventory) return;
+  saveJson(lastResult.inventory, "aibom-inventory.json", "Inventory JSON");
+}
+
 function saveJson(payload, filename, label) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  saveBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    filename, label);
+}
+
+function saveBlob(blob, filename, label) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -700,59 +698,57 @@ function saveJson(payload, filename, label) {
   setStatus(label + " downloaded.", false);
 }
 
-function downloadInventory() {
-  if (!lastResult || !lastResult.inventory) return;
-  saveJson(lastResult.inventory, "aibom-inventory.json", "Inventory JSON");
+// ── the server ────────────────────────────────────────────────────────────────
+// The page and the API are one server (`aibom serve`, the Docker image, the
+// hosted site), so every request is a path on this page's own origin, and
+// `api` is the only function that touches the network.
+const NO_API = "this address serves the page but not the analysis API; open the page from "
+  + "`aibom serve` or the Docker image";
+
+async function api(path, { method = "POST", body = null, signal } = {}) {
+  const options = { method, signal };
+  if (body) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+  try {
+    return await fetch(path, options);
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    // Network-level failure: the server stopped, or the browser is offline.
+    throw new Error("cannot reach the analysis server (" + e.message + ")");
+  }
 }
 
-// SARIF is built server-side so the file matches `aibom scan --sarif` exactly.
-async function downloadSarif() {
-  if (!lastRequest) return;
-  const button = $("downloadSarif");
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.textContent = "Building SARIF…";
+// The reply as JSON. Anything else becomes an error that says what happened:
+// the server's own reason when it sent one.
+async function readJson(resp) {
+  const text = await resp.text();
+  let data;
   try {
-    const endpoint = lastRequest.demo ? "/api/demo/sarif" : "/api/sarif";
-    const resp = await fetch(lastRequest.api + endpoint, exportRequest());
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-    saveJson(data, "aibom-findings.sarif", "SARIF log");
-  } catch (e) {
-    setStatus("SARIF export failed: " + e.message, true);
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    // HTML where JSON was expected: a static host, not AIBOM Inspector.
+    throw new Error(NO_API + " (HTTP " + resp.status + ", and the reply was not JSON)");
   }
+  if (resp.status === 404 || resp.status === 405) {
+    throw new Error(NO_API + " (HTTP " + resp.status + ")");
+  }
+  if (!resp.ok) throw new Error(errorDetail(data, resp.status));
+  return data;
+}
+
+async function postJson(path, body, signal) {
+  return readJson(await api(path, { body, signal }));
 }
 
 // POST to an NDJSON endpoint: {"stage": id} lines, then {"result": ...} or
-// {"error": detail, "status": code}. Returns NO_STREAM when the backend has no
-// such endpoint (404/405) so the caller can fall back to the plain request.
-const NO_STREAM = Symbol("no-stream");
-async function postStream(url, body, signal, progress) {
-  let resp;
-  try {
-    resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body), signal });
-  } catch (e) {
-    if (e.name === "AbortError") throw e;
-    throw new BackendUnavailable("cannot reach " + apiBase() + " (" + e.message + ")");
-  }
-  if (resp.status === 404 || resp.status === 405) return NO_STREAM;
+// {"error": detail, "status": code}.
+async function postStream(path, body, signal, progress) {
+  const resp = await api(path, { body, signal });
   const type = resp.headers.get("content-type") || "";
-  if (!resp.ok || !type.includes("ndjson") || !resp.body) {
-    // A validation error (plain JSON) or a static host (HTML): same handling
-    // as a plain request.
-    const text = await resp.text();
-    let data;
-    try { data = text ? JSON.parse(text) : {}; } catch (_) {
-      throw new BackendUnavailable("no analysis backend at " + apiBase() + " (HTTP "
-        + resp.status + ", and the reply was not JSON)");
-    }
-    if (!resp.ok) throw new Error(errorDetail(data, resp.status));
-    return data;
-  }
+  // A rejected URL or a busy server answers with plain JSON before any stage.
+  if (!resp.ok || !type.includes("ndjson") || !resp.body) return readJson(resp);
   progress.streamed = true;
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
@@ -770,7 +766,7 @@ async function postStream(url, body, signal, progress) {
       else if (msg.error) throw new Error(errorDetail({ detail: msg.error }, msg.status || 500));
       else if (msg.result) return msg.result;
     }
-    if (done) throw new Error("the backend closed the connection before sending a result");
+    if (done) throw new Error("the server closed the connection before sending a result");
   }
 }
 
@@ -781,89 +777,16 @@ function errorDetail(data, status) {
   return "HTTP " + status;
 }
 
-async function postJson(url, body, signal) {
-  const options = body
-    ? { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body), signal }
-    : { method: "POST", signal };
-  let resp;
+// Ask the server whether it is there *before* the user clicks anything, so a
+// page opened from a file or a static host says so instead of failing an
+// analysis the visitor has not started yet.
+async function checkServer() {
   try {
-    resp = await fetch(url, options);
-  } catch (e) {
-    if (e.name === "AbortError") throw e;
-    // Network-level failure: wrong address, backend down, CORS, offline.
-    throw new BackendUnavailable("cannot reach " + apiBase() + " (" + e.message + ")");
-  }
-  const text = await resp.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch (_) {
-    // Not JSON. A static host (GitHub Pages, a CDN) answers every POST with
-    // HTML, which is exactly the "nothing happens" case.
-    throw new BackendUnavailable(
-      "no analysis backend at " + apiBase() + " (HTTP " + resp.status
-      + ", and the reply was not JSON)");
-  }
-  if (!resp.ok) {
-    // 404/405 on an API path means this origin serves the page but not the API.
-    if (resp.status === 404 || resp.status === 405) {
-      throw new BackendUnavailable(
-        "no analysis backend at " + apiBase() + " (HTTP " + resp.status + ")");
-    }
-    throw new Error(data.detail || ("HTTP " + resp.status));
-  }
-  return data;
-}
-
-// --- backend address -------------------------------------------------------
-
-function renderApiLine() {
-  const base = apiBase();
-  const sameOrigin = base === location.origin;
-  $("apiLine").textContent = sameOrigin
-    ? "Analysis backend: this server"
-    : "Analysis backend: " + base;
-}
-
-function showApiEndpointField(message) {
-  $("advancedInfo").open = true;
-  $("apiEndpoint").value = apiOverride || "";
-  if (message) setStatus(message, true);
-  $("advancedInfo").scrollIntoView({ block: "nearest" });
-  $("apiEndpoint").focus();
-}
-
-function saveApiEndpoint() {
-  const value = $("apiEndpoint").value.trim().replace(/\/$/, "");
-  if (value && !isRepositoryUrl(value)) {
-    $("apiEndpoint").setAttribute("aria-invalid", "true");
-    setStatus("Enter the backend address, including https://.", true);
-    return;
-  }
-  $("apiEndpoint").removeAttribute("aria-invalid");
-  apiOverride = value;
-  storeApiBase(value);
-  renderApiLine();
-  checkBackend({ announce: true });
-}
-
-// Ask the backend whether it is there *before* the user clicks anything, so a
-// missing backend reads as a setup step rather than a failed analysis.
-async function checkBackend(options) {
-  const announce = options && options.announce;
-  const base = apiBase();
-  try {
-    const resp = await fetch(base + "/api/health");
-    const data = await resp.json();
-    if (!resp.ok || data.status !== "ok") throw new Error("HTTP " + resp.status);
-    scannerVersion = data.version || "";
-    if (announce) setStatus("Backend reachable (aibom " + (data.version || "?") + ").", false);
+    const data = await readJson(await api("/api/health", { method: "GET" }));
+    if (data.status !== "ok") throw new Error("unexpected health reply");
     return true;
-  } catch (_) {
-    showApiEndpointField(
-      "No analysis backend at " + base + ". This page is only the interface — "
-      + "point it at a running backend to analyze anything.");
+  } catch (e) {
+    setStatus("The analysis server did not answer: " + e.message + ".", true);
     return false;
   }
 }
@@ -898,6 +821,10 @@ let graphFindings = [];
 let graphExposurePaths = [];
 let graphImpactPaths = [];
 
+// A node's label sits under its circle, drawn or dragged.
+function labelY(n) {
+  return n.y + n.radius + 13;
+}
 function nodeColor(n) {
   return n.severity ? SEV_COLOR[n.severity] : (TYPE_COLOR[n.type] || "#6b7280");
 }
@@ -934,14 +861,13 @@ function layerLayout(nodes, links, pad) {
     }
     if (!changed) break;
   }
-  const deepest = Math.max(0, ...Object.values(depth));
-  const columns = [];
-  nodes.forEach(n => {
-    const d = depth[n.id] ?? deepest + 1;
-    (columns[d] = columns[d] || []).push(n);
-  });
+  // Packages that depend on each other climb to the depth cap and leave empty
+  // depths behind them, so a column is a depth that is actually in use.
+  const used = [...new Set(Object.values(depth))].sort((a, b) => a - b);
+  const columns = used.map(() => []);
+  nodes.forEach(n => columns[used.indexOf(depth[n.id])].push(n));
   const COL = 190, ROW = 44;
-  const rows = Math.max(...columns.map(c => (c ? c.length : 0)));
+  const rows = Math.max(...columns.map(c => c.length));
   const W = pad * 2 + Math.max(1, columns.length - 1) * COL;
   const H = pad * 2 + Math.max(1, rows - 1) * ROW;
   // Left column by name; every later column by the mean height of the
@@ -949,7 +875,6 @@ function layerLayout(nodes, links, pad) {
   const parents = {};
   links.forEach(l => { (parents[l.t.id] = parents[l.t.id] || []).push(l.s); });
   columns.forEach((col, i) => {
-    if (!col) return;
     const key = (n) => {
       const ys = (parents[n.id] || []).filter(p => p.y != null && p.x < pad + i * COL);
       return ys.length ? ys.reduce((sum, p) => sum + p.y, 0) / ys.length : Infinity;
@@ -1091,7 +1016,7 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
     const r = n.radius;
     const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
     const label = n.label.length > 24 ? n.label.slice(0, 23) + "…" : n.label;
-    const t = svgEl("text", { x: n.x, y: n.y + r + 13, "text-anchor": "middle" });
+    const t = svgEl("text", { x: n.x, y: labelY(n), "text-anchor": "middle" });
     t.textContent = label;
     const full = svgEl("title", {});
     full.textContent = `${n.label} (${n.type})`;
@@ -1190,7 +1115,7 @@ function renderImpactPaths(paths) {
     const operations = (path.capabilities || []).map(item =>
       `${item.operation}(${(item.controlled_parameters || []).join(", ")})`).join(", ");
     return `<div class="impact-path"><strong>Untrusted input reaches a bound tool \u00b7 ${esc(path.severity)}</strong>`
-      + `<span class="impact-route">${esc(route)}</span>`
+      + `<span class="impact-route" translate="no">${esc(route)}</span>`
       + `<span>Could ${esc(consequences)}.</span>`
       + `<span class="muted"> Direct binding + tool-parameter flow \u00b7 ${esc(operations)}`
       + ` \u00b7 confidence ${Number(path.confidence || 0).toFixed(2)}</span></div>`;
@@ -1212,7 +1137,7 @@ function renderExposurePaths(paths) {
     return `<div class="exposure-path" data-privileged="${path.privileged ? "true" : "false"}">`
       + `<strong>${esc(prefix)}</strong><code>${esc(label)}</code>`
       + `<span class="muted">${esc(path.trust_boundary)}`
-      + `${location ? ` \u00b7 ${esc(location)}` : ""}</span></div>`;
+      + `${location ? ` \u00b7 ${verbatim(location)}` : ""}</span></div>`;
   }).join("");
 }
 
@@ -1296,7 +1221,7 @@ function enableDrag(g, n, svg, W, H, links) {
     if (!dragging) return;
     const p = toSvg(ev); n.x = p.x; n.y = p.y;
     n.circle.setAttribute("cx", n.x); n.circle.setAttribute("cy", n.y);
-    n.text.setAttribute("x", n.x); n.text.setAttribute("y", n.y + n.radius + 9);
+    n.text.setAttribute("x", n.x); n.text.setAttribute("y", labelY(n));
     links.forEach(l => { if (l.s === n || l.t === n) placeEdge(l); });
   });
   g.addEventListener("pointerup", (ev) => { dragging = false; g.releasePointerCapture(ev.pointerId); });
@@ -1314,7 +1239,8 @@ function connectionsHtml(node, links) {
     return `<div class="dt-find muted">No proven connections. A component is only linked when a`
       + ` scanned line (import, call, lockfile entry) shows the relationship.</div>`;
   }
-  const name = (n) => `<strong>${esc(n.label)}</strong> <span class="muted">(${esc(n.type)})</span>`;
+  const name = (n) => `<strong translate="no">${esc(n.label)}</strong> `
+    + `<span class="muted">(${esc(n.type)})</span>`;
   const cite = (l) => (l.evidence.length ? ` <code>${esc(l.evidence[0])}</code>` : "");
   let html = `<div class="dt-find"><strong>Connections</strong><ul class="dt-links">`;
   // Outgoing reads "this <verb> other"; incoming reads "other <verb> this".
@@ -1329,7 +1255,7 @@ function detailShow(node, links, ctx) {
   const paths = ctx.exposure.filter(path =>
     path.prompt_id === node.id || (path.model_ids || []).includes(node.id));
   let html = `<span class="dt-type">${esc(node.type)} · selected</span>`
-    + `<h3 class="dt-name">${esc(node.label)}</h3>`
+    + `<h3 class="dt-name" translate="no">${esc(node.label)}</h3>`
     + `<button type="button" class="ghost small copy-name">Copy name</button>`;
   if (node.provider) html += `<div class="muted">Provider: ${esc(node.provider)}</div>`;
   if (node.version) html += `<div class="muted">Version: <code>${esc(node.version)}</code></div>`;
@@ -1434,13 +1360,8 @@ function filterInventory() {
       && (context === "all" || row.dataset.contexts.split(" ").includes(context)));
 }
 
-// The panel has two modes; the steps and empty state describe the active one.
 $("scan").addEventListener("click", scan);
 $("loadExample").addEventListener("click", loadExample);
-$("saveApiEndpoint").addEventListener("click", saveApiEndpoint);
-$("apiEndpoint").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") saveApiEndpoint();
-});
 $("runDemo").addEventListener("click", runDemo);
 $("download").addEventListener("click", download);
 $("downloadCdx").addEventListener("click", downloadCycloneDX);
@@ -1500,7 +1421,6 @@ async function runCompare(button, busyLabel, status, request, demo) {
   } catch (e) {
     setCompareStatus("The comparison could not be completed: " + e.message, true);
     $("compareState").textContent = "Comparison failed";
-    if (e instanceof BackendUnavailable) showApiEndpointField();
   } finally {
     COMPARE_BUTTONS.forEach((id) => { $(id).disabled = false; });
     button.textContent = original;
@@ -1517,7 +1437,7 @@ function compareDemo(language, revision) {
     revision === "fixed"
       ? "Comparing the vulnerable candidate with the bundled fixed revision (offline demo)…"
       : `Scanning the bundled ${language} baseline and candidate (offline demo)…`,
-    () => postJson(apiBase() + "/api/diff/demo?" + query), revision === "fixed" ? "fixed" : "demo");
+    () => postJson("/api/diff/demo?" + query), revision === "fixed" ? "fixed" : "demo");
 }
 
 function compareRepo() {
@@ -1530,8 +1450,7 @@ function compareRepo() {
   }
   return runCompare($("compareRun"), "Comparing…",
     `Cloning ${repoLabel(repo)} at ${base} and ${head}…`,
-    () => postJson(apiBase() + "/api/diff",
-      { repo_url: repo, base_ref: base, head_ref: head }), null);
+    () => postJson("/api/diff", { repo_url: repo, base_ref: base, head_ref: head }), null);
 }
 
 function renderCompare(body, demo) {
@@ -1565,7 +1484,7 @@ function renderCompare(body, demo) {
       || (change.before_evidence && change.before_evidence[0]);
     return `<tr><td>${sevTag(change.severity)}</td><td><code>${esc(change.kind)}</code></td>`
       + `<td><strong>${esc(change.title)}</strong><br>${esc(change.description)}</td>`
-      + `<td>${esc(evLoc(evidence))}${change.evidence_level
+      + `<td>${verbatim(evLoc(evidence))}${change.evidence_level
         ? "<br>" + evidenceTag(change.evidence_level) : ""}</td></tr>`;
   });
   $("otherChanges").querySelector("tbody").innerHTML = rows.length ? rows.join("")
@@ -1592,7 +1511,7 @@ function renderVerdicts(drift, privileges, demo) {
       ...bom.changed.map(x => "~" + x)];
     bomBox.innerHTML = `<p class="verdict-label">COMPONENTS (${types})</p>`
       + `<p class="verdict-value">Changed</p><p class="verdict-note">`
-      + `${esc(delta.slice(0, 6).join(", "))}${delta.length > 6 ? ` +${delta.length - 6} more` : ""}</p>`;
+      + `${verbatim(delta.slice(0, 6).join(", "))}${delta.length > 6 ? ` +${delta.length - 6} more` : ""}</p>`;
   } else {
     bomBox.className = "verdict";
     bomBox.innerHTML = `<p class="verdict-label">COMPONENTS</p><p class="verdict-value">—</p>`;
@@ -1643,13 +1562,13 @@ function renderRevision(card, title, summary, paths) {
   const impact = (paths && paths.impact) || [];
   const unresolved = (paths && paths.unresolved) || [];
   const items = [...impact.map(p => `<li>${sevTag(p.severity)} ${evidenceTag(p.evidence_level)}`
-      + ` ${esc(p.source_kind)} → ${esc(p.tool_names.join(", "))}</li>`),
+      + ` ${esc(p.source_kind)} → ${verbatim(p.tool_names.join(", "))}</li>`),
     ...unresolved.map(p => `<li>${evidenceTag("unknown")} ${esc(p.sink_kind)} → `
-      + `${esc(p.tool_names.join(", "))}</li>`)];
+      + `${verbatim(p.tool_names.join(", "))}</li>`)];
   const head = summary.headline || {};
   const score = summary.score || {};
   card.innerHTML = `<h4>${esc(title)}</h4>`
-    + `<p class="revision-target">${esc(revisionLabel(summary.target))}</p>`
+    + `<p class="revision-target" translate="no">${esc(revisionLabel(summary.target))}</p>`
     + `<div>${esc(counts || "no components")}</div>`
     + `<div><strong>${esc(head.label || "")}</strong> · ${summary.findings} finding(s)`
     + `${score.overall != null ? ` <span class="muted">· hygiene ${score.overall}</span>` : ""}</div>`
@@ -1678,8 +1597,8 @@ function pathChangeHtml(change, index) {
     return `<li><button type="button" class="path-node role-${esc(node.role)} ${esc(node.status)}"`
       + ` data-node="${id}" aria-pressed="false"`
       + ` aria-label="${esc((ROLE_LABEL[node.role] || node.role) + ": " + node.label + ", " + where)}">`
-      + `${esc(ROLE_LABEL[node.role] || node.role)}: ${esc(node.label)}`
-      + `<small>${esc(where)}</small></button></li>`;
+      + `${esc(ROLE_LABEL[node.role] || node.role)}: ${verbatim(node.label)}`
+      + `<small${node.file ? ' translate="no"' : ""}>${esc(where)}</small></button></li>`;
   }).join("");
   const consequence = view.potential_consequence
     ? `<p><strong>Potential consequence:</strong> ${esc(view.potential_consequence)}</p>` : "";
@@ -1703,8 +1622,8 @@ function showNode(button) {
   const { node, limitations } = entry;
   const detail = $("nodeDetail");
   detail.hidden = false;
-  detail.innerHTML = `<h4>${esc(ROLE_LABEL[node.role] || node.role)}: ${esc(node.label)}</h4>`
-    + `<dl><dt>Location</dt><dd>${esc(node.file ? node.file + ":" + node.line : "unresolved")}</dd>`
+  detail.innerHTML = `<h4>${esc(ROLE_LABEL[node.role] || node.role)}: ${verbatim(node.label)}</h4>`
+    + `<dl><dt>Location</dt><dd>${node.file ? verbatim(node.file + ":" + node.line) : "unresolved"}</dd>`
     + `<dt>Evidence</dt><dd>${evidenceTag(node.status)}</dd>`
     + (node.detail ? `<dt>Detail</dt><dd>${esc(node.detail)}</dd>` : "")
     + `</dl>`
@@ -1718,7 +1637,7 @@ $("compareDemoFix").addEventListener("click", () => compareDemo(compareLanguage,
 $("compareRun").addEventListener("click", compareRepo);
 
 // ── agent security: agent → MCP server → tool → operation → identity ───────────
-// Renders the AgentSecurityReport the backend returns (`aibom scan --agent-security`).
+// Renders the AgentSecurityReport the server returns (`aibom scan --agent-security`).
 // Nothing here infers anything: verdicts, unknowns and evidence come from the report.
 const SEC_COL = { agent: 0, mcp_client: 0, mcp_server: 1, tool: 2, operation: 3, identity: 4 };
 const SEC_COL_TITLE = ["AGENT / CLIENT", "MCP SERVER", "TOOL", "CLOUD OPERATION", "IDENTITY"];
@@ -2096,7 +2015,7 @@ function renderSecDetail(host, n, model) {
     add("Status", esc(r.status));
     add("Runs as", r.identity_id ? `<code>${esc(r.identity_id)}</code>`
       : `<span class="verdict-tag v-unknown">unmapped</span>`);
-    add("Tools", (r.tools || []).map(t => esc(t.name)
+    add("Tools", (r.tools || []).map(t => verbatim(t.name)
       + (t.capability_kinds && t.capability_kinds.length
         ? ` <span class="cap-tag">${esc(t.capability_kinds.join(", "))}</span>` : "")).join("<br>"));
   } else if (n.kind === "tool") {
@@ -2117,7 +2036,8 @@ function renderSecDetail(host, n, model) {
     add("Policies", identity ? identity.policies.map(p => `<code>${esc(p)}</code>`).join("<br>")
       : "none: no aibom-identity.yaml mapping");
   }
-  let html = `<span class="dt-type">${esc(n.kind.replace("_", " "))}</span><h3>${esc(n.label)}</h3>`
+  let html = `<span class="dt-type">${esc(n.kind.replace("_", " "))}</span>`
+    + `<h3 translate="no">${esc(n.label)}</h3>`
     + (rows.length ? `<dl>${rows.join("")}</dl>` : "");
   const paths = n.paths.slice().sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict]);
   if (paths.length) {
@@ -2140,7 +2060,7 @@ function attackPathCards(report) {
   const paths = (report.capability_paths || []).slice().sort((a, b) =>
     (VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict])
     || (SEV_RANK[HAZARD_SEV[a.hazard]] - SEV_RANK[HAZARD_SEV[b.hazard]]));
-  const hop = (kind, text) => `<span class="ap-hop k-${kind}">${esc(text)}</span>`;
+  const hop = (kind, text) => `<span class="ap-hop k-${kind}" translate="no">${esc(text)}</span>`;
   const arrow = `<span class="ap-arrow">→</span>`;
   const cards = paths.slice(0, 5).map(p => {
     const sev = HAZARD_SEV[p.hazard] || "info";
@@ -2152,8 +2072,8 @@ function attackPathCards(report) {
       ? `The supplied policy for ${p.identity_id} matches with an Allow.`
       : p.reasons.length ? p.reasons.join(", ") : VERDICT_LABEL[p.verdict];
     return `<article class="attack-path" data-verdict="${esc(p.verdict)}"><header>`
-      + `${sevTag(sev)} ${verdictTag(p.verdict)} <strong>${esc(agents[p.agent_id] || p.agent_id)} can reach `
-      + `${esc(p.action)}</strong></header><div class="ap-route">${route}</div>`
+      + `${sevTag(sev)} ${verdictTag(p.verdict)} <strong>${verbatim(agents[p.agent_id] || p.agent_id)} can reach `
+      + `${verbatim(p.action)}</strong></header><div class="ap-route">${route}</div>`
       + `<div class="ap-meta">${esc(why)} · evidence `
       + uniqueLocs(p.evidence, 3).map(l => `<code>${esc(l)}</code>`).join(" ")
       + `</div></article>`;
@@ -2167,7 +2087,7 @@ function attackPathCards(report) {
       .sort((a, b) => SEV_RANK[a] - SEV_RANK[b])[0];
     const connected = server.status === "connected";
     cards.push(`<article class="attack-path" data-verdict="${connected ? "potentially_allowed" : "unknown"}">`
-      + `<header>${sevTag(worst)} <strong>MCP server “${esc(server.name || server.file)}” `
+      + `<header>${sevTag(worst)} <strong>MCP server “${verbatim(server.name || server.file)}” `
       + `exposes ${(server.tools || []).length} LLM-invokable tool(s)</strong></header>`
       + `<div class="ap-route">${risky.map(t => `${hop("tool", t.name)} <span class="cap-tag">`
         + `${esc(t.capability_kinds.join(", "))}</span>`).join(" ")}</div>`
@@ -2188,7 +2108,7 @@ function unknownsHtml(report) {
     const subjects = [...new Set(groups[reason].map(u => u.subject))];
     return `<li><strong>${esc(UNKNOWN_REASON[reason] || "Not statically resolvable.")}</strong>`
       + ` <span class="muted">(${esc(reason)}; ${subjects.length} subject(s))</span>`
-      + `<br><span class="muted">${esc(subjects.slice(0, 4).join(", "))}`
+      + `<br><span class="muted" translate="no">${esc(subjects.slice(0, 4).join(", "))}`
       + `${subjects.length > 4 ? ` +${subjects.length - 4}` : ""}</span></li>`;
   }).join("");
   const total = (report.unknowns || []).length;
@@ -2355,7 +2275,7 @@ async function runPrivilegeScenario(scenario, button) {
   setCompareStatus("", false);
   setDriftStatus("Scanning the bundled baseline, candidate and fixed revisions (offline demo)…", false);
   try {
-    const body = await postJson(apiBase() + "/api/agent-drift/demo?scenario=" + encodeURIComponent(scenario));
+    const body = await postJson("/api/agent-drift/demo?scenario=" + encodeURIComponent(scenario));
     renderDrift(body);
     $("driftState").textContent = "Scenario loaded";
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
@@ -2364,7 +2284,6 @@ async function runPrivilegeScenario(scenario, button) {
   } catch (e) {
     setDriftStatus("The demo could not be run: " + e.message, true);
     $("driftState").textContent = "Failed";
-    if (e instanceof BackendUnavailable) showApiEndpointField();
   } finally {
     DRIFT_BUTTONS.forEach(id => { $(id).disabled = false; });
     button.textContent = original;
@@ -2375,8 +2294,8 @@ function driftCard(title, label, report, note) {
   const agents = Object.fromEntries((report.agents || []).map(a => [a.id, a.display_name || a.id]));
   const items = (report.capability_paths || []).slice()
     .sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict])
-    .map(p => `<li>${verdictTag(p.verdict)} ${esc(agents[p.agent_id] || p.agent_id)} → `
-      + `${esc(p.tool_name)} → <code>${esc(p.action)}</code></li>`);
+    .map(p => `<li>${verdictTag(p.verdict)} ${verbatim(agents[p.agent_id] || p.agent_id)} → `
+      + `${verbatim(p.tool_name)} → <code>${esc(p.action)}</code></li>`);
   return `<h4>${esc(title)}</h4><p class="revision-target">${esc(label)}</p>`
     + (note ? `<div>${note}</div>` : "")
     + `<div><strong>${report.capability_paths.length}</strong> capability path(s) · `
@@ -2397,7 +2316,7 @@ function privilegeChangesHtml(list, toolLabel) {
       + ` <span class="evidence-tag">${esc(DRIFT_TYPE_LABEL[c.type] || c.type)}</span>`
       + ` <span class="evidence-tag" title="Whether aibom diff --agent-privileges --fail-on would fail on it">`
       + `${c.gates ? "can fail CI (--fail-on)" : "review only, never fails CI"}</span>`
-      + ` <h4>${esc(subject)}${c.affected_resource ? ` on ${esc(c.affected_resource)}` : ""}</h4></header>`
+      + ` <h4>${verbatim(subject)}${c.affected_resource ? ` on ${verbatim(c.affected_resource)}` : ""}</h4></header>`
       + `<div class="f3"><span class="f3-label l-impact">Impact</span><div>`
       + `${esc(rem.why_it_matters || "")} ${verdicts}</div>`
       + `<span class="f3-label l-evidence">Evidence</span><div>certainty: ${esc(c.certainty)}`
@@ -2527,15 +2446,13 @@ $("depsFilter").addEventListener("change", filterDeps);
 $("contextFilter").addEventListener("change", filterInventory);
 $("repoRef").addEventListener("keydown", (e) => { if (e.key === "Enter") scan(); });
 
-renderApiLine();
-
 // Shareable demo links: ?repo=https://github.com/owner/repo prefills and scans.
 const params = new URLSearchParams(location.search);
 const preset = params.get("repo");
 
-// Confirm the backend first: an autostarted analysis against a static host
-// would otherwise fail with an error the visitor never asked for.
-checkBackend().then((ready) => {
+// Confirm the server first: an autostarted analysis with no server behind the
+// page would otherwise fail with an error the visitor never asked for.
+checkServer().then((ready) => {
   if (!ready) return;
   if (params.get("demo") === "1") runDemo();
   else if (preset) { $("repo").value = preset; scan(); }

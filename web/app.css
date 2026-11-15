@@ -89,7 +89,6 @@ button.link { min-height: 0; padding: 0; border: 0; background: none; color: var
   font-weight: 600; text-align: left; text-decoration: underline; text-underline-offset: 2px; }
 button.link:hover:not(:disabled) { background: none; color: var(--accent-strong); }
 .inline-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.inline-row input { flex: 1 1 260px; }
 
 .scan-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px auto; gap: 12px;
   align-items: end; }
@@ -99,7 +98,6 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-strong)
 .disclosure summary { cursor: pointer; font-size: 15px; font-weight: 600; color: var(--fg); }
 .disclosure p, .disclosure ul { margin: 8px 0 4px; color: var(--muted); font-size: 15px; }
 .disclosure li { margin: 4px 0; }
-.api-line { margin: 8px 0; font-size: 14px; color: var(--muted); }
 .status-block { margin-top: 10px; }
 #status, #compareStatus, #driftStatus { margin: 6px 0 0; font-size: 15px; color: var(--muted);
   overflow-wrap: anywhere; }
