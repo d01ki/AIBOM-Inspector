@@ -284,9 +284,16 @@ def _coverage(inventory: Inventory) -> tuple[str, str]:
             "transitive",
             "dependencies resolved from lockfiles, so transitive components are included",
         )
+    unparsed = inventory.stats.lockfiles_unparsed
+    found = (
+        f"{', '.join(unparsed)} {'was' if len(unparsed) == 1 else 'were'} found but "
+        "not parsed (unsupported format)"
+        if unparsed
+        else "no lockfile was found"
+    )
     return (
         "declared-dependencies-only",
-        "no lockfile was found; only dependencies declared in manifests are listed, "
+        f"{found}; only dependencies declared in manifests are listed, "
         "so transitive components are missing",
     )
 

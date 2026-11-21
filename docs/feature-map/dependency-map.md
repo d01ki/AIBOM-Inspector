@@ -112,8 +112,13 @@ counts, the panel text, and console errors).
   (`source = { virtual = "." }`); it used to appear as its own transitive
   dependency. `_is_uv_project` skips it, held by
   `test_the_uv_project_itself_is_not_a_dependency`.
-- `pnpm-lock.yaml` and `yarn.lock` are not parsed (no package nodes or edges
-  for those projects).
+- `pnpm-lock.yaml`, `yarn.lock` and `bun.lock(b)` are not parsed (no package
+  nodes or edges for those projects). They are recorded in
+  `stats.lockfiles_unparsed`, so the analysis limits and `cisa:coverage-note`
+  name the file instead of claiming "no lockfile" (found on `vercel/ai-chatbot`,
+  which has a `pnpm-lock.yaml`). Held by
+  `test_limits_name_a_lockfile_that_is_present_but_not_parsed` and
+  `test_coverage_note_names_a_lockfile_it_could_not_parse`.
 - PHP and Ruby source imports are not linked (`openai-php/client`,
   `ruby-openai` stay unlinked to models).
 - Model IDs chosen at run time (gateway catalogs) cannot be linked.

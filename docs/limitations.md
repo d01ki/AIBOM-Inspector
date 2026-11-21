@@ -17,7 +17,9 @@
   is where transitive components and artifact digests come from. Without one of
   those lockfiles, transitive dependencies are absent — the emitted SBOM says
   so in `cisa:coverage` rather than implying completeness. `yarn.lock` and
-  `pnpm-lock.yaml` need a YAML parser this project does not depend on;
+  `pnpm-lock.yaml` need a YAML parser this project does not depend on, and
+  `bun.lock` / `bun.lockb` are not read either; when one is present, the
+  analysis limits and `cisa:coverage-note` name it as found but not parsed;
   `go.sum` records module-tree hashes rather than artifact digests, so it is
   not used (`go.mod` already lists resolved versions).
 - Dependencies are never resolved over the network: what is not in the

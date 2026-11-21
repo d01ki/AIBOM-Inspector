@@ -156,3 +156,30 @@ def test_a_hub_purl_is_only_built_from_a_whole_repo_id() -> None:
     for name in ("acme/foo\n", "acme/..", "local/path/model"):
         assert _hf_purl(name, "huggingface", None) is None, name
     assert _hf_purl("acme/foo", "openai", None) is None
+
+
+def _coverage_props(tmp_path: Path) -> dict[str, str]:
+    from aibom.service import run_scan
+
+    doc = to_cyclonedx(run_scan(tmp_path).inventory)
+    return {p["name"]: p["value"] for p in doc["metadata"]["properties"]}
+
+
+def test_coverage_note_names_a_lockfile_it_could_not_parse(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    props = _coverage_props(tmp_path)
+    assert props["cisa:coverage"] == "declared-dependencies-only"
+    assert "pnpm-lock.yaml" in props["cisa:coverage-note"]
+    assert "no lockfile was found" not in props["cisa:coverage-note"]
+
+
+def test_coverage_note_says_no_lockfile_only_when_there_is_none(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
+    )
+    props = _coverage_props(tmp_path)
+    assert props["cisa:coverage"] == "declared-dependencies-only"
+    assert "no lockfile was found" in props["cisa:coverage-note"]
