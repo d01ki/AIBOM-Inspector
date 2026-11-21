@@ -304,6 +304,62 @@ def _cyclic_layout_checks(page: Any) -> tuple[dict[str, Any], list[str]]:
     return checks, failures
 
 
+#: Counts every pair of node labels whose drawn boxes intersect in one map.
+_LABEL_OVERLAPS = """(h) => {
+  const boxes = [...document.querySelectorAll(`#${h} .node text`)].map(t => t.getBBox());
+  let pairs = 0;
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (a.x < b.x + b.width && b.x < a.x + a.width
+          && a.y < b.y + b.height && b.y < a.y + a.height) pairs++;
+    }
+  }
+  return { labels: boxes.length, drawn: boxes.every(b => b.width > 0), pairs };
+}"""
+
+
+def _dense_map_checks(page: Any, port: int, out: Path) -> tuple[dict[str, Any], list[str]]:
+    """A real-size AI usage map keeps every label readable.
+
+    ``vercel/ai-chatbot`` (34 components, 10 edges, long prompt labels) drew a
+    pile of overlapping labels: the map was laid out on a fixed canvas and the
+    layout ignored how wide a label is. The synthetic graph below has the same
+    shape, so the check needs no network.
+    """
+    _open(page, port, "/")
+    page.locator("#runDemo").click()
+    page.locator('[data-tab="graph"]').click(timeout=60_000)
+    page.wait_for_selector("#graph svg", timeout=60_000)
+    page.evaluate(
+        """() => {
+          const nodes = [], edges = [];
+          const add = (id, label, type) => nodes.push({ id, label, type, severity: null });
+          for (let i = 0; i < 18; i++) {
+            const role = i % 2 ? "user" : "system";
+            add(`p${i}`, `${role}-prompt@artifacts/kind${i}/server.ts:${10 + i}`, "prompt");
+          }
+          for (let i = 0; i < 5; i++) add(`m${i}`, `vendor${i}/model-family-${i}-fast`, "model");
+          for (let i = 0; i < 5; i++) add(`t${i}`, `tool${i}Name@lib/ai/tools/t${i}.ts:5`, "tool");
+          for (let i = 0; i < 5; i++) add(`k${i}`, `@scope/package-${i}`, "package");
+          add("s0", "gateway-service", "service");
+          for (let i = 0; i < 10; i++) {
+            edges.push({ source: `p${i % 2}`, target: `t${i % 5}`, type: "invokes",
+                         evidence: [`app/route.ts:${i + 1}`] });
+          }
+          renderGraph({ nodes, edges, exposure_paths: [], impact_paths: [] }, [], MAIN_GRAPH);
+        }"""
+    )
+    checks: dict[str, Any] = page.evaluate(_LABEL_OVERLAPS, "graph")
+    page.locator("#graph").screenshot(path=str(out / f"ui-{DEMOS}-dense-map.png"))
+    failures = []
+    if checks["labels"] != 34 or not checks["drawn"]:
+        failures.append(f"dense map: expected 34 drawn labels, got {checks}")
+    elif checks["pairs"]:
+        failures.append(f"dense map: {checks['pairs']} pair(s) of node labels overlap")
+    return checks, failures
+
+
 def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
     """Render every demo view from tainted API data; nothing may become markup."""
 
@@ -445,6 +501,9 @@ def run_demos(out: Path) -> int:
             failures += problems
             checks, problems = _cyclic_layout_checks(page)
             report["checks"]["cyclic-layout"] = checks
+            failures += problems
+            checks, problems = _dense_map_checks(page, port, out)
+            report["checks"]["dense-map"] = checks
             failures += problems
             checks, problems = _injection_checks(page, port)
             report["checks"]["injection"] = checks

@@ -982,6 +982,7 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
   } else {
     simulate(nodes, links, W, H);
     fit(nodes, W, H, PAD);
+    H = spreadLabels(nodes, W, H, PAD);
   }
 
   if (!links.length) {
@@ -1025,9 +1026,8 @@ function renderGraph(graph, findings, view = MAIN_GRAPH) {
       "aria-label": `${n.label}, ${n.type}${n.severity ? `, ${n.severity} severity` : ""}` });
     const r = n.radius;
     const c = svgEl("circle", { r, cx: n.x, cy: n.y, fill: nodeColor(n) });
-    const label = n.label.length > 24 ? n.label.slice(0, 23) + "…" : n.label;
     const t = svgEl("text", { x: n.x, y: labelY(n), "text-anchor": "middle" });
-    t.textContent = label;
+    t.textContent = mapLabel(n);
     const full = svgEl("title", {});
     full.textContent = `${n.label} (${n.type})`;
     g.appendChild(full); g.appendChild(c); g.appendChild(t);
@@ -1179,6 +1179,47 @@ function simulate(nodes, links, W, H) {
       n.y += Math.max(-14, Math.min(14, n.vy));
     }
   }
+}
+
+function mapLabel(n) {
+  return n.label.length > 24 ? n.label.slice(0, 23) + "…" : n.label;
+}
+
+// The force layout keeps circles apart, but a label is far wider than its
+// circle, so a real-size map (vercel/ai-chatbot: 34 components) stacked
+// "system-prompt@…" labels on top of each other. Push apart any two nodes
+// whose circle-plus-label boxes meet. The map grows downwards only: growing
+// sideways would make the default zoom shrink the text. Returns the height.
+function spreadLabels(nodes, W, H, pad) {
+  const CHAR = 7.6, GAP = 4;
+  const half = n => Math.max(n.radius, mapLabel(n).length * CHAR / 2) + GAP;
+  const top = n => n.y - n.radius - GAP;
+  const bottom = n => labelY(n) + 4 + GAP;
+  for (let it = 0; it < 400; it++) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const ox = half(a) + half(b) - Math.abs(a.x - b.x);
+        const oy = Math.min(bottom(a), bottom(b)) - Math.max(top(a), top(b));
+        if (ox <= 0 || oy <= 0) continue;
+        moved = true;
+        // Take the cheaper way out; a label row is short, so it is usually down.
+        if (ox < oy) {
+          const s = (a.x <= b.x ? -1 : 1) * (ox / 2 + 0.5);
+          a.x += s; b.x -= s;
+        } else {
+          const s = (a.y <= b.y ? -1 : 1) * (oy / 2 + 0.5);
+          a.y += s; b.y -= s;
+        }
+      }
+    }
+    nodes.forEach(n => { n.x = Math.min(W - pad / 2 - half(n), Math.max(pad / 2 + half(n), n.x)); });
+    if (!moved) break;
+  }
+  const shift = pad / 2 - Math.min(...nodes.map(top));
+  nodes.forEach(n => { n.y += shift; });
+  return Math.max(H, Math.ceil(Math.max(...nodes.map(bottom)) + pad / 2));
 }
 
 function fit(nodes, W, H, pad) {

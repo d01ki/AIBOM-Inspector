@@ -118,6 +118,13 @@ What broke before, and the check that now holds it:
 - "No edges" looked like "no dependencies". The Dependencies tab renders the
   API's full `dependencies` table and says "relations unresolved" when no
   edge-recording lockfile exists; the map says when it has nothing to connect.
+- A real-size AI usage map (`vercel/ai-chatbot`: 34 components, long
+  `system-prompt@…` labels) drew 17 pairs of overlapping labels: the force
+  layout kept circles apart on a fixed 800×520 canvas and ignored label width.
+  `spreadLabels()` pushes apart nodes whose circle-plus-label boxes meet and
+  grows the map downwards only (sideways growth would shrink the text under
+  the default zoom). `verify_ui.py --fixture demos` draws a synthetic map of
+  the same shape and fails on any overlapping label pair (`dense-map`).
 
 ```json verify
 {
