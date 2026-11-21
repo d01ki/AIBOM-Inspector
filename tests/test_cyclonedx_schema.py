@@ -7,6 +7,9 @@ schema bundled in ``cyclonedx-python-lib``.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from aibom import __version__
@@ -116,3 +119,58 @@ def test_cross_file_demo_boms_are_schema_valid(fixture: str) -> None:
     assert properties.get("aibom:prompt_flow_cross_file") == "true"
     if fixture.endswith("candidate"):
         assert properties.get("aibom:prompt_flow_evidence_level") == "proven_static"
+
+
+# --- one name in two ecosystems is two components -------------------------------
+
+def _two_ecosystems(tmp_path: Path) -> Inventory:
+    from aibom.service import run_scan
+
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "package.json").write_text(
+        '{"dependencies": {"dotenv": "16.0.0"}}\n', encoding="utf-8"
+    )
+    (tmp_path / "cli").mkdir()
+    (tmp_path / "cli" / "Gemfile").write_text(
+        'source "https://rubygems.org"\ngem "dotenv", "3.2.0"\n', encoding="utf-8"
+    )
+    return run_scan(tmp_path).inventory
+
+
+def test_same_name_in_two_ecosystems_gets_two_ids_and_a_valid_bom(tmp_path: Path) -> None:
+    """modelcontextprotocol/quickstart-resources: dotenv on npm and on RubyGems.
+
+    Packages dedupe per ecosystem, but the id ignored the ecosystem, so both got
+    one bom-ref and the root's dependsOn listed it twice (schema-invalid).
+    """
+    inventory = _two_ecosystems(tmp_path)
+    dotenv = [e for e in inventory.entities if isinstance(e, Package) and e.name == "dotenv"]
+    assert sorted(p.ecosystem or "" for p in dotenv) == ["RubyGems", "npm"]
+    assert dotenv[0].id != dotenv[1].id
+    ids = [e.id for e in inventory.entities]
+    assert len(ids) == len(set(ids))
+    document = to_cyclonedx_json(inventory)
+    _assert_valid(document)
+    refs = [c["bom-ref"] for c in json.loads(document)["components"]]
+    assert len(refs) == len(set(refs))
+
+
+def test_one_package_in_one_ecosystem_keeps_one_id(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    for sub in ("a", "b"):
+        (tmp_path / sub / "requirements.txt").write_text("openai==1.0.0\n", encoding="utf-8")
+    from aibom.service import run_scan
+
+    packages = [e for e in run_scan(tmp_path).inventory.entities
+                if isinstance(e, Package) and e.name == "openai"]
+    assert len(packages) == 1  # still merged
+    assert len({ev.file for ev in packages[0].source_evidence}) == 2
+
+
+def test_ids_of_other_components_do_not_change() -> None:
+    import hashlib
+
+    model = Model(name="gpt-4o", provider="openai")
+    digest = hashlib.sha256(b"model\x1fgpt-4o").hexdigest()[:12]
+    assert model.id == f"model:{digest}"

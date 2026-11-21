@@ -347,6 +347,17 @@ class Package(Entity):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def id(self) -> str:
+        """Identity per ecosystem, like :meth:`natural_key`.
+
+        The base id hashed the name only, so `dotenv` on npm and on RubyGems
+        shared one id: one CycloneDX bom-ref for two components, and edges that
+        could land on the wrong one.
+        """
+        return f"{self.type.value}:{_slug(*self.natural_key())}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def purl(self) -> str | None:
         """Package URL (purl), e.g. ``pkg:pypi/transformers@4.40`` — enables
         ecosystem vulnerability correlation (OSV, Dependency-Track)."""

@@ -88,6 +88,13 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
   Intra-file linking used to rebuild an id map of the whole inventory per file.
   A performance change must leave the scan output identical: compare a full
   offline scan of the benchmark checkouts before and after.
+- A package's id ignored its ecosystem although packages dedupe per ecosystem,
+  so `dotenv` on npm and on RubyGems (quickstart-resources) or `openai` on npm
+  and PyPI (openai-cua-sample-app) shared one id: one CycloneDX bom-ref for
+  two components, a schema-invalid `dependsOn`, and edges that could land on
+  the wrong package. `Package.id` hashes the natural key
+  (`test_same_name_in_two_ecosystems_gets_two_ids_and_a_valid_bom`). Every
+  package id changed with it; ids of other components did not.
 
 ```json verify
 {
