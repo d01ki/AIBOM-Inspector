@@ -118,6 +118,7 @@ class Parser:
         self.tokens = tokens
         self.i = 0
         self.depth = 0
+        self._paren_close: dict[int, int] | None = None
 
     # -- token helpers --------------------------------------------------
 
@@ -845,7 +846,7 @@ class Parser:
             return None
 
         self._skip_generic_parameters()
-        if not self.at_punct("("):
+        if not self.at_punct("(") or not self._parens_open_an_arrow():
             self.i = start_index
             return None
         params = self._parse_params()
@@ -856,6 +857,29 @@ class Parser:
             self.i = start_index
             return None
         return self._parse_arrow_body(start, params, is_async)
+
+    def _parens_open_an_arrow(self) -> bool:
+        """Cheap lookahead: is the '(' here an arrow's parameter list?
+
+        Only if its matching ')' is followed by '=>' or a return type ':'.
+        Trying every '(' as a parameter list let a failed attempt run past its
+        ')' into the following code, which doubled the work per JSX component
+        (gemini-chatbot's 30 KB icons.tsx took 16 s). Unbalanced brackets fall
+        back to the full attempt.
+        """
+        if self._paren_close is None:
+            self._paren_close = {}
+            stack: list[int] = []
+            for index, token in enumerate(self.tokens):
+                if token.is_punct("("):
+                    stack.append(index)
+                elif token.is_punct(")") and stack:
+                    self._paren_close[stack.pop()] = index
+        close = self._paren_close.get(self.i)
+        if close is None:
+            return True
+        after = self.tokens[close + 1] if close + 1 < len(self.tokens) else None
+        return after is not None and after.is_punct("=>", ":")
 
     def _parse_arrow_body(
         self, start: Token | None, params: list[Param], is_async: bool

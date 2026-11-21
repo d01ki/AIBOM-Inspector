@@ -26,6 +26,15 @@ def test_tokenizer_separates_regex_from_division() -> None:
     assert ("punct", "/") in kinds
 
 
+def test_every_punctuator_is_read_at_its_longest_match() -> None:
+    from aibom.detectors.javascript.tokenizer import _PUNCTUATORS
+
+    for punct in _PUNCTUATORS:
+        # After a name, '/' and '/=' are division, not a regex.
+        values = [t.value for t in tokenize(f"a {punct} b") if t.type == "punct"]
+        assert values == [punct], (punct, values)
+
+
 def test_imports_with_scoped_and_prefixed_module_names() -> None:
     module = parse_javascript(
         "import { execSync } from 'node:child_process';\n"
@@ -165,3 +174,69 @@ def test_class_methods_are_indexed() -> None:
     )
     assert "S.run" in module.functions
     assert isinstance(module.functions["S.run"].node, FunctionNode)
+
+
+# --- parse cost must stay linear in the number of components -------------------
+
+_JSX_ICON = (
+    "export const Icon{n} = () => {{\n"
+    "  return (\n"
+    '    <svg height="16" style={{{{ color: "c" }}}}>\n'
+    '      <path d="M8 2Z" fill="c"></path>\n'
+    "    </svg>\n"
+    "  );\n"
+    "}};\n"
+)
+
+
+def _param_list_attempts(source: str, monkeypatch: pytest.MonkeyPatch) -> int:
+    from aibom.detectors.javascript.nodes import Param
+    from aibom.detectors.javascript.parser import Parser
+
+    calls = 0
+    original = Parser._parse_params
+
+    def counting(self: Parser) -> list[Param]:
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(Parser, "_parse_params", counting)
+    parse_javascript(source, "icons.tsx")
+    return calls
+
+
+def test_repeated_jsx_components_parse_in_linear_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    """gemini-chatbot's icons.tsx (30 KB of these) took 16 s; 16 copies took 48 s.
+
+    Each `return ( <svg … )` was tried as an arrow parameter list that ran past
+    its ')' into the following components, so the work doubled per component.
+    """
+    small = _param_list_attempts("".join(_JSX_ICON.format(n=i) for i in range(6)), monkeypatch)
+    large = _param_list_attempts("".join(_JSX_ICON.format(n=i) for i in range(12)), monkeypatch)
+    assert large <= 2 * small + 2, (small, large)
+    module = parse_javascript("".join(_JSX_ICON.format(n=i) for i in range(40)), "icons.tsx")
+    assert {f"Icon{i}" for i in range(40)} <= {f.name for f in module.functions.values()}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const f = async (a: string, b = 2): Promise<void> => { use(a); };",
+        "const f = <T,>(x: T) => x;",
+        "const f = ({ a, b }: Props) => a;",
+    ],
+)
+def test_arrows_with_types_and_patterns_are_still_arrows(source: str) -> None:
+    module = parse_javascript(source, "a.ts")
+    assert any(
+        f.name == "f" and isinstance(f.node, FunctionNode) and f.node.is_arrow
+        for f in module.functions.values()
+    )
+
+
+def test_a_parenthesised_operand_is_not_an_arrow() -> None:
+    module = parse_javascript("const v = ok ? (a) : (b);\nconst w = (x + y) * 2;", "a.ts")
+    assert not any(
+        isinstance(n, FunctionNode) and n.is_arrow for n in walk(module.program)
+    )
