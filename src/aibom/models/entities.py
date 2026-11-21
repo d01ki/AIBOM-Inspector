@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from enum import Enum
+from functools import lru_cache
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -61,8 +62,13 @@ class RelationshipType(str, Enum):
     LICENSED_UNDER = "licensed_under"
 
 
+@lru_cache(maxsize=1 << 16)
 def _slug(*parts: str) -> str:
-    """Build a short, stable identity hash from natural-key parts."""
+    """Build a short, stable identity hash from natural-key parts.
+
+    Memoized: ``Entity.id`` calls it on every access, and a scan reads ids
+    hundreds of thousands of times. The cache is bounded for the server.
+    """
     raw = "\x1f".join(p.strip().lower() for p in parts if p)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
     return digest
