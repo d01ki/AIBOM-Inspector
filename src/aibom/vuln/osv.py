@@ -26,6 +26,7 @@ import math
 import re
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
 from aibom.inventory import Inventory, VulnLookup
@@ -42,6 +43,8 @@ from aibom.models.findings import (
 _OSV_URL = "https://api.osv.dev/v1/query"
 _OSV_VULN_PAGE = "https://osv.dev/vulnerability/"
 _TIMEOUT = 10.0
+#: Lookups in flight at once. Small on purpose: a public API, shared fairly.
+_CONCURRENT_QUERIES = 8
 
 _SEVERITY_WORD = {
     "critical": Severity.CRITICAL,
@@ -129,13 +132,12 @@ class OSVMapper:
             not_queried_over_limit=len(candidates) - len(queried),
         )
         findings: list[Finding] = []
-        for pkg in queried:
-            try:
-                vulns = self.client.query(pkg.name, pkg.ecosystem or "", pkg.version or "")
-            except VulnLookupError as exc:
+        for pkg, outcome in zip(queried, self._lookup_all(queried), strict=True):
+            if isinstance(outcome, VulnLookupError):
                 coverage.failed += 1
-                coverage.errors.append(str(exc)[:200])
+                coverage.errors.append(str(outcome)[:200])
                 continue
+            vulns = outcome
             coverage.queried += 1
             live = [v for v in vulns if isinstance(v, dict) and not v.get("withdrawn")]
             findings.extend(_to_finding(pkg, group) for group in _merge_aliases(live))
@@ -146,6 +148,26 @@ class OSVMapper:
         )
         self.coverage = coverage
         return findings
+
+    def _lookup_all(
+        self, packages: list[Package]
+    ) -> list[list[dict[str, Any]] | VulnLookupError]:
+        """Query every package, a few at a time; results come back in input order.
+
+        One by one, the round trips dominated a live scan (flask: 80 pinned
+        packages, 41 of 44 s). Any other exception propagates as before.
+        """
+
+        def one(pkg: Package) -> list[dict[str, Any]] | VulnLookupError:
+            try:
+                return self.client.query(pkg.name, pkg.ecosystem or "", pkg.version or "")
+            except VulnLookupError as exc:
+                return exc
+
+        if len(packages) <= 1:
+            return [one(pkg) for pkg in packages]
+        with ThreadPoolExecutor(max_workers=min(_CONCURRENT_QUERIES, len(packages))) as pool:
+            return list(pool.map(one, packages))
 
 
 def _merge_aliases(vulns: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:

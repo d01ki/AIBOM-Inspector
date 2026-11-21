@@ -371,3 +371,42 @@ def test_group_by_package_gives_one_upgrade_for_all_fixed_advisories() -> None:
     assert group["recommended_version"] == "3.0.6"
     assert group["without_known_fix"] == 1
     assert len(group["advisories"]) == 3
+
+
+# --- lookups run concurrently; results stay in package order --------------------
+
+def test_lookups_run_concurrently() -> None:
+    """flask (80 pinned packages) spent 41 s of a 44 s live scan asking one by one."""
+    import threading
+
+    barrier = threading.Barrier(4, timeout=5)
+
+    class AllAtOnce:
+        def query(self, *_a: Any) -> list[dict[str, Any]]:
+            barrier.wait()  # only returns once four queries are in flight together
+            return []
+
+    mapper = OSVMapper(AllAtOnce())
+    mapper.map(_inv(*(_pinned(name, "1.0") for name in "abcd")))
+    assert mapper.coverage.queried == 4 and mapper.coverage.status == "complete"
+
+
+def test_findings_and_errors_keep_package_order_whatever_finishes_first() -> None:
+    import time
+
+    from aibom.vuln.osv import VulnLookupError
+
+    delay = {"a": 0.3, "b": 0.2, "c": 0.1, "d": 0.0}
+
+    class Staggered:
+        def query(self, name: str, *_a: Any) -> list[dict[str, Any]]:
+            time.sleep(delay[name])
+            if name in {"b", "d"}:
+                raise VulnLookupError(f"{name} down")
+            return [{**_VULN, "id": f"GHSA-{name}"}]
+
+    mapper = OSVMapper(Staggered())
+    findings = mapper.map(_inv(*(_pinned(name, "1.0") for name in "dcba")))
+    assert [f.rule_id for f in findings] == ["GHSA-a", "GHSA-c"]
+    assert mapper.coverage.errors == ["b down", "d down"]
+    assert mapper.coverage.status == "partial"

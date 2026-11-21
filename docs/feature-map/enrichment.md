@@ -58,6 +58,11 @@ Upstream API shape changes are only caught by the manual live check.
 
 What broke before, and the check that now holds it:
 
+- OSV lookups ran one at a time, so a live scan's time grew with its pinned
+  packages (flask: 80 lookups, 41 of 44 s). Up to 8 run at once; findings and
+  recorded errors stay in package order (`test_lookups_run_concurrently`,
+  `test_findings_and_errors_keep_package_order_whatever_finishes_first`).
+
 - A reply cut off mid-body raised `http.client.IncompleteRead`, which is
   neither `URLError` nor `OSError`, so it escaped both clients and failed the
   whole scan (HTTP 500 from the server) instead of leaving the entity
