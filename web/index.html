@@ -26,7 +26,7 @@
       </a>
       <nav class="app-nav" aria-label="Main">
         <a href="#analyze" data-view-link="analyze" aria-current="page">Analyze</a>
-        <a href="#compare" data-view-link="compare">Compare changes</a>
+        <a href="#compare" data-view-link="compare">Security drift</a>
         <a href="#help" data-view-link="analyze">Help</a>
         <a href="https://github.com/d01ki/AIBOM-Inspector#readme"
            target="_blank" rel="noopener noreferrer">Docs ↗</a>
@@ -139,15 +139,15 @@
       <section class="summary" id="securitySummary" aria-label="Summary"></section>
 
       <nav class="tabs" aria-label="Result sections" role="tablist">
-        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="true">Findings <span class="tab-count" id="tabCountFindings"></span></button>
-        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="false">Dependencies <span class="tab-count" id="tabCountDeps"></span></button>
+        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="true">Dependencies <span class="tab-count" id="tabCountDeps"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="graph" aria-selected="false">AI usage map</button>
+        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="false">Findings <span class="tab-count" id="tabCountFindings"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="agent" aria-selected="false" id="agentTab">Agent paths</button>
         <button type="button" role="tab" class="result-tab" data-tab="inventory" aria-selected="false">Inventory <span class="tab-count" id="tabCountInventory"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="compliance" aria-selected="false">SBOM fields</button>
       </nav>
 
-      <section class="tab-panel" id="findingsSection" data-panel="findings" aria-labelledby="findings-title">
+      <section class="tab-panel" id="findingsSection" data-panel="findings" aria-labelledby="findings-title" hidden>
         <div class="section-head">
           <div>
             <h2 id="findings-title">Findings <span class="count" id="findingCount"></span></h2>
@@ -193,7 +193,7 @@
         </details>
       </section>
 
-      <section class="tab-panel" id="depsSection" data-panel="deps" aria-labelledby="deps-title" hidden>
+      <section class="tab-panel" id="depsSection" data-panel="deps" aria-labelledby="deps-title">
         <div class="section-head">
           <div>
             <h2 id="deps-title">Dependencies <span class="count" id="depsCount"></span></h2>
@@ -381,7 +381,7 @@
             <li><strong>Agent and tool paths:</strong>
               <button class="link" type="button" data-example="demo">the bundled sample</button>.</li>
             <li><strong>Changes between revisions:</strong>
-              <a href="#compare">Compare changes</a> (bundled demos or your repository).</li>
+              <a href="#compare">Security drift</a> (bundled demos or your repository).</li>
           </ul>
         </section>
         <section>
@@ -399,11 +399,11 @@
 
   <div class="view" data-view="compare" id="compareView" hidden>
     <section class="intro" aria-labelledby="compare-title">
-      <h1 id="compare-title">Compare changes between two revisions</h1>
-      <p>Security drift analysis: two scans of the same repository are compared on three
-        separate questions. Did the components change? Did a new path appear from untrusted
-        input to a tool an agent can call? Did an agent gain cloud permissions? The component
-        list can stay identical while the other two change.</p>
+      <h1 id="compare-title">Security drift analysis</h1>
+      <p>Two revisions of the same repository are scanned and compared on three separate
+        questions. Did the components change? Did a new path appear from untrusted input to a
+        tool an agent can call? Did an agent gain cloud permissions? The component list can
+        stay identical while the other two change.</p>
     </section>
 
     <section class="panel results-area compare-area" id="compareSection" aria-labelledby="compare-form-title">

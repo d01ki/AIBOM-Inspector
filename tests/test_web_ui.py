@@ -143,13 +143,22 @@ def test_the_page_can_be_translated_but_identifiers_stay_verbatim(page: str) -> 
         assert marked in page, f"identifier left open to translation: {marked}"
 
 
-def test_findings_lead_and_the_score_is_secondary(page: str) -> None:
-    """The headline comes from the worst finding (API `headline`), not the grade (#36)."""
+def test_the_result_opens_on_a_map_and_the_status_still_leads(page: str) -> None:
+    """The result opens on a visualization; the worst finding still heads it (#36).
+
+    The headline above the tabs comes from the API's `headline`, not the
+    grade, so a critical finding reads "Action required" whichever tab is
+    open. Under it the two maps come first, and the result opens on the first
+    one that has something to draw.
+    """
     tabs = re.findall(r'class="result-tab" data-tab="(\w+)"', page)
-    assert tabs[0] == "findings"
-    assert {"deps", "graph", "agent", "inventory", "compliance"} <= set(tabs)
-    assert 'selectTab((d.findings || []).length ? "findings" : "deps")' in page
-    assert "d.headline" in page
+    assert tabs[:3] == ["deps", "graph", "findings"]
+    assert {"agent", "inventory", "compliance"} <= set(tabs)
+    assert "selectTab(firstTab(d));" in page
+    # The status and the way to the finding sit above the tabs.
+    markup = (WEB / "index.html").read_text(encoding="utf-8")
+    assert markup.index('id="securitySummary"') < markup.index('class="tabs"')
+    assert "d.headline" in page and 'data-goto="findings"' in page
     # The hygiene score lives in a collapsed, explicitly secondary disclosure.
     assert '<details class="disclosure score-box" id="overview">' in page
     assert "Supply-chain hygiene score (secondary)" in page

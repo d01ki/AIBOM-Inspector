@@ -196,7 +196,7 @@ function runDemo() {
     request: (signal) => postJson("/api/demo", null, signal),
     render: (data) => {
       renderScan(data);
-      setStatus("Sample scanned. Start with the findings at the top of the result.", false);
+      setStatus("Sample scanned. The status at the top of the result says what to fix first.", false);
     },
   });
 }
@@ -269,11 +269,21 @@ function renderScan(d) {
   renderInventory(d);
   renderMinimumElements(d.minimum_elements, d);
   renderAgentSecurity(d.agent_security, d.inventory);
-  // Lead with what needs doing: findings when there are any, else the packages.
-  selectTab((d.findings || []).length ? "findings" : "deps");
+  selectTab(firstTab(d));
   filterFindings();
   filterInventory();
   filterDeps();
+}
+
+// A result opens on what it can draw: the package graph when a lockfile
+// records dependencies, else the AI usage map. The status above the tabs
+// already says what needs doing, and links to the finding. With nothing to
+// draw it opens on the findings, or on the package table when there are none.
+function firstTab(d) {
+  const packages = d.dependencies && d.dependencies.summary;
+  if (packages && packages.edges) return "deps";
+  if (((d.graph || {}).nodes || []).length) return "graph";
+  return (d.findings || []).length ? "findings" : "deps";
 }
 
 function provenanceHtml(meta) {
@@ -2398,7 +2408,7 @@ document.querySelectorAll(".stage-toggle button").forEach(b => {
 $("driftDemoPolicy").addEventListener("click", () => runPrivilegeScenario("agent-privilege-drift", $("driftDemoPolicy")));
 $("driftDemoMcp").addEventListener("click", () => runPrivilegeScenario("mcp-tool-exposure", $("driftDemoMcp")));
 
-// ── views: Analyze (default) and Compare changes ──────────────────────────────
+// ── views: Analyze (default) and Security drift ───────────────────────────────
 function showView(name) {
   document.querySelectorAll(".view").forEach(v => { v.hidden = v.dataset.view !== name; });
   document.querySelectorAll("[data-view-link]").forEach(a => {

@@ -186,6 +186,10 @@ def _taint(value: Any, key: str | None = None) -> Any:
     return value
 
 
+#: The result tab that is selected right now.
+_OPENED_ON = "() => document.querySelector('.result-tab[aria-selected=\"true\"]').dataset.tab"
+
+
 def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str, Any], list[str]]:
     """The sample's package graph matches the API's dependency table, edge for edge."""
     page.set_viewport_size({"width": 1280, "height": 1000})
@@ -194,7 +198,8 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
         page.locator("#runDemo").click()
     summary = response.value.json()["dependencies"]["summary"]
     page.wait_for_selector("#securitySummary .headline", timeout=60_000)
-    page.locator('[data-tab="deps"]').click()
+    # No tab is clicked: the sample has a lockfile, so the result opens on its graph.
+    opened_on = page.evaluate(_OPENED_ON)
     page.wait_for_selector("#depsGraph svg", timeout=60_000)
     checks: dict[str, Any] = page.evaluate(
         """() => ({
@@ -210,7 +215,10 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
     page.locator("#depsGraph .node circle").first.dispatch_event("click")
     checks["detail"] = page.locator("#depsDetail").inner_text()
     checks["api"] = {"total": summary["total"], "edges": summary["edges"]}
+    checks["opened_on"] = opened_on
     failures = []
+    if opened_on != "deps":
+        failures.append(f"result opened on the '{opened_on}' tab, not the dependency graph")
     if checks["nodes"] != summary["total"] or checks["edges"] != summary["edges"]:
         failures.append(f"dependency graph: drew {checks['nodes']} nodes / {checks['edges']} "
                         f"edges, API has {summary['total']} / {summary['edges']}")
@@ -504,6 +512,9 @@ def run(fixture_name: str, out: Path) -> int:
                     if r.url.endswith("/api/scan/stream") else None)
             repo = f"https://github.com/example/{fixture_name}"
             page.goto(f"http://127.0.0.1:{port}/?repo={repo}")
+            page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+            # Before any click: every fixture has something to draw.
+            report["checks"]["opened_on"] = page.evaluate(_OPENED_ON)
             page.locator('[data-tab="graph"]').click(timeout=60_000)
             page.wait_for_selector("#graph svg, #graph p", timeout=60_000)
 
@@ -526,6 +537,8 @@ def run(fixture_name: str, out: Path) -> int:
         failures.append(f"scan did not stream its stages and result: {stages}")
     if "resolve" in stages or "vulns" in stages:
         failures.append("the offline check reached a network stage (resolve/vulns)")
+    if checks.get("opened_on") not in ("deps", "graph"):
+        failures.append(f"result opened on the '{checks.get('opened_on')}' tab, not on a map")
     if report["console_errors"]:
         failures.append("browser console errors")
     report["failures"] = failures
