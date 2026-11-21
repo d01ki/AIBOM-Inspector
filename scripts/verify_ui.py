@@ -16,12 +16,14 @@ sample at 403 px and 1280 px wide and checks the page does not scroll
 sideways, every result tab is on screen, and map labels stay readable
 (``<out>/ui-demos-viewport-<width>.png``). The sample's Dependencies tab must
 draw one node per package and one lockfile-cited arrow per recorded dependency
-(``<out>/ui-demos-dependency-graph.png``). Finally it replays the demos with
-every repository-controlled string in the API responses carrying an HTML
+(``<out>/ui-demos-dependency-graph.png``). It checks that the page can be
+translated by a browser while every ``<code>``, graph and component name opts
+out, and that a dependency cycle still lays out. Finally it replays the demos
+with every repository-controlled string in the API responses carrying an HTML
 payload, and fails if any view renders it as markup (escaping regression).
 
 A fixture run also checks that the scan went through ``/api/scan/stream`` and
-that the backend reported its stages.
+that the server reported its stages.
 
 Exit code: 0 PASS, 1 FAIL (an assertion about the page failed), 2 BLOCKED
 (Playwright or a browser is unavailable). Never reports PASS for a check it
@@ -103,6 +105,17 @@ _VIEWPORTS = (403, 1280)
 _MIN_LABEL_PX = 9.0
 
 
+def _open(page: Any, port: int, path: str) -> None:
+    """Load ``path`` with nothing left over from the previous check.
+
+    ``goto`` to a URL that differs only in its ``#fragment`` does not reload
+    the page, so the previous demo's result stayed on screen and satisfied the
+    next demo's wait before its own response had arrived.
+    """
+    page.goto(f"http://127.0.0.1:{port}{path}")
+    page.reload()
+
+
 def _viewport_checks(
     page: Any, port: int, width: int, out: Path
 ) -> tuple[dict[str, Any], list[str]]:
@@ -173,6 +186,10 @@ def _taint(value: Any, key: str | None = None) -> Any:
     return value
 
 
+#: The result tab that is selected right now.
+_OPENED_ON = "() => document.querySelector('.result-tab[aria-selected=\"true\"]').dataset.tab"
+
+
 def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str, Any], list[str]]:
     """The sample's package graph matches the API's dependency table, edge for edge."""
     page.set_viewport_size({"width": 1280, "height": 1000})
@@ -181,7 +198,8 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
         page.locator("#runDemo").click()
     summary = response.value.json()["dependencies"]["summary"]
     page.wait_for_selector("#securitySummary .headline", timeout=60_000)
-    page.locator('[data-tab="deps"]').click()
+    # No tab is clicked: the sample has a lockfile, so the result opens on its graph.
+    opened_on = page.evaluate(_OPENED_ON)
     page.wait_for_selector("#depsGraph svg", timeout=60_000)
     checks: dict[str, Any] = page.evaluate(
         """() => ({
@@ -197,7 +215,10 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
     page.locator("#depsGraph .node circle").first.dispatch_event("click")
     checks["detail"] = page.locator("#depsDetail").inner_text()
     checks["api"] = {"total": summary["total"], "edges": summary["edges"]}
+    checks["opened_on"] = opened_on
     failures = []
+    if opened_on != "deps":
+        failures.append(f"result opened on the '{opened_on}' tab, not the dependency graph")
     if checks["nodes"] != summary["total"] or checks["edges"] != summary["edges"]:
         failures.append(f"dependency graph: drew {checks['nodes']} nodes / {checks['edges']} "
                         f"edges, API has {summary['total']} / {summary['edges']}")
@@ -207,6 +228,135 @@ def _dependency_graph_checks(page: Any, port: int, out: Path) -> tuple[dict[str,
         failures.append("dependency graph: an arrow points backwards (layering broke)")
     if ".lock:" not in checks["detail"]:
         failures.append("dependency graph: the detail panel shows no lockfile evidence")
+    return checks, failures
+
+
+def _translation_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
+    """The page may be translated; what it quotes from the repository may not.
+
+    Run on the rendered sample, with the package graph and a node's detail
+    panel open: every ``<code>`` and graph must opt out of translation, and the
+    page as a whole must not.
+    """
+    page.goto(f"http://127.0.0.1:{port}/")
+    page.locator("#runDemo").click()
+    page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+    page.locator('[data-tab="deps"]').click()
+    page.wait_for_selector("#depsGraph svg", timeout=60_000)
+    page.locator("#depsGraph .node circle").first.dispatch_event("click")
+    checks: dict[str, Any] = page.evaluate(
+        """() => {
+          const open = (el) => !el.closest('[translate="no"]');
+          const all = (selector) => [...document.querySelectorAll(selector)];
+          return {
+            page_opts_out: document.documentElement.getAttribute('translate') === 'no'
+              || !!document.querySelector('meta[name="google"][content="notranslate"]'),
+            marked: all('[translate="no"]').length,
+            code_open: all('code, pre').filter(open).length,
+            graphs_open: all('svg').filter(open).length,
+            names_open: all('#deps tbody tr[data-row] td:first-child strong, '
+              + '#inventory tbody tr[data-row] td:nth-child(2), #depsDetail .dt-name')
+              .filter(open).length,
+            heading_translatable: open(document.getElementById('findings-title')),
+          };
+        }"""
+    )
+    failures = []
+    if checks["page_opts_out"]:
+        failures.append("translation: the whole page opts out, so a browser cannot translate it")
+    if not checks["heading_translatable"]:
+        failures.append("translation: a section heading is marked untranslatable")
+    for key, what in (("code_open", "<code>/<pre> element(s)"), ("graphs_open", "graph(s)"),
+                      ("names_open", "package or component name(s)")):
+        if checks[key]:
+            failures.append(f"translation: {checks[key]} {what} could be rewritten by a translator")
+    if not checks["marked"]:
+        failures.append("translation: nothing on the rendered sample is marked verbatim")
+    return checks, failures
+
+
+def _cyclic_layout_checks(page: Any) -> tuple[dict[str, Any], list[str]]:
+    """Packages that depend on each other still get a finite, compact drawing.
+
+    A two-package cycle used to climb to the depth cap, leave empty columns
+    behind and make the graph's height NaN.
+    """
+    checks: dict[str, Any] = page.evaluate(
+        """() => {
+          const nodes = ['app', 'x', 'y', 'a', 'b'].map(id => ({ id, label: id }));
+          const at = Object.fromEntries(nodes.map(n => [n.id, n]));
+          const links = [['app', 'x'], ['a', 'b'], ['b', 'a']]
+            .map(([s, t]) => ({ s: at[s], t: at[t] }));
+          const size = layerLayout(nodes, links, 46);
+          return {
+            finite: [size.W, size.H, ...nodes.flatMap(n => [n.x, n.y])].every(Number.isFinite),
+            columns: new Set(nodes.map(n => n.x)).size,
+            width: size.W,
+          };
+        }"""
+    )
+    failures = []
+    if not checks["finite"]:
+        failures.append("dependency graph: a dependency cycle produced a non-finite layout")
+    elif checks["columns"] > 4:
+        failures.append(f"dependency graph: a cycle spread 5 packages over {checks['columns']} "
+                        "columns (empty depths were not removed)")
+    return checks, failures
+
+
+#: Counts every pair of node labels whose drawn boxes intersect in one map.
+_LABEL_OVERLAPS = """(h) => {
+  const boxes = [...document.querySelectorAll(`#${h} .node text`)].map(t => t.getBBox());
+  let pairs = 0;
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (a.x < b.x + b.width && b.x < a.x + a.width
+          && a.y < b.y + b.height && b.y < a.y + a.height) pairs++;
+    }
+  }
+  return { labels: boxes.length, drawn: boxes.every(b => b.width > 0), pairs };
+}"""
+
+
+def _dense_map_checks(page: Any, port: int, out: Path) -> tuple[dict[str, Any], list[str]]:
+    """A real-size AI usage map keeps every label readable.
+
+    ``vercel/ai-chatbot`` (34 components, 10 edges, long prompt labels) drew a
+    pile of overlapping labels: the map was laid out on a fixed canvas and the
+    layout ignored how wide a label is. The synthetic graph below has the same
+    shape, so the check needs no network.
+    """
+    _open(page, port, "/")
+    page.locator("#runDemo").click()
+    page.locator('[data-tab="graph"]').click(timeout=60_000)
+    page.wait_for_selector("#graph svg", timeout=60_000)
+    page.evaluate(
+        """() => {
+          const nodes = [], edges = [];
+          const add = (id, label, type) => nodes.push({ id, label, type, severity: null });
+          for (let i = 0; i < 18; i++) {
+            const role = i % 2 ? "user" : "system";
+            add(`p${i}`, `${role}-prompt@artifacts/kind${i}/server.ts:${10 + i}`, "prompt");
+          }
+          for (let i = 0; i < 5; i++) add(`m${i}`, `vendor${i}/model-family-${i}-fast`, "model");
+          for (let i = 0; i < 5; i++) add(`t${i}`, `tool${i}Name@lib/ai/tools/t${i}.ts:5`, "tool");
+          for (let i = 0; i < 5; i++) add(`k${i}`, `@scope/package-${i}`, "package");
+          add("s0", "gateway-service", "service");
+          for (let i = 0; i < 10; i++) {
+            edges.push({ source: `p${i % 2}`, target: `t${i % 5}`, type: "invokes",
+                         evidence: [`app/route.ts:${i + 1}`] });
+          }
+          renderGraph({ nodes, edges, exposure_paths: [], impact_paths: [] }, [], MAIN_GRAPH);
+        }"""
+    )
+    checks: dict[str, Any] = page.evaluate(_LABEL_OVERLAPS, "graph")
+    page.locator("#graph").screenshot(path=str(out / f"ui-{DEMOS}-dense-map.png"))
+    failures = []
+    if checks["labels"] != 34 or not checks["drawn"]:
+        failures.append(f"dense map: expected 34 drawn labels, got {checks}")
+    elif checks["pairs"]:
+        failures.append(f"dense map: {checks['pairs']} pair(s) of node labels overlap")
     return checks, failures
 
 
@@ -234,7 +384,7 @@ def _injection_checks(page: Any, port: int) -> tuple[dict[str, Any], list[str]]:
             page.locator("#graph .node circle").first.dispatch_event("click")
     checks["sample"] = page.evaluate(count)
     for button in ("#compareDemoPy", "#driftDemoPolicy", "#driftDemoMcp"):
-        page.goto(f"http://127.0.0.1:{port}/#compare")
+        _open(page, port, "/#compare")
         page.locator(button).click()
         page.wait_for_selector("#compareResult:not([hidden]), #privResult:not([hidden])",
                                timeout=60_000)
@@ -322,7 +472,7 @@ def run_demos(out: Path) -> int:
             )
             page.on("pageerror", lambda err: report["console_errors"].append(str(err)))
             for name, path, button, host, legend, detail in _DEMO_CASES:
-                page.goto(f"http://127.0.0.1:{port}{path}")
+                _open(page, port, path)
                 page.locator(button).click()
                 if host == "graph":
                     page.locator('[data-tab="graph"]').click(timeout=60_000)
@@ -345,6 +495,15 @@ def run_demos(out: Path) -> int:
                 failures += problems
             checks, problems = _dependency_graph_checks(page, port, out)
             report["checks"]["dependency-graph"] = checks
+            failures += problems
+            checks, problems = _translation_checks(page, port)
+            report["checks"]["translation"] = checks
+            failures += problems
+            checks, problems = _cyclic_layout_checks(page)
+            report["checks"]["cyclic-layout"] = checks
+            failures += problems
+            checks, problems = _dense_map_checks(page, port, out)
+            report["checks"]["dense-map"] = checks
             failures += problems
             checks, problems = _injection_checks(page, port)
             report["checks"]["injection"] = checks
@@ -406,14 +565,15 @@ def run(fixture_name: str, out: Path) -> int:
                 body.update(resolve=False, vulns=False)
                 route.continue_(post_data=json.dumps(body))
 
-            # Both the stream and the plain fallback: never let either go online.
-            page.route("**/api/scan", static_only)
             page.route("**/api/scan/stream", static_only)
             streamed: list[Any] = []
             page.on("response", lambda r: streamed.append(r)
                     if r.url.endswith("/api/scan/stream") else None)
             repo = f"https://github.com/example/{fixture_name}"
             page.goto(f"http://127.0.0.1:{port}/?repo={repo}")
+            page.wait_for_selector("#securitySummary .headline", timeout=60_000)
+            # Before any click: every fixture has something to draw.
+            report["checks"]["opened_on"] = page.evaluate(_OPENED_ON)
             page.locator('[data-tab="graph"]').click(timeout=60_000)
             page.wait_for_selector("#graph svg, #graph p", timeout=60_000)
 
@@ -436,6 +596,8 @@ def run(fixture_name: str, out: Path) -> int:
         failures.append(f"scan did not stream its stages and result: {stages}")
     if "resolve" in stages or "vulns" in stages:
         failures.append("the offline check reached a network stage (resolve/vulns)")
+    if checks.get("opened_on") not in ("deps", "graph"):
+        failures.append(f"result opened on the '{checks.get('opened_on')}' tab, not on a map")
     if report["console_errors"]:
         failures.append("browser console errors")
     report["failures"] = failures

@@ -4,7 +4,7 @@ A :class:`Finding` is the risk engine's unit of output. Like every claim in the
 tool it is **evidence-backed**: it points at the entity and the concrete
 `file:line` locations that triggered it, and it is produced by a deterministic,
 rule-based check — never by an LLM (LLM assistance is limited to *explaining* an
-already-produced finding, per SPEC §6).
+already-produced finding, per docs/usage.md, "Risk rules & scoring").
 """
 
 from __future__ import annotations

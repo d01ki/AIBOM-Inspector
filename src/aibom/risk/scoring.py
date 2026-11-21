@@ -14,7 +14,7 @@ Formula (also surfaced in the report and web UI):
    on the strength of the categories it simply has no components in.
 
 The score is a pure function of the deterministic findings — never
-LLM-derived (SPEC §6).
+LLM-derived (docs/usage.md, "Risk rules & scoring").
 """
 
 from __future__ import annotations

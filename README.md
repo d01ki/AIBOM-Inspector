@@ -44,9 +44,9 @@ HTTP request body   routes/api.py:11
   retrieval) through prompts into a tool bound to an agent, and into what the
   tool does: shell, file writes, network. Each path is labelled
   *proven statically* or *potential*.
-- **Drift between revisions:** new input-to-tool paths, and agent cloud
-  permissions that grow (IAM policy or MCP tool filter) while the component
-  list stays identical.
+- **Security drift analysis:** compares two revisions and reports new
+  input-to-tool paths, and agent cloud permissions that grow (IAM policy or
+  MCP tool filter), even when the component list stays identical.
 - **Known vulnerabilities:** OSV.dev advisories merged across GHSA, PYSEC and
   CVE aliases, with one upgrade per package that clears every advisory with
   a known fixed release.
@@ -80,7 +80,8 @@ Docker: `pip install -e ".[server]"`, then `aibom scan .` or `aibom serve`.
   [Agent privilege drift](docs/agent-privilege-drift.md)
 - [Benchmark](docs/benchmark-methodology.md): 20 pinned public repositories,
   ground truth written before scanning ·
-  [Known limitations](docs/limitations.md)
+  [Known limitations](docs/limitations.md) ·
+  [Writing a detector](docs/contributing-detectors.md)
 
 ## License
 

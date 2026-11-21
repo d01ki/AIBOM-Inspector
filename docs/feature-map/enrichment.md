@@ -56,6 +56,24 @@ pytest output. For a live run, the command, its date, and the enriched fields.
 
 Upstream API shape changes are only caught by the manual live check.
 
+What broke before, and the check that now holds it:
+
+- OSV lookups ran one at a time, so a live scan's time grew with its pinned
+  packages (flask: 80 lookups, 41 of 44 s). Up to 8 run at once; findings and
+  recorded errors stay in package order (`test_lookups_run_concurrently`,
+  `test_findings_and_errors_keep_package_order_whatever_finishes_first`).
+
+- A reply cut off mid-body raised `http.client.IncompleteRead`, which is
+  neither `URLError` nor `OSError`, so it escaped both clients and failed the
+  whole scan (HTTP 500 from the server) instead of leaving the entity
+  unresolved or recording a failed lookup. Both clients catch
+  `http.client.HTTPException`; each has a truncated-reply test.
+- The repo-id pattern used `$`, which also matches before a trailing newline,
+  and accepted `org/..`. A model name comes from scanned code and is placed in
+  a hub URL and a purl. `is_hf_repo_id` (in `models/entities.py`, shared by the
+  resolver and the CycloneDX exporter, which each had their own copy) matches
+  the whole ASCII string; `tests/test_hf_resolver.py` lists what must not pass.
+
 ```json verify
 {
   "id": "enrichment",

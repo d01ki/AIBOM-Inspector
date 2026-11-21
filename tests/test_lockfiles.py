@@ -145,3 +145,23 @@ def test_the_uv_project_itself_is_not_a_dependency(tmp_path: Path) -> None:
     LockfileCollector(tmp_path).collect(inv)
     names = {e.name for e in inv.by_type(EntityType.PACKAGE)}
     assert names == {"httpx"}  # registry packages stay; the project is not one
+
+
+# --- a lockfile the scanner cannot read is still a fact about the repository --
+
+def test_an_unparsed_lockfile_is_recorded_not_ignored(tmp_path: Path) -> None:
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
+    (tmp_path / "bun.lock").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text(
+        '{"lockfileVersion": 3, "packages": {}}\n', encoding="utf-8"
+    )
+    vendored = tmp_path / "node_modules" / "dep"
+    vendored.mkdir(parents=True)
+    (vendored / "yarn.lock").write_text("", encoding="utf-8")
+    inv = Inventory(metadata=ScanMetadata(tool_version="test", target=str(tmp_path)))
+    LockfileCollector(tmp_path).collect(inv)
+    # Parsed formats and vendored copies are not "unparsed".
+    assert inv.stats.lockfiles_unparsed == ["bun.lock", "pnpm-lock.yaml", "web/yarn.lock"]
+    assert "pnpm-lock.yaml" not in inv.stats.manifests_parsed

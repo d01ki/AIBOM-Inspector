@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from aibom.inventory import Inventory
 from aibom.models.evidence import Evidence
 from aibom.models.findings import Finding, RiskCategory, Severity
@@ -166,3 +168,32 @@ def test_html_report_leads_with_the_headline_and_limits() -> None:
     html = render_html(result.inventory, result.findings, result.score)
     assert html.index("Action required") < html.index("hygiene grade")
     assert "Known-vulnerability lookup (OSV) was not run" in html
+
+
+def _unresolved_note(tmp_path: Path) -> str:
+    from aibom.report.html import coverage_notes
+    from aibom.service import run_scan
+
+    notes = coverage_notes(run_scan(tmp_path).inventory)
+    [note] = [n for n in notes if n.startswith("Dependency relations unresolved")]
+    return note
+
+
+def test_limits_name_a_lockfile_that_is_present_but_not_parsed(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    note = _unresolved_note(tmp_path)
+    assert "pnpm-lock.yaml" in note
+    assert "not parsed" in note
+    assert "no lockfile" not in note  # the repository has one; saying otherwise is false
+
+
+def test_limits_say_no_lockfile_only_when_there_is_none(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
+    )
+    note = _unresolved_note(tmp_path)
+    assert "no lockfile that records dependency edges" in note
+    assert "not parsed" not in note

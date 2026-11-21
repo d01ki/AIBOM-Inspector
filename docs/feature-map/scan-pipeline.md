@@ -76,6 +76,25 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
 - Precision regressions show up in `tests/test_precision.py` and
   `tests/test_corpus_regressions.py` before anywhere else.
 - Reachability is bounded. `unknown` does not mean unreachable.
+- Scan time. A repository of generated JSX (gemini-chatbot's 30 KB
+  `icons.tsx`) took 16 s, and doubled per component: every `(` was tried as an
+  arrow parameter list that ran past its `)`. The parser now tries only a `(`
+  whose matching `)` is followed by `=>` or `:`
+  (`test_repeated_jsx_components_parse_in_linear_work`). Python evidence
+  snippets re-split the whole file per call through `ast.get_source_segment`
+  (half of an openai-agents-python scan); `PythonModule` splits once
+  (`test_source_segment_does_not_rescan_the_file_per_call`, and
+  `test_source_segment_matches_the_stdlib_on_every_node` for equal text).
+  Intra-file linking used to rebuild an id map of the whole inventory per file.
+  A performance change must leave the scan output identical: compare a full
+  offline scan of the benchmark checkouts before and after.
+- A package's id ignored its ecosystem although packages dedupe per ecosystem,
+  so `dotenv` on npm and on RubyGems (quickstart-resources) or `openai` on npm
+  and PyPI (openai-cua-sample-app) shared one id: one CycloneDX bom-ref for
+  two components, a schema-invalid `dependsOn`, and edges that could land on
+  the wrong package. `Package.id` hashes the natural key
+  (`test_same_name_in_two_ecosystems_gets_two_ids_and_a_valid_bom`). Every
+  package id changed with it; ids of other components did not.
 
 ```json verify
 {

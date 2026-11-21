@@ -8,7 +8,9 @@ repeated scans and merges are stable and content-addressable.
 from __future__ import annotations
 
 import hashlib
+import re
 from enum import Enum
+from functools import lru_cache
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -20,6 +22,18 @@ from aibom.models.analysis import (
     ValueResolution,
 )
 from aibom.models.evidence import Evidence
+
+_RE_HF_REPO_ID = re.compile(r"[A-Za-z0-9][\w\-.]*/[\w\-.]+", re.ASCII)
+
+
+def is_hf_repo_id(name: str) -> bool:
+    """Whether ``name`` is shaped like a Hugging Face ``org/name`` repo id.
+
+    The name comes from scanned code and ends up in a hub URL and a purl, so
+    the whole string must match (ASCII only, nothing after the name), and a
+    dots-only name such as ``org/..`` is not an id.
+    """
+    return bool(_RE_HF_REPO_ID.fullmatch(name)) and not name.endswith(("/.", "/.."))
 
 
 class EntityType(str, Enum):
@@ -48,8 +62,13 @@ class RelationshipType(str, Enum):
     LICENSED_UNDER = "licensed_under"
 
 
+@lru_cache(maxsize=1 << 16)
 def _slug(*parts: str) -> str:
-    """Build a short, stable identity hash from natural-key parts."""
+    """Build a short, stable identity hash from natural-key parts.
+
+    Memoized: ``Entity.id`` calls it on every access, and a scan reads ids
+    hundreds of thousands of times. The cache is bounded for the server.
+    """
     raw = "\x1f".join(p.strip().lower() for p in parts if p)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
     return digest
@@ -325,6 +344,17 @@ class Package(Entity):
         """Packages dedupe per ecosystem — 'openai' on PyPI and npm are distinct."""
         eco = (self.ecosystem or "").lower()
         return (self.type.value, f"{eco}:{self.name.strip().lower()}")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def id(self) -> str:
+        """Identity per ecosystem, like :meth:`natural_key`.
+
+        The base id hashed the name only, so `dotenv` on npm and on RubyGems
+        shared one id: one CycloneDX bom-ref for two components, and edges that
+        could land on the wrong one.
+        """
+        return f"{self.type.value}:{_slug(*self.natural_key())}"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

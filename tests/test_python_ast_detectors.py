@@ -293,3 +293,46 @@ def test_openai_agents_sdk_model_is_inventoried(tmp_path: Path) -> None:
     (tmp_path / "agents" / "__init__.py").write_text("class Agent: ...\n", encoding="utf-8")
     entities = run_scan(tmp_path).inventory.entities
     assert not [e for e in entities if isinstance(e, Model)]
+
+
+# --- evidence snippets: same text as the stdlib, without re-splitting the file --
+
+_SEGMENT_SOURCES = [
+    "client = OpenAI()\nresp = client.chat.completions.create(\n    model='gpt-4o',\n"
+    "    messages=[{'role': 'user', 'content': 'é ✓'}],\n)\n",
+    "x = 1\r\ny = f(\r\n  a,\r\n  b)\r\nz = 'tail'",  # CRLF, no final newline
+    "a = 1\n\fb = g(\n 2)\rc = h(3)\n",  # form feed is not a line break; lone CR is
+]
+
+
+def test_source_segment_matches_the_stdlib_on_every_node() -> None:
+    import ast
+
+    from aibom.detectors.python.parser import parse_python
+
+    for source in _SEGMENT_SOURCES:
+        module = parse_python(source, "a.py")
+        nodes = [n for n in ast.walk(module.tree) if hasattr(n, "end_col_offset")]
+        assert nodes
+        for node in nodes:
+            expected = ast.get_source_segment(source, node)
+            assert expected is not None
+            assert module.source_segment(node, limit=10_000) == " ".join(
+                expected.strip().split()
+            ), (source, ast.dump(node))
+
+
+def test_source_segment_does_not_rescan_the_file_per_call() -> None:
+    """openai-agents-python spent 184 of 342 s here: 54 ms per call on a 155 KB file."""
+    import ast
+    import time
+
+    from aibom.detectors.python.parser import parse_python
+
+    source = "".join(f"value_{i} = call_{i}(arg, key='{'x' * 40}')\n" for i in range(2500))
+    module = parse_python(source, "big.py")
+    calls = [n for n in ast.walk(module.tree) if isinstance(n, ast.Call)][:2000]
+    started = time.perf_counter()
+    for node in calls:
+        module.source_segment(node)
+    assert time.perf_counter() - started < 5.0

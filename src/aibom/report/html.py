@@ -201,10 +201,17 @@ def coverage_notes(inventory: Inventory) -> list[str]:
     packages = [e for e in inventory.entities if isinstance(e, Package)]
     unresolved = [p for p in packages if not dependencies_resolved(p)]
     if packages and unresolved:
+        unparsed = inventory.stats.lockfiles_unparsed
+        reason = (
+            f"{', '.join(unparsed)} {'is' if len(unparsed) == 1 else 'are'} in the "
+            "repository but not parsed yet (unsupported format)"
+            if unparsed
+            else "no lockfile that records dependency edges covers them"
+        )
         notes.append(
             f"Dependency relations unresolved for {len(unresolved)} of {len(packages)} "
-            "package(s): no lockfile that records dependency edges covers them, so their "
-            "own (transitive) dependencies are unknown, not absent."
+            f"package(s): {reason}, so their own (transitive) dependencies are unknown, "
+            "not absent."
         )
     lookup = inventory.stats.vuln_lookup
     if not lookup.requested:

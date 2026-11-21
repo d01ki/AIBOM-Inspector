@@ -90,8 +90,8 @@ Ask first, every time, even if a similar action was approved earlier:
   and the clone URL allowlist (`src/aibom/server/clone.py`).
 - Anything touching secrets or credentials: never print, log, or commit them.
   `verify.py` redacts its logs, but do not rely on that.
-- Releases, tags, GitHub Pages or render.com deploys, `release.yml` and
-  `pages.yml` dispatches, Docker pushes.
+- Releases, tags, Cloud Run deploys, `release.yml` and
+  `deploy-cloud-run.yml` dispatches, Docker pushes.
 - Network calls that send repository data to third parties (`--resolve`,
   `--vulns`, live clones, benchmark checkouts). These are the map's manual
   items.

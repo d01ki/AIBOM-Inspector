@@ -57,6 +57,11 @@ _LOCKFILE_NAMES = {
     "gemfile.lock",
 }
 
+# Lockfiles we recognise but do not parse (docs/limitations.md). They are
+# recorded, so the coverage notes can say "present but not parsed" instead of
+# the false "no lockfile".
+_UNPARSED_LOCKFILE_NAMES = {"pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"}
+
 # Digest length (hex chars) -> CycloneDX hash algorithm name. Used when a
 # lockfile records a bare digest without naming its algorithm.
 _ALG_BY_LENGTH = {32: "MD5", 40: "SHA-1", 64: "SHA-256", 96: "SHA-384", 128: "SHA-512"}
@@ -104,6 +109,10 @@ class LockfileCollector(Collector):
         for path in self._iter_lockfiles():
             rel = self._rel(path)
             name = path.name.lower()
+            if name in _UNPARSED_LOCKFILE_NAMES:
+                if rel not in inventory.stats.lockfiles_unparsed:
+                    inventory.stats.lockfiles_unparsed.append(rel)
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 self._resolved, self._declared = {}, []
@@ -141,7 +150,11 @@ class LockfileCollector(Collector):
             if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
                 continue
             n = path.name.lower()
-            if n in _LOCKFILE_NAMES or (n.startswith("requirements") and n.endswith(".txt")):
+            if (
+                n in _LOCKFILE_NAMES
+                or n in _UNPARSED_LOCKFILE_NAMES
+                or (n.startswith("requirements") and n.endswith(".txt"))
+            ):
                 out.append(path)
         return sorted(out)
 

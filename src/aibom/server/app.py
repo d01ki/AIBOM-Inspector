@@ -57,8 +57,8 @@ class ScanCancelled(Exception):
 
 
 # The UI and the HTML report run no inline script and load nothing from other
-# origins. ``connect-src`` stays open to https because the page may be pointed
-# at another backend (``?api=``, the Advanced setting).
+# origins. The page only calls its own origin now; ``connect-src`` still lists
+# https and localhost from when it could be pointed at another backend.
 _CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; connect-src 'self' https: http://localhost:* "

@@ -103,20 +103,62 @@ def test_demos_are_labelled_and_never_claim_to_verify_user_code(page: str) -> No
     assert "Compared components identical" in page
 
 
-def test_the_page_can_be_pointed_at_a_backend(page: str) -> None:
-    """Statically hosted, the page has no API of its own and must say so."""
-    assert 'id="apiEndpoint"' in page
-    assert "BackendUnavailable" in page
+def test_the_page_talks_only_to_the_server_that_served_it(page: str) -> None:
+    """The page and the API are one server; there is no backend to choose.
+
+    A "Backend address" field and a ``?api=`` link used to let the page send
+    the repository URL to, and draw results from, any server a link named. It
+    only mattered for a statically hosted copy of the page, which is no longer
+    published.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    for leftover in ("apiEndpoint", "apiOverride", "apiBase", "localStorage", 'get("api")',
+                     "BackendUnavailable"):
+        assert leftover not in page, f"leftover backend-selection code: {leftover}"
+    # One function talks to the network, and it is only ever given a path.
+    assert len(re.findall(r"(?<![A-Za-z.])fetch\(", script)) == 1
+    assert not re.search(r"""["'`]https?://[^"'`]*/api/""", script)
     assert "/api/health" in page
 
 
-def test_findings_lead_and_the_score_is_secondary(page: str) -> None:
-    """The headline comes from the worst finding (API `headline`), not the grade (#36)."""
+def test_the_page_can_be_translated_but_identifiers_stay_verbatim(page: str) -> None:
+    """Browser translation works on the prose and leaves evidence alone.
+
+    The whole page used to opt out (``translate="no"`` on ``<html>`` plus the
+    ``notranslate`` meta), so a reader could not translate it at all. The
+    opt-out now sits on what must read exactly as it does in the repository:
+    package names, file paths, rule ids, versions and the graphs.
+    """
+    markup = (WEB / "index.html").read_text(encoding="utf-8")
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    assert '<html lang="en">' in markup
+    assert "notranslate" not in page
+    # Every <code> and graph is marked as it is rendered, in one place.
+    assert 'const VERBATIM = "code, pre, svg";' in script
+    assert "MutationObserver" in script and 'setAttribute("translate", "no")' in script
+    # Names that are not in <code> carry the attribute themselves.
+    for marked in ('id="resultRepoName" translate="no"', 'class="brand-name" translate="no"',
+                   '<td translate="no">${esc(e.name)}</td>',
+                   '<strong translate="no">${esc(p.name)}</strong>'):
+        assert marked in page, f"identifier left open to translation: {marked}"
+
+
+def test_the_result_opens_on_a_map_and_the_status_still_leads(page: str) -> None:
+    """The result opens on a visualization; the worst finding still heads it (#36).
+
+    The headline above the tabs comes from the API's `headline`, not the
+    grade, so a critical finding reads "Action required" whichever tab is
+    open. Under it the two maps come first, and the result opens on the first
+    one that has something to draw.
+    """
     tabs = re.findall(r'class="result-tab" data-tab="(\w+)"', page)
-    assert tabs[0] == "findings"
-    assert {"deps", "graph", "agent", "inventory", "compliance"} <= set(tabs)
-    assert 'selectTab((d.findings || []).length ? "findings" : "deps")' in page
-    assert "d.headline" in page
+    assert tabs[:3] == ["deps", "graph", "findings"]
+    assert {"agent", "inventory", "compliance"} <= set(tabs)
+    assert "selectTab(firstTab(d));" in page
+    # The status and the way to the finding sit above the tabs.
+    markup = (WEB / "index.html").read_text(encoding="utf-8")
+    assert markup.index('id="securitySummary"') < markup.index('class="tabs"')
+    assert "d.headline" in page and 'data-goto="findings"' in page
     # The hygiene score lives in a collapsed, explicitly secondary disclosure.
     assert '<details class="disclosure score-box" id="overview">' in page
     assert "Supply-chain hygiene score (secondary)" in page
@@ -129,8 +171,6 @@ def test_agent_paths_distinguish_not_detected_from_not_evaluated(page: str) -> N
     # The page renders the analyzer's verdicts and unknowns; it does not compute its own.
     assert "capability_paths" in page and "unknowns" in page
     assert '"/api/agent-drift/demo?scenario="' in page
-    # Browser auto-translation mixed languages into the demo UI.
-    assert '<html lang="en" translate="no">' in page
 
 
 def test_dependencies_tab_renders_the_full_table_and_says_when_relations_are_unknown(
@@ -157,8 +197,9 @@ def test_stream_stages_match_the_backend() -> None:
     assert _stage_ids() == backend
 
 
-
-def test_the_scan_reads_the_stage_stream_with_a_fallback() -> None:
+def test_the_scan_reads_the_stage_stream() -> None:
+    """The page ships with its server, so there is no older API to fall back to."""
     script = (WEB / "app.js").read_text(encoding="utf-8")
-    assert "/api/scan/stream" in script and "NO_STREAM" in script
+    assert '"/api/scan/stream"' in script
+    assert "NO_STREAM" not in script and '"/api/scan"' not in script
     assert 'id="progressSteps"' in (WEB / "index.html").read_text(encoding="utf-8")

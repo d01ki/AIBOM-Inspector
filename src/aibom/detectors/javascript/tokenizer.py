@@ -79,6 +79,13 @@ _PUNCTUATORS = sorted(
     reverse=True,
 )
 
+# The same punctuators grouped by first character, still longest-first, so a
+# symbol is matched against its few candidates instead of all of them.
+_PUNCTUATORS_BY_FIRST: dict[str, tuple[str, ...]] = {
+    first: tuple(p for p in _PUNCTUATORS if p[0] == first)
+    for first in dict.fromkeys(p[0] for p in _PUNCTUATORS)
+}
+
 # After these, a '/' starts a regular expression rather than a division.
 _REGEX_PRECEDING_KEYWORDS = frozenset(
     {
@@ -314,7 +321,7 @@ class _Scanner:
 
     def _read_punctuator(self) -> None:
         line, column = self.line, self._column()
-        for punct in _PUNCTUATORS:
+        for punct in _PUNCTUATORS_BY_FIRST.get(self.src[self.pos], ()):
             if self.src.startswith(punct, self.pos):
                 self.pos += len(punct)
                 self._emit("punct", punct, punct, line, column)
