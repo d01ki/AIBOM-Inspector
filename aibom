@@ -34,8 +34,14 @@ require_docker() {
 
 ensure_image() {
   if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    printf 'Building the %s image (first run only)…\n' "$IMAGE" >&2
+    printf 'Building the %s image (first run takes about a minute)…\n' "$IMAGE" >&2
     docker build -t "$IMAGE" "$HERE" >&2
+  elif [ -z "${AIBOM_IMAGE:-}" ]; then
+    # Rebuild from this checkout every run: unchanged layers come from the
+    # cache, so it takes a second, and a `git pull` never leaves an old image
+    # running. An image named with AIBOM_IMAGE is the caller's; leave it alone.
+    docker build -q -t "$IMAGE" "$HERE" >/dev/null ||
+      die "the image build failed. Run 'docker build -t $IMAGE $HERE' to see why."
   fi
 }
 
@@ -60,6 +66,33 @@ map_arg() {
   esac
 }
 
+# Flags whose value is a file or directory the CLI writes.
+OUTPUT_FLAGS=" -o --output -c --cyclonedx -r --report --sarif --agent-sarif --minimum-elements --output-dir --hf-cache "
+is_output_flag() { case "$OUTPUT_FLAGS" in *" $1 "*) return 0 ;; esac; return 1; }
+
+# /work is mounted read-only, so a path the CLI writes goes to ./aibom-out
+# (mounted at /out): `-c bom.json` becomes ./aibom-out/bom.json.
+map_out() {
+  local arg="${1#./}" rel
+  case "$arg" in
+    /*|[A-Za-z]:[/\\]*)
+      local dir
+      dir="$(cd "$(dirname "$arg")" 2>/dev/null && pwd -P)" ||
+        die "'$1': its directory does not exist."
+      case "$dir" in
+        "$OUT") rel="$(basename "$arg")" ;;
+        "$OUT"/*) rel="${dir#"$OUT"/}/$(basename "$arg")" ;;
+        *) die "'$1' is outside $OUT. Outputs are written there; pass a relative path such as bom.json." ;;
+      esac
+      ;;
+    aibom-out/*) rel="${arg#aibom-out/}" ;;  # already names the output directory
+    *) rel="$arg" ;;
+  esac
+  # The CLI does not create parent directories; make them on the host side.
+  case "$rel" in */*) mkdir -p "$OUT/$(dirname "$rel")" ;; esac
+  printf '/out/%s' "$rel"
+}
+
 # Only ask docker for a TTY when we actually have one, so the launcher works
 # from CI, a pipe, or a background job as well as from a terminal.
 tty_flags() {
@@ -69,8 +102,17 @@ tty_flags() {
 run_cli() {
   mkdir -p "$OUT"
   local mapped=()
-  local arg
-  for arg in "$@"; do mapped+=("$(map_arg "$arg")"); done
+  local arg prev=""
+  for arg in "$@"; do
+    if is_output_flag "$prev"; then
+      mapped+=("$(map_out "$arg")")
+    elif [[ "$arg" == --*=* ]] && is_output_flag "${arg%%=*}"; then
+      mapped+=("${arg%%=*}=$(map_out "${arg#*=}")")
+    else
+      mapped+=("$(map_arg "$arg")")
+    fi
+    prev="$arg"
+  done
   local tty=()
   [ -n "$(tty_flags)" ] && tty=(-it)
   exec env $MSYS_ENV docker run --rm "${tty[@]}" \

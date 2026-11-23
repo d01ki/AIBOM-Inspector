@@ -364,8 +364,10 @@
         <section>
           <h3>Limits and failures</h3>
           <ul>
-            <li>The clone times out after 120 seconds; checkouts over 300 MB or 60,000 files are
-              rejected. Use the CLI on a local checkout for larger repositories.</li>
+            <li>The clone times out after 120 seconds, and a checkout over this server's size or
+              file-count limit is rejected; the error names the limit (300 MB and 60,000 files
+              unless the operator set lower ones). Use the CLI on a local checkout for larger
+              repositories.</li>
             <li>“Cannot reach the analysis server”: the page and the analysis run on the same
               server. Check that it is still running, then reload the page.</li>
             <li>Advisory lookup failures are listed under <em>Analysis limits</em> in the result,

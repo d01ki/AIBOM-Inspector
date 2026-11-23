@@ -50,12 +50,18 @@ gcloud run deploy "$GCP_SERVICE" \
   --max-instances 1 \
   --cpu 1 \
   --memory 1Gi \
-  --concurrency 1 \
+  --concurrency 8 \
   --timeout 300 \
   --port 8080 \
   --execution-environment gen2 \
-  --set-env-vars "^@^AIBOM_CORS_ORIGINS=https://aibom-inspector.com,https://www.aibom-inspector.com@AIBOM_MAX_CLONE_MB=100@AIBOM_MAX_CLONE_FILES=15000"
+  --set-env-vars "^@^AIBOM_CORS_ORIGINS=https://aibom-inspector.com,https://www.aibom-inspector.com@AIBOM_MAX_CLONE_MB=100@AIBOM_MAX_CLONE_FILES=15000@AIBOM_MAX_CONCURRENT_SCANS=1"
 # `^@^` makes `@` the separator (gcloud topic escaping): the CORS value itself
 # contains a comma, which the default separator would split into a bad entry.
+#
+# Concurrency: page loads, health checks and the bundled demos are cheap, so
+# the instance takes 8 requests at once; the expensive part, a clone and scan,
+# is capped at one by AIBOM_MAX_CONCURRENT_SCANS, and a second one is refused
+# at once with 503 + Retry-After. With --concurrency 1, one visitor's scan (up
+# to 300 s) queued every other visitor's page load behind it.
 
 echo "Check the service URL and /api/health endpoint before connecting your domain."

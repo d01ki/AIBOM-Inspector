@@ -58,5 +58,7 @@ jobs:
           url=$(gcloud run services describe "$GCP_SERVICE" --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" --format='value(status.url)')
           curl -fsS --retry 5 --retry-delay 10 --retry-all-errors "$url/api/health"
-          curl -fsS --max-time 120 -X POST "$url/api/demo" -o /dev/null
+          # --data '': Google Frontend answers a bodiless POST (no
+          # Content-Length) with 411, so `-X POST` alone fails every deploy.
+          curl -fsS --max-time 120 --data '' "$url/api/demo" -o /dev/null
           echo "Deployed ${{ github.event.workflow_run.head_sha || github.sha }} to $url"
