@@ -50,17 +50,29 @@ verify = _load_verify()
 FEATURES = verify.load_features()
 
 
-def _tracked() -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-        cwd=ROOT, capture_output=True, text=True, check=False,
-    )
+def _git_files() -> list[str] | None:
+    """Files git knows about, or ``None`` outside a git checkout (an sdist,
+    an exported tree). Skipping at import time instead made pytest error out
+    on the whole collection, including the modules that import this one."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+    except OSError:  # git is not installed
+        return None
     if out.returncode != 0:
-        pytest.skip("not a git checkout")
+        return None
     return [line for line in out.stdout.splitlines() if (ROOT / line).exists()]
 
 
-TRACKED = _tracked()
+GIT_FILES = _git_files()
+
+
+def _tracked() -> list[str]:
+    if GIT_FILES is None:
+        pytest.skip("not a git checkout")
+    return GIT_FILES
 
 
 def test_feature_ids_are_unique() -> None:
@@ -77,7 +89,7 @@ def test_index_lists_every_feature_file() -> None:
 @pytest.mark.parametrize("feature", FEATURES, ids=lambda f: f.id)
 def test_every_glob_matches_a_file(feature: object) -> None:
     for pattern in feature.paths:  # type: ignore[attr-defined]
-        assert any(verify.matches(p, pattern) for p in TRACKED), f"{pattern!r} matches nothing"
+        assert any(verify.matches(p, pattern) for p in _tracked()), f"{pattern!r} matches nothing"
 
 
 @pytest.mark.parametrize("feature", FEATURES, ids=lambda f: f.id)
@@ -108,7 +120,7 @@ def test_smoke_specs_are_well_formed(feature: object) -> None:
 
 
 def test_every_shipped_source_file_is_mapped() -> None:
-    shipped = [p for p in TRACKED if p.startswith(("src/aibom/", "web/")) and
+    shipped = [p for p in _tracked() if p.startswith(("src/aibom/", "web/")) and
                "__pycache__" not in p]
     unmapped = [
         p for p in shipped
