@@ -1,8 +1,7 @@
 <!DOCTYPE html>
-<html lang="en" translate="no">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="google" content="notranslate">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AIBOM Inspector</title>
 <meta name="description" content="See the AI models, SDKs, dependencies and risks in a repository, with every claim traced to a file and line.">
@@ -23,11 +22,11 @@
           <path d="M10 11 16 22 22 11" stroke="#fff" stroke-width="1.8" fill="none"/>
           <path d="M20.5 20.5 25 25" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
         </svg>
-        <span class="brand-name">AIBOM <span>Inspector</span></span>
+        <span class="brand-name" translate="no">AIBOM <span>Inspector</span></span>
       </a>
       <nav class="app-nav" aria-label="Main">
         <a href="#analyze" data-view-link="analyze" aria-current="page">Analyze</a>
-        <a href="#compare" data-view-link="compare">Compare changes</a>
+        <a href="#compare" data-view-link="compare">Security drift</a>
         <a href="#help" data-view-link="analyze">Help</a>
         <a href="https://github.com/d01ki/AIBOM-Inspector#readme"
            target="_blank" rel="noopener noreferrer">Docs ↗</a>
@@ -50,7 +49,7 @@
         <div class="field">
           <label for="repo">Repository URL</label>
           <input type="url" id="repo" placeholder="https://github.com/owner/repository"
-                 autocomplete="off" spellcheck="false" aria-describedby="status">
+                 autocomplete="off" spellcheck="false" translate="no" aria-describedby="status">
         </div>
         <div class="field field-ref">
           <label for="repoRef">Branch, tag or commit <span class="optional">optional</span></label>
@@ -101,21 +100,6 @@
             are never loaded. Findings come from deterministic rules, not from an AI model.</li>
         </ul>
       </details>
-      <details class="disclosure" id="advancedInfo">
-        <summary>Advanced: analysis backend</summary>
-        <p class="api-line"><span id="apiLine"></span></p>
-        <div class="api-endpoint" id="apiEndpointBlock">
-          <label for="apiEndpoint">Backend address</label>
-          <div class="inline-row">
-            <input type="url" id="apiEndpoint" placeholder="https://your-backend.example.com"
-                   autocomplete="off" spellcheck="false" aria-describedby="apiEndpointHelp">
-            <button id="saveApiEndpoint" type="button">Use this backend</button>
-          </div>
-          <p class="help" id="apiEndpointHelp">The repository URL and the analysis results go to
-            this address. Start your own with <code>aibom serve</code> or the Docker image. The
-            address is remembered in this browser only.</p>
-        </div>
-      </details>
 
       <div class="status-block">
         <p id="status" role="status" aria-live="polite"></p>
@@ -134,7 +118,7 @@
       <header class="result-header">
         <div>
           <p class="overline" id="resultOverline">Analysis result</p>
-          <h2 id="results-title"><span id="resultRepoName">Repository</span></h2>
+          <h2 id="results-title"><span id="resultRepoName" translate="no">Repository</span></h2>
           <p class="result-meta" id="resultMeta"></p>
           <p class="result-meta" id="resultProvenance"></p>
         </div>
@@ -155,15 +139,15 @@
       <section class="summary" id="securitySummary" aria-label="Summary"></section>
 
       <nav class="tabs" aria-label="Result sections" role="tablist">
-        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="true">Findings <span class="tab-count" id="tabCountFindings"></span></button>
-        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="false">Dependencies <span class="tab-count" id="tabCountDeps"></span></button>
+        <button type="button" role="tab" class="result-tab" data-tab="deps" aria-selected="true">Dependencies <span class="tab-count" id="tabCountDeps"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="graph" aria-selected="false">AI usage map</button>
+        <button type="button" role="tab" class="result-tab" data-tab="findings" aria-selected="false">Findings <span class="tab-count" id="tabCountFindings"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="agent" aria-selected="false" id="agentTab">Agent paths</button>
         <button type="button" role="tab" class="result-tab" data-tab="inventory" aria-selected="false">Inventory <span class="tab-count" id="tabCountInventory"></span></button>
         <button type="button" role="tab" class="result-tab" data-tab="compliance" aria-selected="false">SBOM fields</button>
       </nav>
 
-      <section class="tab-panel" id="findingsSection" data-panel="findings" aria-labelledby="findings-title">
+      <section class="tab-panel" id="findingsSection" data-panel="findings" aria-labelledby="findings-title" hidden>
         <div class="section-head">
           <div>
             <h2 id="findings-title">Findings <span class="count" id="findingCount"></span></h2>
@@ -209,7 +193,7 @@
         </details>
       </section>
 
-      <section class="tab-panel" id="depsSection" data-panel="deps" aria-labelledby="deps-title" hidden>
+      <section class="tab-panel" id="depsSection" data-panel="deps" aria-labelledby="deps-title">
         <div class="section-head">
           <div>
             <h2 id="deps-title">Dependencies <span class="count" id="depsCount"></span></h2>
@@ -380,10 +364,12 @@
         <section>
           <h3>Limits and failures</h3>
           <ul>
-            <li>The clone times out after 120 seconds; checkouts over 300 MB or 60,000 files are
-              rejected. Use the CLI on a local checkout for larger repositories.</li>
-            <li>“No analysis backend”: this page is only the interface; set a backend under
-              <em>Advanced</em>.</li>
+            <li>The clone times out after 120 seconds, and a checkout over this server's size or
+              file-count limit is rejected; the error names the limit (300 MB and 60,000 files
+              unless the operator set lower ones). Use the CLI on a local checkout for larger
+              repositories.</li>
+            <li>“Cannot reach the analysis server”: the page and the analysis run on the same
+              server. Check that it is still running, then reload the page.</li>
             <li>Advisory lookup failures are listed under <em>Analysis limits</em> in the result,
               never reported as “no vulnerabilities”.</li>
           </ul>
@@ -397,7 +383,7 @@
             <li><strong>Agent and tool paths:</strong>
               <button class="link" type="button" data-example="demo">the bundled sample</button>.</li>
             <li><strong>Changes between revisions:</strong>
-              <a href="#compare">Compare changes</a> (bundled demos or your repository).</li>
+              <a href="#compare">Security drift</a> (bundled demos or your repository).</li>
           </ul>
         </section>
         <section>
@@ -415,11 +401,11 @@
 
   <div class="view" data-view="compare" id="compareView" hidden>
     <section class="intro" aria-labelledby="compare-title">
-      <h1 id="compare-title">Compare changes between two revisions</h1>
-      <p>Two scans of the same repository are compared on separate questions: did the
-        components change, did a new path appear from untrusted input to a tool an agent can
-        call, and did an agent gain cloud permissions. The component list can stay identical
-        while the other two change.</p>
+      <h1 id="compare-title">Security drift analysis</h1>
+      <p>Two revisions of the same repository are scanned and compared on three separate
+        questions. Did the components change? Did a new path appear from untrusted input to a
+        tool an agent can call? Did an agent gain cloud permissions? The component list can
+        stay identical while the other two change.</p>
     </section>
 
     <section class="panel results-area compare-area" id="compareSection" aria-labelledby="compare-form-title">
@@ -428,7 +414,7 @@
         <div class="field compare-url">
           <label for="compareRepo">Repository URL</label>
           <input type="url" id="compareRepo" placeholder="https://github.com/owner/repository"
-                 autocomplete="off" spellcheck="false">
+                 autocomplete="off" spellcheck="false" translate="no">
         </div>
         <div class="field">
           <label for="compareBase">Baseline</label>

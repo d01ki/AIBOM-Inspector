@@ -18,7 +18,7 @@ export GCP_PROJECT_ID="YOUR_PROJECT_ID"
 bash scripts/deploy-cloud-run.sh
 ```
 
-The script prompts before creating resources. It uses Tokyo (`asia-northeast1`), zero minimum instances, one maximum instance, 1 vCPU, 1 GiB memory, concurrency 1, and a 300-second request timeout. Source deployments may create an Artifact Registry repository and incur build and storage charges. Verify available quota and CPU allocation/billing configuration in the Google Cloud console. Do not assume this setup is free.
+The script prompts before creating resources. It uses Tokyo (`asia-northeast1`), zero minimum instances, one maximum instance, 1 vCPU, 1 GiB memory, concurrency 8 with at most one clone-and-scan at a time (`AIBOM_MAX_CONCURRENT_SCANS=1`; a second scan gets 503 + `Retry-After`), and a 300-second request timeout. Source deployments may create an Artifact Registry repository and incur build and storage charges. Verify available quota and CPU allocation/billing configuration in the Google Cloud console. Do not assume this setup is free.
 
 After deployment, open the generated `https://...run.app` URL and verify:
 
@@ -99,7 +99,7 @@ If domain mapping is unavailable or unsuitable, evaluate **Firebase Hosting in f
 - Public access means anyone can trigger analysis. Cloud Run's maximum instance count is **not** a hard spending cap. Set a Google Cloud budget and alerts; alerts do not automatically stop billing.
 - The current scanner already restricts repository URLs to selected public forges, uses shallow clones and timeouts, and deletes temporary checkout directories. Review DNS redirect behavior and upstream enrichment requests before treating it as hardened against all SSRF/resource exhaustion.
 - `AIBOM_MAX_CLONE_MB=100` and `AIBOM_MAX_CLONE_FILES=15000` reduce checkout size. They are not network transfer caps.
-- `--concurrency 1` limits simultaneous requests **per instance**, not the number of total requests. A public endpoint can still be abused; consider rate limiting or authenticated access before a high-profile event.
+- `--concurrency 8` lets page loads and demos proceed while a scan runs; `AIBOM_MAX_CONCURRENT_SCANS=1` keeps only one clone and scan in memory at a time. Both are **per instance**, not limits on total requests. A public endpoint can still be abused; consider rate limiting or authenticated access before a high-profile event.
 - Source scanning and enrichment can take longer than a browser or upstream proxy timeout. Test with realistic repositories.
 - Do not store secrets in repository files or CLI arguments. Use Secret Manager and a least-privilege service account for any future credentials.
 - To roll back, use Cloud Run **Revisions** to shift traffic to a previously verified revision.

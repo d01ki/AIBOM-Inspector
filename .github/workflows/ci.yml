@@ -34,6 +34,26 @@ jobs:
       - name: Test (pytest)
         run: uv run pytest --cov=aibom --cov-report=term-missing
 
+  # The image people run locally (./aibom, Compose) and Cloud Run deploys:
+  # build it, then run it both ways (local, and Cloud Run-shaped: $PORT=8080,
+  # read-only root filesystem, 1 vCPU, 1 GiB, the deploy script's env) and
+  # exercise the API, the CLI and a SIGTERM stop. Offline demos only.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and verify the image
+        run: python3 scripts/verify_docker.py verify-out/docker --no-browser
+
+      - name: Upload Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-evidence
+          path: verify-out/docker/
+          retention-days: 14
+
   # Real-browser evidence for the features a reviewer can only judge by
   # looking: the dependency map and the web UI. Runs the same harness an agent
   # runs locally (scripts/verify.py); Playwright is installed here only, it is

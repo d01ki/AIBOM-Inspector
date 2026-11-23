@@ -16,18 +16,7 @@ services:
       # Host-side port, so the startup banner prints a URL that works.
       AIBOM_PORT: "${AIBOM_PORT:-8000}"
     restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
-        ]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
+    # Health: the image's HEALTHCHECK (GET /api/health) applies as is.
 
   # One short command for the talk/demo: docker compose run --rm demo
   demo:
@@ -36,13 +25,18 @@ services:
     image: aibom-inspector
     command: ["aibom", "demo"]
 
-  # Scan the current directory: docker compose run --rm cli scan /work
+  # Scan the current directory: docker compose run --rm cli scan /work -c /out/bom.json
   # The tree is mounted read-only; artifacts are written to ./aibom-out.
+  # On Linux/macOS run it as yourself so the container can write ./aibom-out:
+  #   AIBOM_UID=$(id -u) AIBOM_GID=$(id -g) docker compose run --rm cli scan /work
   cli:
     profiles: ["cli"]
     build: .
     image: aibom-inspector
     entrypoint: ["aibom"]
+    user: "${AIBOM_UID:-10001}:${AIBOM_GID:-10001}"
+    environment:
+      HOME: /tmp
     working_dir: /work
     volumes:
       - "${AIBOM_TARGET:-.}:/work:ro"

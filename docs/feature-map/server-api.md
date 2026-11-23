@@ -2,7 +2,7 @@
 
 ## Overview
 
-A FastAPI app (`aibom serve`, the Docker image, render.com) that shallow-clones
+A FastAPI app (`aibom serve`, the Docker image, Cloud Run) that shallow-clones
 a public repository URL into a temporary directory, runs the same pipeline as
 the CLI, and returns JSON or HTML. It also serves the web UI from `/`.
 
@@ -39,7 +39,8 @@ a clone failure after streaming started is an `{"error", "status"}` line.
 ## Boundaries
 
 `min_confidence` is limited to 0–1. CORS origins come from
-`AIBOM_CORS_ORIGINS` (default `*`).
+`AIBOM_CORS_ORIGINS` (default: none, so cross-origin requests get no
+CORS headers; the bundled UI is same-origin and needs none).
 
 At most `AIBOM_MAX_CONCURRENT_SCANS` (default 4) clone-and-scan requests run
 at once, shared by `/api/scan`, `/api/scan/stream`, `/api/report`,
@@ -77,7 +78,15 @@ compares the two lists.
 The browser check intercepts both `/api/scan` and `/api/scan/stream` to keep
 the run offline: a new scan route needs the same interception. A new endpoint
 that clones must take a scan slot (`slots.held()`); the cap test in
-`tests/test_server.py` lists the routes it expects to be capped.
+`tests/test_server.py` lists the routes it expects to be capped. An endpoint
+that clones twice (`/api/diff`) takes one slot for both clones: it used to
+release the slot in between, so under the production cap of 1 another request
+could take it and fail the diff after its baseline scan
+(`test_a_diff_keeps_one_slot_for_both_revisions`).
+CORS defaulted to `*`, so any page a visitor opened could drive the
+clone-and-scan endpoints from their browser; the UI never needed it (same
+origin). The default is now no CORS (`test_cross_origin_requests_are_refused_by_default`),
+and `AIBOM_CORS_ORIGINS` opts in.
 
 ```json verify
 {

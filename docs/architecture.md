@@ -59,7 +59,7 @@ only draws an edge that a scanned line proves:
 
 Plain (non-AI) packages are drawn only when flagged or directly depended on by
 an AI package, so a large lockfile does not flood the map; edges are drawn only
-between drawn nodes. Not linked yet: `pnpm-lock.yaml` / `yarn.lock`,
+between drawn nodes. Not linked yet: `bun.lock` / `bun.lockb`,
 PHP/Ruby imports, and models whose ID is chosen at run time.
 
 ## Detector boundary

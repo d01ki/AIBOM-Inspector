@@ -508,6 +508,75 @@ def test_concurrent_clones_are_capped_and_the_overflow_is_refused(
     assert client.post("/api/scan", json=body).status_code == 200
 
 
+def test_a_diff_keeps_one_slot_for_both_revisions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A diff is one analysis. It used to release its slot between the two
+    clones, so with a cap of 1 another request could take the slot and the
+    diff failed with 503 after its baseline scan had already run.
+    """
+    from aibom.server.app import ScanSlots
+
+    monkeypatch.setenv("AIBOM_MAX_CONCURRENT_SCANS", "1")
+    acquired: list[int] = []
+    original = ScanSlots.acquire
+
+    def counting_acquire(self: ScanSlots) -> None:
+        acquired.append(1)
+        original(self)
+
+    monkeypatch.setattr(ScanSlots, "acquire", counting_acquire)
+
+    @contextmanager
+    def two_revisions(_url: str, *, ref: str | None = None) -> Iterator[Path]:
+        yield TS_BASELINE if ref == "a" else TS_CANDIDATE
+
+    app = create_app()
+    app.dependency_overrides[get_cloner] = lambda: two_revisions
+    resp = TestClient(app).post(
+        "/api/diff",
+        json={"repo_url": "https://github.com/a/b", "base_ref": "a", "head_ref": "b"},
+    )
+    assert resp.status_code == 200
+    # One acquisition for the whole diff: no gap between the revisions in
+    # which another request can take the only slot.
+    assert len(acquired) == 1
+
+
+def test_cross_origin_requests_are_refused_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The page calls only its own origin, so no other origin needs access.
+
+    The default used to be ``*``: any website a visitor opened could drive this
+    server's clone-and-scan endpoints from their browser.
+    """
+    monkeypatch.delenv("AIBOM_CORS_ORIGINS", raising=False)
+    client = TestClient(create_app())
+    resp = client.get("/api/health", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in resp.headers
+    preflight = client.options(
+        "/api/scan",
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-origin" not in preflight.headers
+    # Same-origin use (the bundled UI) is unaffected: no Origin check applies.
+    assert client.post("/api/demo").status_code == 200
+
+
+def test_cors_origins_are_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIBOM_CORS_ORIGINS", "https://app.example, https://b.example")
+    client = TestClient(create_app())
+    allowed = client.get("/api/health", headers={"Origin": "https://app.example"})
+    assert allowed.headers["access-control-allow-origin"] == "https://app.example"
+    other = client.get("/api/health", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in other.headers
+    # An explicit "*" is still possible for someone who wants it.
+    monkeypatch.setenv("AIBOM_CORS_ORIGINS", "*")
+    anyone = TestClient(create_app()).get(
+        "/api/health", headers={"Origin": "https://evil.example"}
+    )
+    assert anyone.headers["access-control-allow-origin"] == "*"
+
+
 def test_responses_carry_security_headers(client: TestClient) -> None:
     api = client.get("/api/health")
     assert api.headers["x-content-type-options"] == "nosniff"

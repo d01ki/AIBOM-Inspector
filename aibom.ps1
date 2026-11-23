@@ -53,9 +53,16 @@ function Assert-Docker {
 
 function Confirm-Image {
     if ((Test-DockerCommand @('image', 'inspect', $image)) -ne 0) {
-        Write-Host "Building the $image image (first run only)..."
+        Write-Host "Building the $image image (first run takes about a minute)..."
         docker build -t $image $here
         if ($LASTEXITCODE -ne 0) { Stop-WithError 'the image build failed.' }
+    } elseif (-not $env:AIBOM_IMAGE) {
+        # Rebuild from this checkout every run: unchanged layers come from the
+        # cache, so it takes a second, and a `git pull` never leaves an old image
+        # running. An image named with AIBOM_IMAGE is the caller's; leave it alone.
+        if ((Test-DockerCommand @('build', '-q', '-t', $image, $here)) -ne 0) {
+            Stop-WithError "the image build failed. Run 'docker build -t $image $here' to see why."
+        }
     }
 }
 
@@ -73,6 +80,31 @@ function Convert-Arg($value) {
     Stop-WithError "'$value' is outside $work. cd to a directory that contains it, then rerun."
 }
 
+# Flags whose value is a file or directory the CLI writes.
+$outputFlags = @('-o', '--output', '-c', '--cyclonedx', '-r', '--report', '--sarif',
+    '--agent-sarif', '--minimum-elements', '--output-dir', '--hf-cache')
+
+# /work is mounted read-only, so a path the CLI writes goes to .\aibom-out
+# (mounted at /out): `-c bom.json` becomes .\aibom-out\bom.json.
+function Convert-OutputArg($value) {
+    $root = $out.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ([System.IO.Path]::IsPathRooted($value)) {
+        $full = [System.IO.Path]::GetFullPath($value)
+        if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Stop-WithError "'$value' is outside $out. Outputs are written there; pass a relative path such as bom.json."
+        }
+        $relative = $full.Substring($root.Length)
+    } else {
+        # 'aibom-out\x' already names the output directory.
+        $relative = $value -replace '^\.[\\/]', '' -replace '^aibom-out[\\/]', ''
+    }
+    $relative = $relative.Replace('\', '/')
+    # The CLI does not create parent directories; make them on the host side.
+    $parent = Split-Path -Parent (Join-Path $out $relative)
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    return "/out/$relative"
+}
+
 # Only ask docker for a TTY when we actually have one, so the launcher works
 # from CI, a pipe, or a background job as well as from a console.
 function Get-TtyFlags([string]$flags) {
@@ -83,7 +115,18 @@ function Get-TtyFlags([string]$flags) {
 function Invoke-Cli([string[]]$commandArgs) {
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     $mapped = @()
-    foreach ($item in $commandArgs) { $mapped += (Convert-Arg $item) }
+    $previous = ''
+    foreach ($item in $commandArgs) {
+        if ($outputFlags -contains $previous) {
+            $mapped += (Convert-OutputArg $item)
+        } elseif ($item -match '^(--[a-z-]+)=(.*)$' -and $outputFlags -contains $Matches[1]) {
+            $flag = $Matches[1]
+            $mapped += ($flag + '=' + (Convert-OutputArg $Matches[2]))
+        } else {
+            $mapped += (Convert-Arg $item)
+        }
+        $previous = $item
+    }
     $tty = @(Get-TtyFlags '-it')  # @() keeps a 1-item array; splatting a bare string splits it into characters
     docker run --rm @tty -v "${work}:/work:ro" -v "${out}:/out" -w /work $image aibom @mapped
     exit $LASTEXITCODE

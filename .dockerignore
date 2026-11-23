@@ -1,0 +1,29 @@
+# The Dockerfile COPYs only what the image needs; this keeps the build context
+# (what `docker build` uploads to the daemon) to roughly those files, instead of
+# the virtualenv, benchmark checkouts and verification evidence (~1 GB).
+.git
+.github
+.claude
+.venv
+venv
+env
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+build
+dist
+benchmark
+verify-out
+aibom-out
+docs
+scripts
+uv.lock
+*.aibom.json
+inventory.json
+AIBOM_Inspector_*.md
+SPEC.md

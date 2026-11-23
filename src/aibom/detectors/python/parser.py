@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import ast
 import io
+import re
 import tokenize
 from collections import deque
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import PurePosixPath
 
 from aibom.models.analysis import Reachability, SourceContext
+
+# One source line as the Python parser counts lines: it ends at CR LF, CR or LF
+# (never at a form feed) and keeps its line end; a final unterminated line follows.
+_PARSER_LINE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+\Z")
 
 _ROUTE_DECORATORS = {"get", "post", "put", "patch", "delete", "options", "route"}
 _ENTRYPOINT_DECORATORS = _ROUTE_DECORATORS | {"command", "task", "tool"}
@@ -199,8 +205,36 @@ class PythonModule:
             return f"{parent}.{node.attr}" if parent else node.attr
         return None
 
+    @cached_property
+    def _parser_lines(self) -> list[str]:
+        """``source`` split as the Python parser splits it, line ends kept.
+
+        ``ast.get_source_segment`` re-splits the whole file, a character at a
+        time, on every call: 54 ms per evidence snippet on a 155 KB file, which
+        was half of a scan of openai-agents-python.
+        """
+        return _PARSER_LINE.findall(self.source)
+
+    def _segment(self, node: ast.AST) -> str | None:
+        """``ast.get_source_segment(self.source, node)``, on the cached lines."""
+        lineno: int | None = getattr(node, "lineno", None)
+        end_lineno: int | None = getattr(node, "end_lineno", None)
+        start: int | None = getattr(node, "col_offset", None)
+        end: int | None = getattr(node, "end_col_offset", None)
+        if lineno is None or end_lineno is None or start is None or end is None:
+            return None
+        first, last = lineno - 1, end_lineno - 1
+        lines = self._parser_lines
+        if first == last:
+            return lines[first].encode()[start:end].decode()
+        return "".join([
+            lines[first].encode()[start:].decode(),
+            *lines[first + 1:last],
+            lines[last].encode()[:end].decode(),
+        ])
+
     def source_segment(self, node: ast.AST, *, limit: int = 240) -> str:
-        segment = ast.get_source_segment(self.source, node)
+        segment = self._segment(node)
         if segment is None:
             lines = self.source.splitlines()
             line = getattr(node, "lineno", 1)
@@ -223,9 +257,13 @@ class PythonModule:
                 return max(candidates, key=lambda a: a.line)
         return None
 
+    @cached_property
+    def import_roots(self) -> frozenset[str]:
+        """Top-level packages this module imports (``aliases`` is final once parsed)."""
+        return frozenset(value.split(".", 1)[0] for value in self.aliases.values())
+
     def has_import(self, *roots: str) -> bool:
-        expected = set(roots)
-        return any(value.split(".", 1)[0] in expected for value in self.aliases.values())
+        return not self.import_roots.isdisjoint(roots)
 
     def reachability(self, node: ast.AST) -> tuple[Reachability, list[str]]:
         """Conservatively classify same-file reachability for ``node``."""

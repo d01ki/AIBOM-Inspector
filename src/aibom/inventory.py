@@ -90,6 +90,13 @@ class ScanStats(BaseModel):
         description="Files that required a legacy fallback because structured parsing failed.",
     )
     vuln_lookup: VulnLookup = Field(default_factory=VulnLookup)
+    lockfiles_unparsed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Lockfiles present in the repository in a format the scanner does not parse "
+            "(repo-relative), e.g. pnpm-lock.yaml. Their packages are not inventoried."
+        ),
+    )
 
 
 class Inventory(BaseModel):

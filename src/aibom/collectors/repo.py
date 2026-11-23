@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from aibom.collectors.base import Collector
+from aibom.collectors.walk import repo_files
 from aibom.detectors.base import ScanContext
 from aibom.detectors.javascript.parser import JsModule, parse_javascript
 from aibom.detectors.project import ProjectIndex
@@ -40,29 +41,6 @@ from aibom.models.entities import (
 from aibom.models.evidence import Evidence
 from aibom.models.signals import RiskSignal
 from aibom.tools import link_tools
-
-# Directories that never contain first-party AI supply-chain signal worth scanning.
-_IGNORE_DIRS = {
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    ".venv",
-    "venv",
-    "env",
-    "__pycache__",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    "dist",
-    "build",
-    "site-packages",
-    ".idea",
-    ".vscode",
-    ".next",
-    ".cache",
-}
 
 # Text files worth reading line-by-line.
 _TEXT_SUFFIXES = {
@@ -432,25 +410,8 @@ class RepoCollector(Collector):
     # -- file iteration --------------------------------------------------------
 
     def _iter_files(self) -> list[Path]:
-        if self.root.is_file():
-            return [self.root]
-        files: list[Path] = []
-        for path in self.root.rglob("*"):
-            if path.is_dir():
-                continue
-            # Ignore-dirs apply to the path *inside* the scan root only. The
-            # root's own ancestors must not count, or a target that happens to
-            # live under e.g. .../venv/... or site-packages (the bundled demo
-            # app does) silently scans as empty.
-            rel_parts = path.relative_to(self.root).parts
-            if any(part in _IGNORE_DIRS for part in rel_parts):
-                continue
-            if path.is_symlink() and not _inside(path, self.root):
-                # A link out of the scan root is not part of the repository,
-                # and following it would read arbitrary host files.
-                continue
-            files.append(path)
-        return sorted(files)
+        # Ignored directories and links out of the root: see collectors.walk.
+        return repo_files(self.root)
 
     def _rel(self, path: Path) -> str:
         try:
@@ -520,7 +481,7 @@ class RepoCollector(Collector):
         is_prompt_template = self._is_prompt_template(path)
         documentation_only = path.suffix.lower() in {".md", ".rst"} and not is_prompt_template
         # per-file buckets used to draw intra-file relationship edges
-        buckets: dict[type[Entity], list[str]] = defaultdict(list)
+        buckets: dict[type[Entity], list[Entity]] = defaultdict(list)
 
         project = self.project
         if path.suffix.lower() == ".py":
@@ -542,7 +503,7 @@ class RepoCollector(Collector):
                 )
                 for detection in self.detectors.detect(context):
                     canonical = inventory.add_entity(detection.entity)
-                    buckets[type(canonical)].append(canonical.id)
+                    buckets[type(canonical)].append(canonical)
                 if "python.security-signals.ast" not in self.disabled_detectors:
                     self._scan_python_signals(inventory, python, rel)
                 legacy_text = python.sanitized_source()
@@ -565,7 +526,7 @@ class RepoCollector(Collector):
                 )
                 for detection in self.detectors.detect(context):
                     canonical = inventory.add_entity(detection.entity)
-                    buckets[type(canonical)].append(canonical.id)
+                    buckets[type(canonical)].append(canonical)
 
         lines = legacy_text.splitlines()
 
@@ -573,7 +534,7 @@ class RepoCollector(Collector):
         if is_prompt_template and "legacy.regex" not in self.disabled_detectors:
             ent = self._make_template_prompt(text, rel)
             self._annotate_legacy(ent, rel)
-            buckets[Prompt].append(inventory.add_entity(ent).id)
+            buckets[Prompt].append(inventory.add_entity(ent))
 
         if "legacy.regex" not in self.disabled_detectors and not documentation_only:
             # Structured Python detectors own model calls when parsing succeeds.
@@ -582,7 +543,7 @@ class RepoCollector(Collector):
                 for entity in self._scan_calls(legacy_text, lines, rel):
                     self._annotate_legacy(entity, rel)
                     canonical = inventory.add_entity(entity)
-                    buckets[type(canonical)].append(canonical.id)
+                    buckets[type(canonical)].append(canonical)
 
             for lineno, line in enumerate(lines, start=1):
                 for entity in self._scan_line(
@@ -594,7 +555,7 @@ class RepoCollector(Collector):
                 ):
                     self._annotate_legacy(entity, rel)
                     canonical = inventory.add_entity(entity)
-                    buckets[type(canonical)].append(canonical.id)
+                    buckets[type(canonical)].append(canonical)
                 if not structured_python:
                     self._scan_signals(inventory, line, lineno, rel)
 
@@ -1017,16 +978,18 @@ class RepoCollector(Collector):
 
     @staticmethod
     def _link_intra_file(
-        inventory: Inventory, buckets: dict[type[Entity], list[str]], rel: str
+        inventory: Inventory, buckets: dict[type[Entity], list[Entity]], rel: str
     ) -> None:
-        """Link co-located entities using detector metadata and file scope."""
-        entities = {entity.id: entity for entity in inventory.entities}
-        for prompt_id in dict.fromkeys(buckets.get(Prompt, [])):
-            prompt = entities.get(prompt_id)
+        """Link co-located entities using detector metadata and file scope.
+
+        ``buckets`` holds the canonical entities this file contributed, so no
+        lookup over the whole inventory is needed (it used to be rebuilt for
+        every file: quadratic in a large repository).
+        """
+        for prompt in _unique(buckets.get(Prompt, [])):
             if not isinstance(prompt, Prompt) or not prompt.model_refs:
                 continue
-            for model_id in dict.fromkeys(buckets.get(Model, [])):
-                model = entities.get(model_id)
+            for model in _unique(buckets.get(Model, [])):
                 if not isinstance(model, Model) or model.name not in prompt.model_refs:
                     continue
                 inventory.add_relationship(
@@ -1061,22 +1024,21 @@ class RepoCollector(Collector):
             (Prompt, RelationshipType.USES_PROMPT),
             (Service, RelationshipType.INVOKES),
         )
-        for agent_id in agents:
-            agent = entities.get(agent_id)
+        for agent in agents:
             # The edge cites the agent's construction in this file: co-location
             # is a weak (0.5) claim, but it is still pinned to a real line.
             anchor = next(
-                (ev for ev in (agent.source_evidence if agent else []) if ev.file == rel),
+                (ev for ev in agent.source_evidence if ev.file == rel),
                 None,
             )
             if anchor is None:
                 continue
             for entity_cls, rel_type in edges:
-                for target_id in buckets.get(entity_cls, []):
+                for target in buckets.get(entity_cls, []):
                     inventory.add_relationship(
                         Relationship(
-                            source_id=agent_id,
-                            target_id=target_id,
+                            source_id=agent.id,
+                            target_id=target.id,
                             relationship=rel_type,
                             source_evidence=[
                                 Evidence(
@@ -1092,12 +1054,9 @@ class RepoCollector(Collector):
                     )
 
 
-def _inside(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root)
-    except (OSError, ValueError):
-        return False
-    return True
+def _unique(entities: list[Entity]) -> list[Entity]:
+    """``entities`` without repeats, first occurrence first."""
+    return list({entity.id: entity for entity in entities}.values())
 
 
 def _sha(text: str) -> str:

@@ -10,10 +10,12 @@ for and what a manifest cannot supply:
   package manager verified on install;
 * **Component Producer** — the registry that supplied the artifact.
 
-Supported lockfiles: ``package-lock.json`` (npm), ``Pipfile.lock``,
-``poetry.lock``, ``uv.lock``, hash-pinned ``requirements*.txt`` (PyPI),
+Supported lockfiles: ``package-lock.json``, ``pnpm-lock.yaml`` (v5, v6, v9)
+and ``yarn.lock`` (classic and berry) for npm; ``Pipfile.lock``,
+``poetry.lock``, ``uv.lock`` and hash-pinned ``requirements*.txt`` (PyPI);
 ``Cargo.lock`` (crates.io), ``composer.lock`` (Packagist) and ``Gemfile.lock``
-(RubyGems). Everything is parsed as text — nothing is installed or executed.
+(RubyGems). Everything is parsed as text — nothing is installed or executed;
+the YAML ones go through :mod:`aibom.collectors.blockyaml`.
 
 Each lockfile that records the resolved graph (all but ``Pipfile.lock`` and
 hash-pinned requirements) also yields ``depends_on`` edges between the packages
@@ -34,11 +36,14 @@ import base64
 import binascii
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from aibom.collectors import blockyaml
 from aibom.collectors.base import Collector
-from aibom.collectors.dependencies import _IGNORE_DIRS, _is_ai_package, _load_toml
+from aibom.collectors.dependencies import _is_ai_package, _load_toml
+from aibom.collectors.walk import repo_files
 from aibom.detectors.python.parser import classify_source_context
 from aibom.inventory import Inventory
 from aibom.models.analysis import ConfidenceFactors, UsageState
@@ -47,15 +52,15 @@ from aibom.models.evidence import Evidence
 
 DETECTOR_ID = "lockfile.dependencies"
 
-_LOCKFILE_NAMES = {
-    "package-lock.json",
-    "pipfile.lock",
-    "poetry.lock",
-    "uv.lock",
-    "cargo.lock",
-    "composer.lock",
-    "gemfile.lock",
-}
+# Lockfiles we recognise but do not parse (docs/limitations.md). They are
+# recorded, so the coverage notes can say "present but not parsed" instead of
+# the false "no lockfile".
+_UNPARSED_LOCKFILE_NAMES = {"bun.lock", "bun.lockb"}
+
+# Dependency groups a pnpm importer or package entry lists. peerDependencies
+# are ranges, not resolutions; a resolved peer appears in these groups.
+_PNPM_DEP_GROUPS = ("dependencies", "devDependencies", "optionalDependencies")
+_YARN_DEP_GROUPS = ("dependencies", "optionalDependencies")
 
 # Digest length (hex chars) -> CycloneDX hash algorithm name. Used when a
 # lockfile records a bare digest without naming its algorithm.
@@ -104,27 +109,17 @@ class LockfileCollector(Collector):
         for path in self._iter_lockfiles():
             rel = self._rel(path)
             name = path.name.lower()
+            if name in _UNPARSED_LOCKFILE_NAMES:
+                if rel not in inventory.stats.lockfiles_unparsed:
+                    inventory.stats.lockfiles_unparsed.append(rel)
+                continue
+            parse = _parser_for(name)
+            if parse is None:
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 self._resolved, self._declared = {}, []
-                if name == "package-lock.json":
-                    self._parse_package_lock(inventory, text, rel)
-                elif name == "pipfile.lock":
-                    self._parse_pipfile_lock(inventory, text, rel)
-                elif name == "poetry.lock":
-                    self._parse_poetry_lock(inventory, text, rel)
-                elif name == "uv.lock":
-                    self._parse_uv_lock(inventory, text, rel)
-                elif name == "cargo.lock":
-                    self._parse_cargo_lock(inventory, text, rel)
-                elif name == "composer.lock":
-                    self._parse_composer_lock(inventory, text, rel)
-                elif name == "gemfile.lock":
-                    self._parse_gemfile_lock(inventory, text, rel)
-                elif name.startswith("requirements") and name.endswith(".txt"):
-                    self._parse_hashed_requirements(inventory, text, rel)
-                else:
-                    continue
+                parse(self, inventory, text, rel)
             except (OSError, ValueError):
                 continue
             self._link(inventory, rel, text.splitlines())
@@ -136,14 +131,12 @@ class LockfileCollector(Collector):
     def _iter_lockfiles(self) -> list[Path]:
         if self.root.is_file():
             return [self.root]
-        out: list[Path] = []
-        for path in self.root.rglob("*"):
-            if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
-                continue
-            n = path.name.lower()
-            if n in _LOCKFILE_NAMES or (n.startswith("requirements") and n.endswith(".txt")):
-                out.append(path)
-        return sorted(out)
+        return [
+            path
+            for path in repo_files(self.root)
+            if path.name.lower() in _UNPARSED_LOCKFILE_NAMES
+            or _parser_for(path.name.lower()) is not None
+        ]
 
     def _rel(self, path: Path) -> str:
         base = self.root if self.root.is_dir() else self.root.parent
@@ -349,6 +342,149 @@ class LockfileCollector(Collector):
             nested = entry.get("dependencies")
             if isinstance(nested, dict):
                 self._npm_v1(inventory, nested, lines, rel, direct=False)
+
+    # -- pnpm ------------------------------------------------------------------
+
+    def _parse_pnpm_lock(self, inventory: Inventory, text: str, rel: str) -> None:
+        """pnpm-lock.yaml v5 (``/name/1.0.0``), v6 (``/name@1.0.0``), v9.
+
+        v9 splits each package into ``packages:`` (resolution) and
+        ``snapshots:`` (the dependencies it resolved, per peer set); v5 and v6
+        keep both in ``packages:``. Direct dependencies are what any importer
+        (the root or a workspace package) lists, minus ``link:`` workspaces.
+        """
+        doc = blockyaml.parse(text)
+        major = _pnpm_major(doc.scalar("lockfileVersion"))
+        lines = text.splitlines()
+        importers = doc.get("importers")
+        projects = list(importers.children.values()) if importers else [doc]
+        direct: set[str] = set()
+        for project in projects:
+            for group in _PNPM_DEP_GROUPS:
+                deps = project.get(group)
+                for dep_name, dep in deps.children.items() if deps else ():
+                    resolved = dep.scalar("version") if dep.children else dep.value
+                    if resolved and not resolved.startswith("link:"):
+                        direct.add(dep_name)
+        packages = doc.get("packages")
+        if packages is None:
+            return
+        names: dict[str, str] = {}
+        for key, entry in packages.children.items():
+            name, version = _pnpm_key(key, major)
+            name = entry.scalar("name") or name
+            version = entry.scalar("version") or version
+            if not name:
+                continue
+            names[_pnpm_base(key)] = name
+            resolution = entry.get("resolution")
+            integrity = resolution.scalar("integrity") if resolution else None
+            tarball = resolution.scalar("tarball") if resolution else None
+            self._emit(
+                inventory,
+                rel,
+                entry.line,
+                _line_at(lines, entry.line, key),
+                name=name,
+                ecosystem="npm",
+                version=version,
+                scope=DependencyScope.DIRECT if name in direct else DependencyScope.TRANSITIVE,
+                digest=_npm_integrity(integrity),
+                producer=_registry_of(tarball),
+                producer_url=tarball if tarball and "://" in tarball else None,
+            )
+            self._declare_children("npm", name, entry, _YARN_DEP_GROUPS)
+        snapshots = doc.get("snapshots")
+        for key, entry in snapshots.children.items() if snapshots else ():
+            parent = names.get(_pnpm_base(key)) or _pnpm_key(key, major)[0]
+            if parent:
+                self._declare_children("npm", parent, entry, _YARN_DEP_GROUPS)
+
+    # -- yarn ------------------------------------------------------------------
+
+    def _parse_yarn_lock(self, inventory: Inventory, text: str, rel: str) -> None:
+        """yarn berry (v2+) writes YAML with ``__metadata``; classic does not."""
+        if re.search(r"^__metadata:", text, re.MULTILINE):
+            self._parse_yarn_berry(inventory, text, rel)
+        else:
+            self._parse_yarn_classic(inventory, text, rel)
+
+    def _parse_yarn_berry(self, inventory: Inventory, text: str, rel: str) -> None:
+        """Entries keyed by descriptors, each with a ``resolution``.
+
+        The ``checksum`` is a digest of yarn's own cache zip, not of the
+        registry tarball, so it is not reported as the artifact hash. The
+        ``@workspace:`` entries are the scanned project and its workspaces:
+        not dependencies, but what they list is the direct set.
+        """
+        doc = blockyaml.parse(text)
+        lines = text.splitlines()
+        entries: list[tuple[str, blockyaml.Node]] = []
+        direct: set[str] = set()
+        for key, entry in doc.children.items():
+            if key == "__metadata":
+                continue
+            resolution = entry.scalar("resolution") or ""
+            if "@workspace:" in resolution:
+                for group in _PNPM_DEP_GROUPS:
+                    deps = entry.get(group)
+                    direct.update(deps.children if deps else ())
+                continue
+            name = _yarn_descriptor_name(resolution)
+            if name:
+                entries.append((name, entry))
+        for name, entry in entries:
+            self._emit(
+                inventory,
+                rel,
+                entry.line,
+                _line_at(lines, entry.line, name),
+                name=name,
+                ecosystem="npm",
+                version=entry.scalar("version"),
+                scope=DependencyScope.DIRECT if name in direct else DependencyScope.TRANSITIVE,
+            )
+            self._declare_children("npm", name, entry, _YARN_DEP_GROUPS)
+
+    def _parse_yarn_classic(self, inventory: Inventory, text: str, rel: str) -> None:
+        """yarn v1: ``"a@^1", a@^2:`` headers, then ``key "value"`` fields.
+
+        The lockfile does not say which entries are direct; the manifest
+        (package.json) does, and the merge keeps its DIRECT scope.
+        """
+        lines = text.splitlines()
+        for entry in _yarn_classic_entries(lines):
+            fields = entry.fields
+            resolved = fields.get("resolved")
+            url, _, fragment = (resolved or "").partition("#")
+            digest = _npm_integrity(fields.get("integrity"))
+            if digest is None and fragment:
+                digest = _normalize_digest("sha1", fragment)
+            self._emit(
+                inventory,
+                rel,
+                entry.line,
+                lines[entry.line - 1],
+                name=entry.name,
+                ecosystem="npm",
+                version=fields.get("version"),
+                scope=DependencyScope.TRANSITIVE,
+                digest=digest,
+                producer=_registry_of(url or None),
+                producer_url=url or None,
+            )
+            for child, lineno in entry.dependencies:
+                self._declared.append(("npm", entry.name, child, lineno))
+
+    def _declare_children(
+        self, ecosystem: str, parent: str, entry: blockyaml.Node, groups: tuple[str, ...]
+    ) -> None:
+        """``parent -> child`` for each child in ``groups``, citing the child's own line."""
+        for group in groups:
+            deps = entry.get(group)
+            for child, node in deps.children.items() if deps else ():
+                if child and not (node.value or "").startswith("link:"):
+                    self._declared.append((ecosystem, parent, child, node.line))
 
     # -- PyPI ------------------------------------------------------------------
 
@@ -606,7 +742,119 @@ class LockfileCollector(Collector):
             )
 
 
+_Parser = Callable[[LockfileCollector, Inventory, str, str], None]
+
+# Lockfile name (lowercased) -> its parser.
+_PARSERS: dict[str, _Parser] = {
+    "package-lock.json": LockfileCollector._parse_package_lock,
+    "pnpm-lock.yaml": LockfileCollector._parse_pnpm_lock,
+    "yarn.lock": LockfileCollector._parse_yarn_lock,
+    "pipfile.lock": LockfileCollector._parse_pipfile_lock,
+    "poetry.lock": LockfileCollector._parse_poetry_lock,
+    "uv.lock": LockfileCollector._parse_uv_lock,
+    "cargo.lock": LockfileCollector._parse_cargo_lock,
+    "composer.lock": LockfileCollector._parse_composer_lock,
+    "gemfile.lock": LockfileCollector._parse_gemfile_lock,
+}
+
+
+def _parser_for(name: str) -> _Parser | None:
+    """The parser for a lowercased file name, or ``None`` if it is not a lockfile."""
+    if name.startswith("requirements") and name.endswith(".txt"):
+        return LockfileCollector._parse_hashed_requirements
+    return _PARSERS.get(name)
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+
+class _YarnEntry:
+    """One yarn v1 entry: its header line, name, fields and dependency lines."""
+
+    __slots__ = ("line", "name", "fields", "dependencies")
+
+    def __init__(self, line: int, name: str) -> None:
+        self.line = line
+        self.name = name
+        self.fields: dict[str, str] = {}
+        self.dependencies: list[tuple[str, int]] = []
+
+
+def _yarn_classic_entries(lines: list[str]) -> list[_YarnEntry]:
+    """Split a yarn v1 lockfile into entries; lines outside the format are skipped."""
+    entries: list[_YarnEntry] = []
+    current: _YarnEntry | None = None
+    section: str | None = None
+    for lineno, raw in enumerate(lines, 1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent == 0:
+            current, section = None, None
+            if stripped.endswith(":"):
+                descriptors = blockyaml.split_top_level(stripped[:-1])
+                name = _yarn_descriptor_name(blockyaml.unquote(descriptors[0]))
+                if name:
+                    current = _YarnEntry(lineno, name)
+                    entries.append(current)
+        elif current is None:
+            continue
+        elif indent == 2:
+            section = None
+            if stripped.endswith(":"):
+                section = stripped[:-1]
+            else:
+                key, _, value = stripped.partition(" ")
+                if value:
+                    current.fields.setdefault(key, blockyaml.unquote(value))
+        elif section in _YARN_DEP_GROUPS:
+            if stripped[0] == '"':
+                end = stripped.find('"', 1)
+                child = stripped[1:end] if end > 0 else ""
+            else:
+                child = stripped.split(" ", 1)[0]
+            if child:
+                current.dependencies.append((child, lineno))
+    return [e for e in entries if e.fields.get("version")]
+
+
+def _yarn_descriptor_name(descriptor: str) -> str | None:
+    """``@scope/pkg@npm:^1`` -> ``@scope/pkg``; an alias keeps its own name."""
+    at = descriptor.find("@", 1)
+    return descriptor[:at] if at > 0 else None
+
+
+def _pnpm_major(version: str | None) -> int:
+    """``'9.0'`` -> 9; an unreadable version is treated as the current format."""
+    try:
+        return int(float(version or ""))
+    except ValueError:
+        return 9
+
+
+def _pnpm_base(key: str) -> str:
+    """A package key without its leading ``/`` and ``(peer@1)`` suffix."""
+    return key[1:].split("(", 1)[0] if key.startswith("/") else key.split("(", 1)[0]
+
+
+def _pnpm_key(key: str, major: int) -> tuple[str | None, str | None]:
+    """``/name/1.0.0_peer`` (v5), ``/name@1.0.0(peer)`` (v6), ``name@1.0.0`` (v9)."""
+    base = _pnpm_base(key)
+    if major < 6:
+        name, _, version = base.rpartition("/")
+        return (name or None), (version.split("_", 1)[0] or None)
+    at = base.rfind("@")
+    if at <= 0:
+        return None, None
+    version = base[at + 1 :]
+    # A tarball or git key carries a URL where the version would be.
+    return base[:at], (None if ":" in version or "/" in version else version or None)
+
+
+def _line_at(lines: list[str], lineno: int, fallback: str) -> str:
+    return lines[lineno - 1] if 0 < lineno <= len(lines) else fallback
+
 
 
 def _key(name: str, ecosystem: str) -> str:

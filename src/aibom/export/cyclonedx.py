@@ -47,6 +47,7 @@ from aibom.models.entities import (
     Prompt,
     Service,
     Tool,
+    is_hf_repo_id,
 )
 from aibom.models.evidence import Evidence
 from aibom.spdx import canonical_spdx, is_spdx
@@ -72,9 +73,6 @@ _PRIMARY_REF = "aibom:primary-component"
 
 # CycloneDX only accepts digests of these hex lengths.
 _RE_DIGEST = re.compile(r"^(?:[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}|[a-f0-9]{96}|[a-f0-9]{128})$")
-
-# Hugging Face repo ids look like "org/name".
-_RE_HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w\-.]*/[\w\-.]+$")
 
 
 @dataclass(frozen=True)
@@ -286,9 +284,16 @@ def _coverage(inventory: Inventory) -> tuple[str, str]:
             "transitive",
             "dependencies resolved from lockfiles, so transitive components are included",
         )
+    unparsed = inventory.stats.lockfiles_unparsed
+    found = (
+        f"{', '.join(unparsed)} {'was' if len(unparsed) == 1 else 'were'} found but "
+        "not parsed (unsupported format)"
+        if unparsed
+        else "no lockfile was found"
+    )
     return (
         "declared-dependencies-only",
-        "no lockfile was found; only dependencies declared in manifests are listed, "
+        f"{found}; only dependencies declared in manifests are listed, "
         "so transitive components are missing",
     )
 
@@ -648,7 +653,7 @@ def _unknown(field_id: str, reason: str) -> dict[str, str]:
 
 def _hf_purl(name: str, provider: str | None, revision: str | None) -> str | None:
     """``pkg:huggingface/org/name@revision`` for a hub-hosted component."""
-    if (provider or "").lower() != "huggingface" or not _RE_HF_REPO_ID.match(name):
+    if (provider or "").lower() != "huggingface" or not is_hf_repo_id(name):
         return None
     base = f"pkg:huggingface/{name}"
     return f"{base}@{revision}" if revision else base

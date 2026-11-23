@@ -16,27 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from aibom.collectors.base import Collector
+from aibom.collectors.walk import repo_files
 from aibom.detectors.python.parser import classify_source_context
 from aibom.inventory import Inventory
 from aibom.models.analysis import ConfidenceFactors, UsageState
 from aibom.models.entities import Package
 from aibom.models.evidence import Evidence
-
-_IGNORE_DIRS = {
-    ".git",
-    "node_modules",
-    ".venv",
-    "venv",
-    "env",
-    "__pycache__",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    "dist",
-    "build",
-    "site-packages",
-}
 
 # AI/ML ecosystem allowlist (normalized: lowercase, '_' -> '-'). Kept curated so
 # the AIBOM stays AI-focused rather than becoming a general SBOM.
@@ -242,6 +227,15 @@ _RE_PIN = re.compile(r"""===?\s*([^,;\s]+)""")
 _RE_RANGE = re.compile(r"""(?:~=|>=|<=|!=|>|<|\^|~)\s*([0-9][^,;\s]*)""")
 
 
+def _is_manifest(name: str) -> bool:
+    """A lowercased file name this collector parses."""
+    return (
+        (name.startswith("requirements") and name.endswith(".txt"))
+        or name.endswith(".csproj")
+        or name in _MANIFEST_NAMES
+    )
+
+
 def _load_toml(raw: str) -> dict[str, Any] | None:
     """Parse TOML using the stdlib ``tomllib`` (3.11+) or the ``tomli`` backport."""
     try:
@@ -351,20 +345,7 @@ class DependencyCollector(Collector):
     def _iter_manifests(self) -> list[Path]:
         if self.root.is_file():
             return [self.root]
-        out: list[Path] = []
-        for path in self.root.rglob("*"):
-            # Relative parts only: the scan root's own ancestors (e.g. a venv's
-            # site-packages holding the bundled demo app) must not exclude it.
-            if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
-                continue
-            n = path.name.lower()
-            if (
-                (n.startswith("requirements") and n.endswith(".txt"))
-                or n.endswith(".csproj")
-                or n in _MANIFEST_NAMES
-            ):
-                out.append(path)
-        return sorted(out)
+        return [path for path in repo_files(self.root) if _is_manifest(path.name.lower())]
 
     def _rel(self, path: Path) -> str:
         base = self.root if self.root.is_dir() else self.root.parent
