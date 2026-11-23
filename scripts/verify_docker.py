@@ -15,6 +15,7 @@ anywhere (only the bundled offline demos are scanned).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -207,9 +208,17 @@ def main() -> int:
     cli_out = OUT / "cli-out"
     cli_out.mkdir(exist_ok=True)
     fixture = REPO / "tests" / "fixtures" / "locked-js-app"
-    proc = sh("docker", "run", "--rm", "-v", f"{fixture}:/work:ro", "-v", f"{cli_out}:/out",
-              "-w", "/work", IMAGE, "aibom", "scan", "/work", "-q", "-o", "/out/inv.json",
-              "-c", "/out/bom.json", "--sarif", "/out/findings.sarif", "-r", "/out/report.html")
+    # As the ./aibom launcher runs it: the host user on Linux and macOS, so the
+    # container can write the host-owned output directory.
+    user = (
+        ["--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp"]
+        if hasattr(os, "getuid")
+        else []
+    )
+    proc = sh("docker", "run", "--rm", *user, "-v", f"{fixture}:/work:ro",
+              "-v", f"{cli_out}:/out", "-w", "/work", IMAGE, "aibom", "scan", "/work", "-q",
+              "-o", "/out/inv.json", "-c", "/out/bom.json", "--sarif", "/out/findings.sarif",
+              "-r", "/out/report.html")
     files = {p.name: p.stat().st_size for p in cli_out.iterdir()}
     inv_path = cli_out / "inv.json"
     inv = json.loads(inv_path.read_text(encoding="utf-8")) if inv_path.is_file() else {}
@@ -217,6 +226,7 @@ def main() -> int:
     record("cli: scan a read-only mount and write artifacts to /out",
            proc.returncode == 0 and wanted <= set(files),
            {"exit": proc.returncode, "files": files, "stderr": proc.stderr[-300:],
+            "stdout": proc.stdout[-300:],
             "packages": sum(1 for e in inv.get("entities", []) if e["type"] == "package")})
     proc = sh("docker", "run", "--rm", IMAGE, "aibom", "demo")
     record("cli: aibom demo runs offline", proc.returncode in (0, 1) and len(proc.stdout) > 200,

@@ -83,6 +83,14 @@ command.
   `test_both_launchers_send_the_same_outputs_to_aibom_out` keeps the two
   launchers' lists equal and real; the behavior itself needs Docker
   (run `./aibom scan . -c bom.json` and `.\aibom.ps1 scan . -c bom.json`).
+- Output ownership on Linux. The image runs as uid 10001, which cannot write a
+  `./aibom-out` the host user owns, so on Linux and macOS every launcher scan
+  that wrote a file failed with "Permission denied". Docker Desktop on Windows
+  hides this; CI's `docker` job caught it. The launcher now runs the CLI as
+  `--user $(id -u):$(id -g)` (outside Windows), Compose's `cli` service takes
+  `AIBOM_UID`/`AIBOM_GID`, and `verify_docker.py` runs the CLI the same way.
+  Reproduce on any host: `--tmpfs /out:uid=1001,gid=1001,mode=0755` fails as
+  the image user and succeeds with `--user 1001:1001`.
 - The build context. There was no `.dockerignore`, so `docker build` sent
   `.venv`, `benchmark/checkouts` and `verify-out` (about 1 GB) to the
   daemon on every build. `test_dockerignore_*` hold both directions: the

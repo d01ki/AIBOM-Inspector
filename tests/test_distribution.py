@@ -140,6 +140,17 @@ def test_cloud_run_serves_pages_while_one_scan_runs() -> None:
     assert "AIBOM_CORS_ORIGINS" not in re.sub(r"#.*", "", DOCKERFILE)
 
 
+def test_the_launcher_runs_the_cli_as_the_host_user_on_posix() -> None:
+    """The image's user (uid 10001) cannot write a host-owned ./aibom-out on
+    Linux, so every `./aibom scan … -c bom.json` failed with Permission denied
+    (caught by CI's docker job; Docker Desktop on Windows hides it).
+    """
+    bash = (ROOT / "aibom").read_text(encoding="utf-8")
+    assert '--user "$(id -u):$(id -g)"' in bash
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "AIBOM_UID" in compose
+
+
 def test_the_runtime_image_is_non_root() -> None:
     users = re.findall(r"^USER\s+(\S+)", DOCKERFILE, re.MULTILINE)
     assert users and users[-1] not in {"root", "0"}

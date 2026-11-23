@@ -115,7 +115,16 @@ run_cli() {
   done
   local tty=()
   [ -n "$(tty_flags)" ] && tty=(-it)
-  exec env $MSYS_ENV docker run --rm "${tty[@]}" \
+  # Run as the host user on Linux and macOS: the image's own user (uid 10001)
+  # cannot write a ./aibom-out the host user owns, and files the container
+  # writes then belong to the person who ran the command. Docker Desktop on
+  # Windows maps ownership itself.
+  local user=()
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) user=(--user "$(id -u):$(id -g)" -e HOME=/tmp) ;;
+  esac
+  exec env $MSYS_ENV docker run --rm "${tty[@]}" "${user[@]}" \
     -v "$WORK:/work:ro" \
     -v "$OUT:/out" \
     -w /work \
