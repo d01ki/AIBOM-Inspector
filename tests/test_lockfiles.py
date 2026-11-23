@@ -154,14 +154,17 @@ def test_an_unparsed_lockfile_is_recorded_not_ignored(tmp_path: Path) -> None:
     (tmp_path / "web").mkdir()
     (tmp_path / "web" / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
     (tmp_path / "bun.lock").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "web" / "bun.lockb").write_bytes(b"\x00bun")
     (tmp_path / "package-lock.json").write_text(
         '{"lockfileVersion": 3, "packages": {}}\n', encoding="utf-8"
     )
     vendored = tmp_path / "node_modules" / "dep"
     vendored.mkdir(parents=True)
-    (vendored / "yarn.lock").write_text("", encoding="utf-8")
+    (vendored / "bun.lock").write_text("", encoding="utf-8")
     inv = Inventory(metadata=ScanMetadata(tool_version="test", target=str(tmp_path)))
     LockfileCollector(tmp_path).collect(inv)
-    # Parsed formats and vendored copies are not "unparsed".
-    assert inv.stats.lockfiles_unparsed == ["bun.lock", "pnpm-lock.yaml", "web/yarn.lock"]
-    assert "pnpm-lock.yaml" not in inv.stats.manifests_parsed
+    # Parsed formats (pnpm and yarn are read since they gained parsers) and
+    # vendored copies are not "unparsed".
+    assert inv.stats.lockfiles_unparsed == ["bun.lock", "web/bun.lockb"]
+    assert "pnpm-lock.yaml" in inv.stats.manifests_parsed
+    assert "web/yarn.lock" in inv.stats.manifests_parsed

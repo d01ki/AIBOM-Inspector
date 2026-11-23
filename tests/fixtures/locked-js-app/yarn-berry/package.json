@@ -1,0 +1,7 @@
+{
+  "name": "yarn-berry-app",
+  "dependencies": {
+    "openai": "^4.52.0",
+    "react": "^18.3.1"
+  }
+}

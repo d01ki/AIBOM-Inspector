@@ -169,10 +169,10 @@ def test_coverage_note_names_a_lockfile_it_could_not_parse(tmp_path: Path) -> No
     (tmp_path / "package.json").write_text(
         '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
     )
-    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (tmp_path / "bun.lock").write_text('{"lockfileVersion": 1}\n', encoding="utf-8")
     props = _coverage_props(tmp_path)
     assert props["cisa:coverage"] == "declared-dependencies-only"
-    assert "pnpm-lock.yaml" in props["cisa:coverage-note"]
+    assert "bun.lock" in props["cisa:coverage-note"]
     assert "no lockfile was found" not in props["cisa:coverage-note"]
 
 

@@ -1,0 +1,6 @@
+{
+  "name": "pnpm-v6-app",
+  "dependencies": {
+    "openai": "^4.52.0"
+  }
+}

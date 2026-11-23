@@ -1,0 +1,8 @@
+{
+  "name": "yarn-v1-app",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "react": "^18.3.1",
+    "string-width-cjs": "npm:string-width@^4.2.0"
+  }
+}

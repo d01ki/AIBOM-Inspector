@@ -12,13 +12,16 @@
   not name — is not analyzed at all.
 - Dependency manifests are parsed for PyPI, npm, Go, crates.io, Maven,
   RubyGems, Packagist and NuGet. Lockfiles are read for **npm
-  (`package-lock.json`), PyPI (`Pipfile.lock`, `poetry.lock`, `uv.lock`,
+  (`package-lock.json`, `pnpm-lock.yaml` v5/v6/v9, `yarn.lock` classic and
+  berry), PyPI (`Pipfile.lock`, `poetry.lock`, `uv.lock`,
   hash-pinned `requirements*.txt`), crates.io, Packagist and RubyGems**, which
   is where transitive components and artifact digests come from. Without one of
   those lockfiles, transitive dependencies are absent — the emitted SBOM says
-  so in `cisa:coverage` rather than implying completeness. `yarn.lock` and
-  `pnpm-lock.yaml` need a YAML parser this project does not depend on, and
-  `bun.lock` / `bun.lockb` are not read either; when one is present, the
+  so in `cisa:coverage` rather than implying completeness. The YAML
+  lockfiles are read by a small built-in reader for the subset package
+  managers write (no YAML dependency); a construct outside it is skipped, not
+  guessed. yarn classic does not mark direct dependencies, so their scope
+  comes from `package.json`. `bun.lock` / `bun.lockb` are not read; when one is present, the
   analysis limits and `cisa:coverage-note` name it as found but not parsed;
   `go.sum` records module-tree hashes rather than artifact digests, so it is
   not used (`go.mod` already lists resolved versions).

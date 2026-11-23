@@ -35,6 +35,8 @@ proves it. The edge rules are in
 
 - `src/aibom/collectors/dependencies.py`: manifests (11 ecosystems), AI flag
 - `src/aibom/collectors/lockfiles.py`: lockfile packages and `depends_on` edges
+- `src/aibom/collectors/blockyaml.py`: the line-numbered block-YAML reader
+  behind `pnpm-lock.yaml` and yarn berry
 - `src/aibom/linking.py`: `model → service`, `component → SDK package`, and MCP
   `tool → server`, `config/prompt → server`
 - `src/aibom/tools.py` (`link_tools`): `prompt -invokes-> tool`, citing the agent constructor
@@ -51,8 +53,10 @@ graph is built.
 
 ## Normal paths
 
-- A lockfile with a graph (npm v1/v3, poetry, uv, Cargo, composer, Gemfile)
-  produces `package -depends_on-> package` edges that cite the declaring line.
+- A lockfile with a graph (npm v1/v3, pnpm v5/v6/v9, yarn classic and berry,
+  poetry, uv, Cargo, composer, Gemfile) produces `package -depends_on->
+  package` edges that cite the declaring line. pnpm v9 edges come from
+  `snapshots:` and cite the child's line there.
 - A model whose provider service was found yields `model -served_by-> service`.
 - A model, service, or dataset in a file that imports a same-provider AI
   package yields `-depends_on-> package`, citing the import line.
@@ -63,7 +67,8 @@ graph is built.
 ## Error paths
 
 - Malformed lockfile JSON or TOML: the file is skipped and the scan still
-  succeeds (`OSError`/`ValueError` are swallowed per file).
+  succeeds (`OSError`/`ValueError` are swallowed per file). The block-YAML
+  reader never raises; lines outside its subset are skipped.
 - A requirement on something the lock did not resolve (`php`, an uninstalled
   extra, a package from another lockfile): no edge.
 - A file that is unreadable or larger than 1 MB is not linked. The linker
@@ -112,13 +117,21 @@ counts, the panel text, and console errors).
   (`source = { virtual = "." }`); it used to appear as its own transitive
   dependency. `_is_uv_project` skips it, held by
   `test_the_uv_project_itself_is_not_a_dependency`.
-- `pnpm-lock.yaml`, `yarn.lock` and `bun.lock(b)` are not parsed (no package
-  nodes or edges for those projects). They are recorded in
-  `stats.lockfiles_unparsed`, so the analysis limits and `cisa:coverage-note`
-  name the file instead of claiming "no lockfile" (found on `vercel/ai-chatbot`,
-  which has a `pnpm-lock.yaml`). Held by
+- `bun.lock(b)` is not parsed (no package nodes or edges for those
+  projects). It is recorded in `stats.lockfiles_unparsed`, so the analysis
+  limits and `cisa:coverage-note` name the file instead of claiming "no
+  lockfile". Held by
   `test_limits_name_a_lockfile_that_is_present_but_not_parsed` and
   `test_coverage_note_names_a_lockfile_it_could_not_parse`.
+- pnpm and yarn were unparsed until 4 of the 26 benchmark checkouts
+  (`ai-chatbot`, `gemini-chatbot`, `ai-sdk-preview-roundtrips`,
+  `openai-cua-sample-app`) turned out to lock with pnpm v9. What breaks
+  there: a peer suffix `(react@18.3.1)` or v5's `_react@18` left in the
+  version; a `link:` workspace reported as a package; a peer *range* in
+  `packages:` drawn as an edge (only `snapshots:` resolve peers); yarn
+  berry's cache `checksum` reported as the artifact digest; the berry
+  `@workspace:` entry (the project itself) reported as a dependency. Each
+  has a negative test in `tests/test_js_lockfiles.py`.
 - PHP and Ruby source imports are not linked (`openai-php/client`,
   `ruby-openai` stay unlinked to models).
 - Model IDs chosen at run time (gateway catalogs) cannot be linked.
@@ -135,6 +148,7 @@ counts, the panel text, and console errors).
   "paths": [
     "src/aibom/collectors/dependencies.py",
     "src/aibom/collectors/lockfiles.py",
+    "src/aibom/collectors/blockyaml.py",
     "src/aibom/linking.py",
     "src/aibom/tools.py",
     "src/aibom/graph.py",
@@ -145,6 +159,7 @@ counts, the panel text, and console errors).
     "web/index.html",
     "web/app.js",
     "tests/fixtures/locked-ai-app/*",
+    "tests/fixtures/locked-js-app/**",
     "tests/fixtures/impact-demo/*"
   ],
   "tests": [
@@ -152,6 +167,7 @@ counts, the panel text, and console errors).
     "tests/test_linking.py",
     "tests/test_graph.py",
     "tests/test_lockfiles.py",
+    "tests/test_js_lockfiles.py",
     "tests/test_dependencies.py"
   ],
   "smoke": [

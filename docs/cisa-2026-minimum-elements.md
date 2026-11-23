@@ -139,9 +139,13 @@ The report is also written into the HTML report, the web UI, and the
   dependencies are listed and `cisa:coverage` says
   `declared-dependencies-only`. The tool never resolves dependencies over the
   network — that would mean trusting a registry to describe the build.
-- **No `yarn.lock` / `pnpm-lock.yaml` / `go.sum`.** The first two need a YAML
-  parser this project does not depend on; `go.sum` records module-tree hashes
-  rather than artifact digests, which would be misleading in a `hashes` field.
+- **No `bun.lock` / `go.sum`; partial digests for pnpm and yarn berry.**
+  `bun.lock` is not read. `go.sum` records module-tree hashes rather than
+  artifact digests, which would be misleading in a `hashes` field.
+  `pnpm-lock.yaml` records the tarball integrity but not the registry of a
+  default-registry package, so *Component Producer* stays empty for those.
+  yarn berry's `checksum` is a digest of yarn's own cache zip, not of the
+  registry artifact, so it is not reported as the component hash.
 - **Model and dataset digests are never collected.** Static analysis does not
   download weights. A post-build SBOM produced where the artifacts actually
   live is the right place for those digests.

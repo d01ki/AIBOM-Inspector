@@ -183,9 +183,9 @@ def test_limits_name_a_lockfile_that_is_present_but_not_parsed(tmp_path: Path) -
     (tmp_path / "package.json").write_text(
         '{"dependencies": {"openai": "^4.0.0"}}\n', encoding="utf-8"
     )
-    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (tmp_path / "bun.lock").write_text('{"lockfileVersion": 1}\n', encoding="utf-8")
     note = _unresolved_note(tmp_path)
-    assert "pnpm-lock.yaml" in note
+    assert "bun.lock" in note
     assert "not parsed" in note
     assert "no lockfile" not in note  # the repository has one; saying otherwise is false
 

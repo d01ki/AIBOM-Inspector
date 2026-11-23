@@ -1,0 +1,14 @@
+{
+  "name": "pnpm-v9-app",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "ai": "^4.0.0",
+    "react": "^18.3.1",
+    "private-lib": "https://npm.example.com/private-lib/-/private-lib-1.0.0.tgz",
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,35 @@
+lockfileVersion: '6.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+dependencies:
+  openai:
+    specifier: ^4.52.0
+    version: 4.52.7
+
+packages:
+
+  /node-fetch@2.7.0:
+    resolution: {integrity: sha512-ktXL3mXrK3ONl37/b+9A2E564wWfVeRTRfCB8nc5kg54VY715IwVgxxhFdMrqyzbbs2hYQzI5f5H97u//l9enA==}
+    engines: {node: 4.x || >=6.0.0}
+    peerDependencies:
+      encoding: ^0.1.0
+    peerDependenciesMeta:
+      encoding:
+        optional: true
+    dependencies:
+      whatwg-url: 5.0.0
+    dev: false
+
+  /openai@4.52.7:
+    resolution: {integrity: sha512-TBlgZqBUt0d64gco/Llq6hapPFAhijdI1XX/9tQvuwbNCaveidycs37haEED+5ahvGSo8Sr0APouBswZ5vtp3w==}
+    hasBin: true
+    dependencies:
+      node-fetch: 2.7.0
+    dev: false
+
+  /whatwg-url@5.0.0:
+    resolution: {integrity: sha512-1lfwPdVOkPA7qKMB4ZA0AnyMJr6+Ont8PTieU+f96JkAmsamo+yGVWHbnXIw7kLloin7ObG2+9XiZUr1KagG1A==}
+    dev: false

@@ -1,0 +1,105 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.30.0
+        version: 0.30.1
+      ai:
+        specifier: ^4.0.0
+        version: 4.0.2(react@18.3.1)(zod@3.23.8)
+      private-lib:
+        specifier: https://npm.example.com/private-lib/-/private-lib-1.0.0.tgz
+        version: '@npm.example.com/private-lib/-/private-lib-1.0.0.tgz'
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      shared:
+        specifier: workspace:*
+        version: link:packages/shared
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.6.3
+
+  packages/shared:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.23.8
+
+packages:
+
+  '@anthropic-ai/sdk@0.30.1':
+    resolution: {integrity: sha512-9aFTUvV6VI6I4h7nLOEtXJynEqIDorUaphLa9ls5ld5oazVyL02/OxGioqwoJfbNmXZFhlpMBxTVGip2hItaxA==}
+    peerDependencies:
+      zod: ^3.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+
+  '@npm.example.com/private-lib/-/private-lib-1.0.0.tgz':
+    resolution: {tarball: https://npm.example.com/private-lib/-/private-lib-1.0.0.tgz}
+    name: private-lib
+    version: 1.0.0
+
+  ai@4.0.2:
+    resolution: {integrity: sha512-aAu6kFEXA9hOicQS47DcHq/0YC47Swj0fFu+wUB52eqMom8YVKoG0oc8dv5GBzp5nj2b+8k661kzcv1dO7VmvA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: ^18 || ^19
+      zod: ^3.0.0
+    peerDependenciesMeta:
+      react:
+        optional: true
+
+  js-tokens@4.0.0:
+    resolution: {integrity: sha512-hgvFIIZXEh0qKUvHJA9tb+6uMdEHBUTTBVdE5bnB0HXjEjOjXG0NsMmG74DF0EoiAWA+OCL55ZseKfL6rFqqEw==}
+
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-p6tV/43Z8c4seu03wSajLEoUgCE8tth0qwIk9TQuGL/l4A1cGuu5pJMkpTfGeg4X8Ex5aYGsz2uKe7iYEkGBGw==}
+    hasBin: true
+
+  react@18.3.1:
+    resolution: {integrity: sha512-2+1d312Gv/F0ka3L+WanxnvPQ93+m+j2HLOWk54rzWk/lAPxKcimaVSC+kRml1k+lqAEalcc0tQie4/Wubz/Zg==}
+    engines: {node: '>=0.10.0'}
+
+  typescript@5.6.3:
+    resolution: {integrity: sha512-OX0hlLqXWqrsGxnWwk58Hjp7eoDAXVEPHQEXQGvp/OeotW8xcNuwN2qQKPYK6N539UtCR1Ok/P/ARe7H7PVHwA==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  zod@3.23.8:
+    resolution: {integrity: sha512-02cvFzD1vXmYYADwj+FfXKwq0AVW5LYdapyjA9D3Fh0nW8h+rs4ls+nlO2WQuH6HGZtmlQbJVJAE2EAqY5ClxA==}
+
+snapshots:
+
+  '@anthropic-ai/sdk@0.30.1': {}
+
+  '@npm.example.com/private-lib/-/private-lib-1.0.0.tgz': {}
+
+  ai@4.0.2(react@18.3.1)(zod@3.23.8):
+    dependencies:
+      zod: 3.23.8
+    optionalDependencies:
+      react: 18.3.1
+
+  js-tokens@4.0.0: {}
+
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
+
+  react@18.3.1:
+    dependencies:
+      loose-envify: 1.4.0
+
+  typescript@5.6.3: {}
+
+  zod@3.23.8: {}
