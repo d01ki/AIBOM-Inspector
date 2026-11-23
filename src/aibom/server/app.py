@@ -183,8 +183,15 @@ def get_cloner() -> Cloner:
 
 
 def _cors_origins() -> list[str]:
-    raw = os.environ.get("AIBOM_CORS_ORIGINS", "*").strip()
-    return [o.strip() for o in raw.split(",") if o.strip()] or ["*"]
+    """Origins allowed to call the API from another site; none by default.
+
+    The bundled UI is served by this server and calls only its own origin, so
+    it needs no CORS. A wildcard default let any page a visitor opened drive
+    the clone-and-scan endpoints from their browser. ``AIBOM_CORS_ORIGINS``
+    (comma-separated, ``*`` allowed) opts in.
+    """
+    raw = os.environ.get("AIBOM_CORS_ORIGINS", "").strip()
+    return [o.strip() for o in raw.split(",") if o.strip()]
 
 
 @asynccontextmanager
@@ -213,12 +220,14 @@ def create_app() -> FastAPI:
         summary="Discover, inventory, and risk-analyze AI supply chains from a repo URL.",
         lifespan=_lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_cors_origins(),
-        allow_methods=["GET", "POST"],
-        allow_headers=["*"],
-    )
+    origins = _cors_origins()
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["*"],
+        )
     app.add_middleware(SecurityHeaders)
     slots = ScanSlots.from_env()
 
@@ -310,23 +319,30 @@ def create_app() -> FastAPI:
         req: DiffRequest, cloner: Annotated[Cloner, Depends(get_cloner)]
     ) -> dict[str, Any]:
         display = _validated_url(req.repo_url)
+        # One slot for both revisions: released in between, another request
+        # could take it and fail the diff after the baseline already ran.
         try:
-            with slots.held(), cloner(req.repo_url, ref=req.base_ref) as base_path:
-                baseline = run_scan(
-                    base_path,
-                    min_confidence=req.min_confidence,
-                    display_target=f"{display}@{req.base_ref}",
-                    ref=req.base_ref,
-                )
-                base_agents = _agent_report(base_path, baseline, f"{display}@{req.base_ref}")
-            with slots.held(), cloner(req.repo_url, ref=req.head_ref) as head_path:
-                candidate = run_scan(
-                    head_path,
-                    min_confidence=req.min_confidence,
-                    display_target=f"{display}@{req.head_ref}",
-                    ref=req.head_ref,
-                )
-                head_agents = _agent_report(head_path, candidate, f"{display}@{req.head_ref}")
+            with slots.held():
+                with cloner(req.repo_url, ref=req.base_ref) as base_path:
+                    baseline = run_scan(
+                        base_path,
+                        min_confidence=req.min_confidence,
+                        display_target=f"{display}@{req.base_ref}",
+                        ref=req.base_ref,
+                    )
+                    base_agents = _agent_report(
+                        base_path, baseline, f"{display}@{req.base_ref}"
+                    )
+                with cloner(req.repo_url, ref=req.head_ref) as head_path:
+                    candidate = run_scan(
+                        head_path,
+                        min_confidence=req.min_confidence,
+                        display_target=f"{display}@{req.head_ref}",
+                        ref=req.head_ref,
+                    )
+                    head_agents = _agent_report(
+                        head_path, candidate, f"{display}@{req.head_ref}"
+                    )
         except CloneError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         payload = _to_drift_payload(baseline, candidate)
