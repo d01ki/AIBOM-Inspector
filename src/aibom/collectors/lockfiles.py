@@ -42,7 +42,8 @@ from typing import Any
 
 from aibom.collectors import blockyaml
 from aibom.collectors.base import Collector
-from aibom.collectors.dependencies import _IGNORE_DIRS, _is_ai_package, _load_toml
+from aibom.collectors.dependencies import _is_ai_package, _load_toml
+from aibom.collectors.walk import repo_files
 from aibom.detectors.python.parser import classify_source_context
 from aibom.inventory import Inventory
 from aibom.models.analysis import ConfidenceFactors, UsageState
@@ -130,14 +131,12 @@ class LockfileCollector(Collector):
     def _iter_lockfiles(self) -> list[Path]:
         if self.root.is_file():
             return [self.root]
-        out: list[Path] = []
-        for path in self.root.rglob("*"):
-            if path.is_dir() or any(p in _IGNORE_DIRS for p in path.relative_to(self.root).parts):
-                continue
-            n = path.name.lower()
-            if n in _UNPARSED_LOCKFILE_NAMES or _parser_for(n) is not None:
-                out.append(path)
-        return sorted(out)
+        return [
+            path
+            for path in repo_files(self.root)
+            if path.name.lower() in _UNPARSED_LOCKFILE_NAMES
+            or _parser_for(path.name.lower()) is not None
+        ]
 
     def _rel(self, path: Path) -> str:
         base = self.root if self.root.is_dir() else self.root.parent

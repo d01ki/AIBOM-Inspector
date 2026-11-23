@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from aibom.collectors.base import Collector
+from aibom.collectors.walk import repo_files
 from aibom.detectors.base import ScanContext
 from aibom.detectors.javascript.parser import JsModule, parse_javascript
 from aibom.detectors.project import ProjectIndex
@@ -40,29 +41,6 @@ from aibom.models.entities import (
 from aibom.models.evidence import Evidence
 from aibom.models.signals import RiskSignal
 from aibom.tools import link_tools
-
-# Directories that never contain first-party AI supply-chain signal worth scanning.
-_IGNORE_DIRS = {
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    ".venv",
-    "venv",
-    "env",
-    "__pycache__",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    "dist",
-    "build",
-    "site-packages",
-    ".idea",
-    ".vscode",
-    ".next",
-    ".cache",
-}
 
 # Text files worth reading line-by-line.
 _TEXT_SUFFIXES = {
@@ -432,25 +410,8 @@ class RepoCollector(Collector):
     # -- file iteration --------------------------------------------------------
 
     def _iter_files(self) -> list[Path]:
-        if self.root.is_file():
-            return [self.root]
-        files: list[Path] = []
-        for path in self.root.rglob("*"):
-            if path.is_dir():
-                continue
-            # Ignore-dirs apply to the path *inside* the scan root only. The
-            # root's own ancestors must not count, or a target that happens to
-            # live under e.g. .../venv/... or site-packages (the bundled demo
-            # app does) silently scans as empty.
-            rel_parts = path.relative_to(self.root).parts
-            if any(part in _IGNORE_DIRS for part in rel_parts):
-                continue
-            if path.is_symlink() and not _inside(path, self.root):
-                # A link out of the scan root is not part of the repository,
-                # and following it would read arbitrary host files.
-                continue
-            files.append(path)
-        return sorted(files)
+        # Ignored directories and links out of the root: see collectors.walk.
+        return repo_files(self.root)
 
     def _rel(self, path: Path) -> str:
         try:
@@ -1096,14 +1057,6 @@ class RepoCollector(Collector):
 def _unique(entities: list[Entity]) -> list[Entity]:
     """``entities`` without repeats, first occurrence first."""
     return list({entity.id: entity for entity in entities}.values())
-
-
-def _inside(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root)
-    except (OSError, ValueError):
-        return False
-    return True
 
 
 def _sha(text: str) -> str:

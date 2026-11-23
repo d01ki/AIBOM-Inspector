@@ -21,6 +21,7 @@ evaluates the deterministic risk rules and score. It reads the scanned code but
 
 `src/aibom/service.py`, `cli.py`, `config.py`, `policy.py`, `inventory.py`,
 `tools.py`, `exposure.py`, `impact.py`, `spdx.py`, `collectors/repo.py`,
+`collectors/walk.py` (the one repository walk every collector shares),
 `collectors/base.py`, `detectors/**`, `models/**`, `risk/**`.
 
 ## Depends on
@@ -76,6 +77,18 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
 - Precision regressions show up in `tests/test_precision.py` and
   `tests/test_corpus_regressions.py` before anywhere else.
 - Reachability is bounded. `unknown` does not mean unreachable.
+- What is "in the repository". The code, manifest and lockfile collectors
+  each walked the tree with their own ignore list, so a `package.json` under
+  `.next/` or `.vscode/` became a dependency while the code walk skipped it;
+  and only the code walk refused links out of the root, while all three
+  followed a *directory* link (a symlink, or a Windows junction, which
+  `Path.is_symlink()` does not report): a local scan of an untrusted checkout
+  read files outside it. `collectors/walk.py` is now the only walk: it prunes
+  ignored directories instead of filtering after descending into them, never
+  follows a directory link, and drops file links that resolve outside the
+  root (`tests/test_walk.py`; the junction case runs on Windows, the symlink
+  cases on Linux CI). Server clones were never exposed: git runs with
+  `core.symlinks=false`.
 - Scan time. A repository of generated JSX (gemini-chatbot's 30 KB
   `icons.tsx`) took 16 s, and doubled per component: every `(` was tried as an
   arrow parameter list that ran past its `)`. The parser now tries only a `(`
@@ -115,6 +128,7 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
     "src/aibom/collectors/__init__.py",
     "src/aibom/collectors/base.py",
     "src/aibom/collectors/repo.py",
+    "src/aibom/collectors/walk.py",
     "src/aibom/detectors/**",
     "src/aibom/models/**",
     "src/aibom/risk/**",
@@ -128,6 +142,7 @@ Command lines, exit codes, stdout and stderr logs, and `inv.json`.
     "tests/test_config.py",
     "tests/test_entities.py",
     "tests/test_repo_collector.py",
+    "tests/test_walk.py",
     "tests/test_python_ast_detectors.py",
     "tests/test_javascript_parser.py",
     "tests/test_javascript_prompt_flow.py",
